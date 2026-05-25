@@ -1,0 +1,278 @@
+description = "Generate cinematic 4K image + video prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
+prompt = """
+Bạn là active Gemini Ultra agent thực thi pipeline visual-prompt v0.1.
+LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
+Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
+
+Input args: {{args}}
+
+---
+
+## STEP 0 — FLAG PARSE (mandatory, run first)
+
+Args là 1 string. Parse như sau (regex Python):
+
+1. `--series ([a-z0-9-]+)`              → series_name (kebab-case, optional)
+2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
+3. `--images (\\d+)`                     → images_override (optional, int)
+4. `--videos (\\d+)`                     → videos_override (optional, int)
+5. `--music (\\d+)`                      → music_override (optional, int; honored verbatim)
+6. `--force-redo`                        → force_redo = true (flag)
+7. Sau khi strip flags → còn lại là input_path (positional, required).
+
+Validate:
+- input_path tồn tại (Path.exists()).
+- Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --force-redo`
+
+Echo lại cho user:
+```
+Đã nhận flags:
+  input_path = <path>
+  series     = <name | (none, per-file bible)>
+  genre      = <override | (auto-detect)>
+  images     = <N | (auto)>
+  videos     = <M | (auto)>
+  music      = <N | (auto, default 4 trong [3,5])>
+  force_redo = <true | false>
+```
+
+---
+
+## STEP 1 — LOAD INPUT
+
+```bash
+python3 scripts/load_input.py "<input_path>" > .work/chapters.json
+```
+
+(Tạo `.work/` cạnh input nếu chưa có. Tất cả `.work/...` paths bên dưới là
+relative tới `<input_dir>/.work/`.)
+
+Compute `input_hash = sha1(file_bytes(input_path))[:12]` → ghi vào
+`.work/input.hash` (file plain text 1 dòng).
+
+Đếm chapters K. Print: `Loaded K chapters.`
+
+---
+
+## STEP 1.5 — QA PROOFREAD (resume-safe loop, always runs)
+
+Cổng hiệu đính: sửa ký tự Trung/Anh còn sót, chính tả/ngữ pháp, câu dịch máy
+lủng củng, tách câu quá dài. Mức vừa phải — KHÔNG đổi cốt truyện/tên riêng/số.
+Đầu ra `chapters_qa.json` là nguồn duy nhất cho mọi bước sau, và `<stem>_qa.txt`
+là file đọc TTS.
+
+Nếu `--force-redo`: `rm -f .work/qa-chapter-*.md` TRƯỚC khi vào loop.
+
+Load `.work/chapters.json`. For mỗi chapter row (theo thứ tự id):
+
+  qa_path = `.work/qa-chapter-<NNN>.md` (NNN = zero-padded chapter id)
+
+  expected_cache_key = sha1(input_hash + serialize(chapter_row))[:16]
+
+  a. Nếu qa_path tồn tại VÀ KHÔNG `--force-redo`:
+     - Đọc frontmatter `cache_key`. Match expected → skip ("chương NNN: cached");
+       GOTO next chapter.
+     - Mismatch → WARN "chương NNN stale — regenerating"; xóa file, regenerate.
+
+  b. Load `@prompts/qa-proofread.md` + execute trên chapter_row (truyền
+     `input_hash`) → write qa_path với frontmatter `{chapter_id, title, cache_key}`.
+
+  c. Log: `QA chương <NNN>/<K> done`.
+
+Sau loop:
+
+```bash
+python3 scripts/assemble_qa.py --input "<input_path>"
+```
+
+Parse stdout JSON. Compute `qa_hash = sha1(file_bytes(.work/chapters_qa.json))[:12]`
+→ ghi vào `.work/qa.hash`.
+
+Print: `QA hoàn tất: <chapter_count> chương → chapters_qa.json + <stem>_qa.txt`.
+
+(Từ đây mọi bước đọc `.work/chapters_qa.json`, KHÔNG đọc `chapters.json` nữa.)
+
+---
+
+## STEP 2 — CHARACTER BIBLE
+
+Resolve `bible_path`:
+- Nếu `--series NAME`: `bible_path = ~/.gemini/bibles/<NAME>.md`
+- Else: `bible_path = <input_dir>/character-bible.md`
+
+Nếu `bible_path` đã tồn tại:
+- Load `@prompts/bible-augmenter.md` + execute (append-only via
+  `scripts/append_bible_row.py`).
+Else:
+- Load `@prompts/bible-extractor.md` + execute (write fresh bible).
+
+Compute `bible_hash = sha1(file_bytes(bible_path))[:12]` → ghi vào
+`.work/bible.hash`.
+
+---
+
+## STEP 3 — GENRE DETECT
+
+Nếu `--genre` flag set → skip detection, dùng giá trị flag.
+Else: load `@prompts/genre-detector.md` + execute (sample 3 chapters).
+
+Nếu detector trả `GENRE REFUSED` → HALT toàn workflow ngay. Không tạo file
+output. In refusal message rồi exit.
+
+---
+
+## STEP 4 — SCENE COUNT
+
+```bash
+python3 scripts/calc_scene_count.py \\
+    --input "<input_path>" \\
+    --chapters-json .work/chapters_qa.json \\
+    [--images <N>] [--videos <M>]
+```
+
+Parse stdout JSON → lưu `images_n`, `videos_m`.
+
+Print: `Sẽ tạo: <images_n> ảnh + <videos_m> video clip.`
+
+---
+
+## STEP 5 — SCENE PLAN (Pass 1)
+
+Nếu `.work/scene-plan.md` tồn tại VÀ KHÔNG có `--force-redo`:
+- Check cache: `expected_plan_key = sha1(qa_hash + bible_hash + images_n + videos_m)`
+- Đọc frontmatter `cache_key` từ scene-plan.md (nếu có). Match → skip.
+- Mismatch → WARN "scene-plan stale (input/bible/count changed) — regenerating"
+  → tiếp tục.
+
+Load `@prompts/scene-planner.md` + execute → write `.work/scene-plan.md`.
+
+Compute `plan_hash = sha1(file_bytes(scene-plan.md))[:12]` → ghi vào
+`.work/plan.hash`.
+
+Print: `Scene plan: <N> scenes, <M> flagged for video.`
+
+---
+
+## STEP 6 — EXPAND SCENES (Pass 2, resume-safe loop)
+
+Nếu `--force-redo`: `rm -f .work/scene-*.md` TRƯỚC khi vào loop.
+
+For mỗi scene row trong scene-plan (theo thứ tự scene_id 1..N):
+
+  scene_path = `.work/scene-<NNN>.md` (NNN = zero-padded scene_id)
+
+  expected_cache_key = sha1(
+      qa_hash + bible_hash + plan_hash + serialize(scene_row)
+  )[:16]
+
+  a. Nếu scene_path tồn tại VÀ KHÔNG `--force-redo`:
+     - Đọc frontmatter, lấy `cache_key`.
+     - Match expected → skip ("scene NNN: cached"); GOTO next scene.
+     - Mismatch → WARN "scene NNN stale (input/bible/plan changed) — regenerating";
+       xóa file, regenerate.
+
+  b. Load relevant chapter text từ chapters_qa.json (chỉ chapter mà scene_row.chapter
+     trỏ tới — KHÔNG load full JSON).
+
+  c. Load `@prompts/prompt-expander-image.md` + execute → write scene_path
+     với frontmatter:
+     ```
+     ---
+     scene_id: <NNN>
+     cache_key: <expected_cache_key>
+     has_video: <true|false>
+     ---
+     ## Image Prompt
+     ...
+     ```
+
+  d. Nếu scene_row.flag_for_video = ✓:
+     Load `@prompts/prompt-expander-video.md` + execute → append
+     `## Video Prompt` block vào scene_path.
+
+  e. Log: `Scene <NNN>/<N> done (<image_wc>w image[, <video_wc>w video])`
+
+---
+
+## STEP 6.5 — MUSIC PROMPTS (resume-safe loop)
+
+Sinh prompt nhạc nền Lyria 3 (instrumental) theo cung bậc cảm xúc truyện.
+
+Resolve số vùng N:
+- Nếu `--music N` với N ≥ 1 → dùng ĐÚNG N (verbatim, KHÔNG clamp).
+- Nếu `--music 0` → WARN "Lỗi: --music phải ≥ 1; bỏ qua, dùng mặc định adaptive"
+  → fallback sang path adaptive.
+- Else (adaptive, không có flag hợp lệ): mặc định 4, clamp [3, 5]. Clamp CHỈ cho
+  path adaptive này.
+
+Nếu `--force-redo`: `rm -f .work/music-*.md` TRƯỚC khi vào loop.
+
+Load `@prompts/music-prompt-builder.md` để LLM phân vùng arc thành N vùng cảm
+xúc liền kề (mỗi vùng = dải `Chương X-Y`, phủ hết 1..K, không chồng lấn), dùng
+`genre`, `.work/scene-plan.md`, `.work/chapters_qa.json`, `qa_hash`, `plan_hash`.
+
+For mỗi vùng region (loop_index 1..N):
+
+  music_path = `.work/music-<NNN>.md` (NNN = zero-padded loop_index)
+
+  expected_cache_key = sha1(
+      qa_hash + genre + plan_hash + serialize(region_spec)
+  )[:16]
+  (region_spec = {loop_index, total, chapter_start, chapter_end, mood})
+
+  a. Nếu music_path tồn tại VÀ KHÔNG `--force-redo`:
+     - Đọc frontmatter `cache_key`. Match → skip ("music NNN: cached").
+     - Mismatch → WARN "music NNN stale — regenerating"; xóa, regenerate.
+
+  b. Execute music-prompt-builder cho vùng này → write music_path với
+     frontmatter `{loop_index, total, chapter_start, chapter_end, mood, cache_key}`
+     + body = khối Lyria prompt (English) có nhãn VN, `Instrumental.`, dòng
+     Negative, dòng Loop.
+
+  c. Log: `Music <NNN>/<N> done (mood: <bucket>, Chương <X>-<Y>)`.
+
+(Bước STEP 7 assemble sẽ tự gom `music-*.md` → `<stem>_music_prompts.txt`.)
+
+---
+
+## STEP 7 — ASSEMBLE OUTPUTS
+
+```bash
+python3 scripts/assemble_outputs.py --input "<input_path>"
+```
+
+Parse stdout JSON cho summary.
+
+---
+
+## POST-RUN SUMMARY (in cho user, VN)
+
+```
+✅ visual-prompt hoàn tất.
+
+Input:      <input_path>
+Genre:      <genre> (confidence <X.XX>)
+Bible:      <bible_path> (<N chars>)
+Scene plan: .work/scene-plan.md (<N> scenes, <M> video)
+
+Output files:
+  📝 <input_stem>_qa.txt              — bản hiệu đính, đưa thẳng vào TTS_Local
+  📷 <input_stem>_image_prompts.txt   — <image_count> ảnh
+  🎬 <input_stem>_video_prompts.txt   — <video_count> video (indices: <list>)
+  🎵 <input_stem>_music_prompts.txt   — <music_count> loop nhạc nền (Lyria)
+
+Warnings:
+  <list, hoặc "(không có)">
+
+Bước tiếp:
+  1. Đưa `<stem>_qa.txt` vào TTS_Local để tạo giọng đọc
+     (VieNeu hoặc VietVoice). Xem HUONG-DAN-SU-DUNG.md §TTS.
+  2. Mở Gemini/Qwen/ChatGPT → paste từng block `--- SCENE NNN ---` từ
+     file ảnh để generate hình.
+  3. Mở Veo3/Seedance → paste từng block từ file video để generate clip.
+  4. Mở Lyria 3 (Gemini app) → paste từng block `--- LOOP i / N ---` từ
+     file nhạc để tạo nhạc nền instrumental. Xem HUONG-DAN-SU-DUNG.md §Lyria.
+  5. Xem chi tiết: HUONG-DAN-SU-DUNG.md §6 (Cách paste vào AI tools).
+```
+"""
