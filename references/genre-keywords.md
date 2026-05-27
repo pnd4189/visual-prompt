@@ -27,7 +27,7 @@ the image/video models understand. Use these to translate scene tags
 | cảnh giới | floating cultivation stage, glowing meridians visible, energy aura |
 | đại đạo | infinite cosmic vista, swirling stars, dao symbol faintly etched in sky |
 
-**Style anchor:** Crouching Tiger Hidden Dragon (2000), Ashes of Time (1994).
+**Default recommended style:** `donghua-xianxia` (see [[style-catalog]]; any style valid — user chooses at STEP 3.5).
 
 ---
 
@@ -44,7 +44,7 @@ the image/video models understand. Use these to translate scene tags
 | thượng cổ | primordial era ruins, weathered stone gates, overgrown jade temples |
 | thần ma | godlike entity, towering silhouette, robes flowing in cosmic wind |
 
-**Style anchor:** Crouching Tiger Hidden Dragon, Hero (2002).
+**Default recommended style:** `dark-fantasy-modao` (see [[style-catalog]]; any style valid).
 
 ---
 
@@ -60,8 +60,8 @@ the image/video models understand. Use these to translate scene tags
 | ẩn tu | hidden cultivator in modern clothes (suit + jade pendant) |
 | võ đường | modern martial arts dojo, wood floors, weapon racks |
 
-**Style anchor:** Wong Kar-wai modern aesthetic (Chungking Express 1994 color),
-NOT xianxia robes unless flashback.
+**Default recommended style:** `semi-realistic-digital-painting` (see [[style-catalog]]; any style valid).
+Genre note: modern dress, NOT xianxia robes unless flashback.
 
 ---
 
@@ -77,7 +77,7 @@ NOT xianxia robes unless flashback.
 | thi thư | scholar's study, scrolls, ink stones, calligraphy brushes, lantern light |
 | cổ trang | period costume Tang/Song/Ming, silk and brocade, traditional cuts |
 
-**Style anchor:** Hero (2002), House of Flying Daggers (2004), Curse of the Golden Flower (2006).
+**Default recommended style:** `painterly-realism-cinematic` (see [[style-catalog]]; any style valid).
 
 ---
 
@@ -94,8 +94,8 @@ NOT xianxia robes unless flashback.
 | tửu lâu | two-story wooden tavern, balcony, hanging lanterns |
 | môn phái | martial sect compound, courtyards, training fields |
 
-**Style anchor:** Hero (2002), Crouching Tiger Hidden Dragon (2000).
-Key diff vs tiên hiệp: NO magical formations, NO flying swords, NO qi auras
+**Default recommended style:** `painterly-realism-cinematic` (see [[style-catalog]]; any style valid).
+Genre note vs tiên hiệp: NO magical formations, NO flying swords, NO qi auras
 beyond subtle palm shimmer. Power expressed through choreography, not VFX.
 
 ---

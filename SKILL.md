@@ -1,7 +1,7 @@
 ---
 name: visual-prompt
-version: 0.2.0
-description: Generate cinematic 4K image + video prompts, a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos
+version: 0.3.0
+description: Generate styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos
 license: MIT
 contextFileName: SKILL.md
 ---
@@ -38,7 +38,7 @@ paste-ready files:
 - **Cross-file series support** via `--series <name>` flag — bible persists in
   `~/.gemini/bibles/<series>.md`.
 
-## Workflow (8 steps)
+## Workflow (9 steps)
 
 1. **Load input** → `python3 scripts/load_input.py` → `.work/chapters.json`
 2. **QA proofread** — LLM fixes residual Chinese/English, grammar, clunky MT
@@ -50,25 +50,35 @@ paste-ready files:
 4. **Genre detect** — sample 3 chapters (first/middle/last) → classify into
    tiên hiệp / huyền huyễn / đô thị / cổ điển / võ hiệp. Refuses đam mỹ /
    ngôn tình.
-5. **Scene count** — `python3 scripts/calc_scene_count.py` →
+5. **Style recommend + select** — recommend an art style for the genre (default
+   #1 + alternatives) and ask the user to pick (Enter = #1, or type an id);
+   `--style <id>` skips the prompt. Headless / no answer → fallback to #1. The
+   chosen style is materialized to `.work/active-style.md` and feeds a
+   `style_hash` into the scene cache key. Genre and style are decoupled — any of
+   the 18 styles works for any genre.
+6. **Scene count** — `python3 scripts/calc_scene_count.py` →
    default `images = round(wc/200)`, `videos = round(images/7)`; CLI overrides.
-6. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
-   `.work/scene-NNN.md` files. Resume-safe via SHA1 cache.
-7. **Music prompts** — LLM segments the emotional arc into N mood regions
+7. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
+   `.work/scene-NNN.md` files, using the chosen style for Style + negatives.
+   Resume-safe via SHA1 cache (busts when style changes).
+8. **Music prompts** — LLM segments the emotional arc into N mood regions
    (default 4, clamp [3,5]; `--music N` honored verbatim) → one instrumental
-   Lyria prompt per region in `.work/music-NNN.md`. Resume-safe.
-8. **Assemble** → `python3 scripts/assemble_outputs.py` writes the image, video,
+   Lyria prompt per region in `.work/music-NNN.md`. Score register follows the
+   chosen style's `music/score anchor`. Resume-safe.
+9. **Assemble** → `python3 scripts/assemble_outputs.py` writes the image, video,
    and music `.txt` files next to the input.
 
 ## Usage
 
 ```
-/visual-prompt <input.txt> [--series <name>] [--genre <name>] \
+/visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
                             [--images N] [--videos M] [--music N] [--force-redo]
 ```
 
-`--music N` sets the exact number of music loops (honored verbatim, no clamp).
-Omit it for adaptive segmentation (default 4, clamped to [3,5]).
+`--style <id>` picks an art style up-front (skips the interactive recommend step);
+ids are in `references/style-catalog.md`. Omit it to get a recommendation and
+choose interactively. `--music N` sets the exact number of music loops (honored
+verbatim, no clamp); omit it for adaptive segmentation (default 4, clamped to [3,5]).
 
 ## Input Spec
 
@@ -94,6 +104,15 @@ Omit it for adaptive segmentation (default 4, clamped to [3,5]).
 - Supported genres: tiên hiệp, huyền huyễn, đô thị, cổ điển, võ hiệp.
 - **Refuses:** đam mỹ (BL romance), ngôn tình (modern romance) — out of scope.
 - Text-only output. Reference-image pattern deferred to v2.
+- **One style per run.** Styles in the `accent-title-card` / `video-oriented`
+  categories keep character identity poorly across many scenes — best for opening
+  title cards or montages, not every shot. The recommend step warns when a chosen
+  style is in those categories.
+- **Headless runs:** the style select step is interactive (CLI foreground). If run
+  headless or no answer is given, it falls back to the recommended #1 — use
+  `--style <id>` to choose explicitly.
+- **Music score register** now follows the chosen style's `music/score anchor`
+  (no longer hardcoded). Segmentation/mood logic is unchanged.
 - **Lyria music:** prompts are instrumental-only with vocal-exclusion negatives,
   but the model cannot 100% guarantee no vocal-like pads. Region→timeline sync
   is manual — place each loop by its `Chương X-Y` label.
@@ -109,8 +128,8 @@ visual-prompt/
 ├── SKILL.md                  ← you are here
 ├── gemini-extension.json
 ├── commands/visual-prompt.toml
-├── prompts/                  ← 8 LLM prompt files (incl. qa-proofread, music-prompt-builder)
-├── references/               ← 7 static knowledge files (incl. music-mood-mapping)
+├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
+├── references/               ← 9 static knowledge files (incl. music-mood-mapping, style-catalog, genre-style-recommendation)
 └── scripts/                  ← 6 Python I/O helpers (incl. assemble_qa)
 ```
 

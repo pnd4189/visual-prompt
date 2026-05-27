@@ -20,7 +20,7 @@ triumph/resolution.
 
 ## 1. Tiên Hiệp (Xianxia — cultivation, immortal sects)
 
-Base style: *traditional Chinese orchestral + ambient, Crouching Tiger Hidden Dragon score.*
+Base style (default): *traditional Chinese orchestral + ambient*; override the register with the chosen style's `music/score anchor` (see [[style-catalog]]).
 
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
@@ -34,7 +34,7 @@ Base style: *traditional Chinese orchestral + ambient, Crouching Tiger Hidden Dr
 
 ## 2. Huyền Huyễn (Xuanhuan — mythic fantasy, mixed magic)
 
-Base style: *epic hybrid orchestral + ethnic Chinese, Hero (2002) grandeur.*
+Base style (default): *epic hybrid orchestral + ethnic Chinese, grand mythic register*; override with the chosen style's `music/score anchor` (see [[style-catalog]]).
 
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ Base style: *epic hybrid orchestral + ethnic Chinese, Hero (2002) grandeur.*
 
 ## 3. Đô Thị (Urban — modern setting with hidden cultivation)
 
-Base style: *modern cinematic, Wong Kar-wai color, subtle electronic.*
+Base style (default): *modern cinematic, subtle electronic*; override with the chosen style's `music/score anchor` (see [[style-catalog]]).
 
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
@@ -62,7 +62,7 @@ Base style: *modern cinematic, Wong Kar-wai color, subtle electronic.*
 
 ## 4. Cổ Điển (Gu Dian — historical court, no magic)
 
-Base style: *period Chinese orchestral, Curse of the Golden Flower opulence.*
+Base style (default): *period Chinese orchestral, courtly opulence*; override with the chosen style's `music/score anchor` (see [[style-catalog]]).
 
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
@@ -76,7 +76,7 @@ Base style: *period Chinese orchestral, Curse of the Golden Flower opulence.*
 
 ## 5. Võ Hiệp (Wuxia — jianghu martial chivalry, no cultivation)
 
-Base style: *lean ethnic Chinese + percussion, Crouching Tiger choreography energy.*
+Base style (default): *lean ethnic Chinese + percussion, martial choreography energy*; override with the chosen style's `music/score anchor` (see [[style-catalog]]).
 
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|

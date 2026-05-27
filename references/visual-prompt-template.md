@@ -18,20 +18,25 @@ Two formats: **Image** (hybrid 200–300 words, sectioned) and **Video**
 Camera: <shot type, lens mm, angle, framing>
 Setting: <location, time of day, weather, atmosphere, era markers>
 Subject: <PASTE IDENTITY ANCHOR VERBATIM from character-bible.md, then pose, expression, props>
-Style: <art style, cinema reference, render style, aspect ratio 16:9>
+Style: <Style block from .work/active-style.md + its reference anchors, aspect ratio 16:9>
 Lighting: <key light, fill, rim, mood, color temperature>
-Negative: <universal anti-Western + genre-specific + style-specific — max 20 items, comma-separated>
+Negative: <anti-Western + genre + AI-defense + style negatives — max 24 items, comma-separated>
 ```
 
 **Rules:**
 - Subject section MUST start with the verbatim Identity Anchor block from
   the bible (see [[identity-anchor-rules]]). Do not paraphrase.
-- Cinema reference is REQUIRED for tiên hiệp / huyền huyễn / võ hiệp →
-  cite Crouching Tiger Hidden Dragon (2000) or Hero (2002).
+- Style section uses the `Style block` of the chosen style in `.work/active-style.md`
+  and cites its `reference anchors`. There is NO global cinema reference — the
+  selected style (see [[style-catalog]]) decides the look.
 - Aspect ratio 16:9 (YouTube native).
 - Use English visual vocabulary; map VN genre words via [[genre-keywords]].
 
 ### IMAGE EXAMPLE — ADAPT TO SCENE, DO NOT COPY VERBATIM
+
+*(Example shown for style `painterly-realism-cinematic`. With another style, the
+Style line comes from that style's `Style block` and the Negative gains its 4 style
+negatives for 24 total. See [[style-catalog]].)*
 
 ```
 Camera: medium shot, 50mm lens, eye-level, centered framing, shallow depth of field.
@@ -75,7 +80,7 @@ Cinematography: <shot type, lens, camera movement, framing, aspect ratio>
 Subject: <PASTE IDENTITY ANCHOR VERBATIM, then current state/wardrobe specifics for the shot>
 Action: <2-3 timestamped beats using ms-precision tags [00:00-00:02.5]>
 Context: <location, time of day, weather, era markers, supporting elements>
-Style & Ambiance: <visual style, cinema reference, color palette, lighting, AND audio cue embedded as one of the ambiance layers — NOT as a tag at the end>
+Style & Ambiance: <Style block + reference anchors from .work/active-style.md, color palette, lighting, AND audio cue embedded as one of the ambiance layers — NOT as a tag at the end>
 ```
 
 **Audio rule (critical):** Audio is part of *Style & Ambiance*, written as
@@ -83,6 +88,10 @@ diegetic + ambient layer. Example: `Audio: steel ringing on steel, low wind
 through bamboo, distant temple bell.` NEVER append `[audio: ...]` at the end.
 
 ### VIDEO EXAMPLE — ADAPT TO SCENE, DO NOT COPY VERBATIM
+
+*(Example shown for style `painterly-realism-cinematic`. With another style, the
+Style & Ambiance line comes from that style's `Style block` + reference anchors.
+See [[style-catalog]].)*
 
 ```
 Cinematography: medium-wide tracking shot, 35mm lens, handheld follow-cam with

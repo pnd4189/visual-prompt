@@ -9,18 +9,23 @@ matching the format spec in `@references/visual-prompt-template.md` exactly.
 - `bible` — `character-bible.md` content (filter to characters in this scene)
 - `genre` — detected genre keyword
 - `chapter_excerpt` — the relevant chapter text ONLY (NOT full chapters.json)
-- `cache_key` — SHA1(input.hash + bible.hash + plan.hash + scene_row_text)
+- `active_style` — `.work/active-style.md` content (one chosen style entry)
+- `cache_key` — SHA1(input.hash + bible.hash + plan.hash + style.hash + scene_row_text)
 
 ## CRITICAL — CHAPTER EXCERPT RULE
 Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
 `chapters.json` whole — for 18k-word files, that blows the context.
 
 ## TASK
-1. Load `@references/visual-prompt-template.md` (image format section).
+1. Load `@references/visual-prompt-template.md` (image format section) AND
+   `.work/active-style.md` (the chosen style entry). The `Style block` field of
+   active-style is the Style section base; its `reference anchors` replace any
+   fixed cinema reference.
 2. Load `@references/scene-tag-camera-mapping.md` — pick row matching
    `scene_row.scene_tag` for Camera defaults.
-3. Load `@references/negative-lists.md` — compose 3-layer negative (universal
-   + genre-specific + style/AI-defense), cap 20 items.
+3. Load `@references/negative-lists.md` — compose 4-layer negative (universal
+   anti-Western + genre + AI-defense + style negatives), cap 24 items. Layer 4 =
+   first 4 items from the `style negatives` field of `.work/active-style.md`.
 4. Load `@references/genre-keywords.md` — translate VN trigger words from
    the chapter excerpt into EN visual vocabulary.
 5. Build the prompt with these EXACT sections in order:
@@ -28,13 +33,14 @@ Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
    Camera: ...
    Setting: ...
    Subject: <IDENTITY ANCHOR VERBATIM from bible> + scene state
-   Style: ...
+   Style: <Style block from active-style + cite its reference anchors>
    Lighting: ...
    Negative: ...
    ```
 6. Target 200–300 words total. Hard penalty if >320.
-7. For tiên hiệp / huyền huyễn / võ hiệp → cite Crouching Tiger Hidden
-   Dragon (2000) OR Hero (2002) in Style section. Mandatory.
+7. The `Style` section MUST use the `Style block` of `.work/active-style.md` and
+   cite at least one of its `reference anchors`. Do NOT inject a fixed cinema
+   reference — the chosen style decides the look.
 
 ## IDENTITY ANCHOR — VERBATIM, NOT PARAPHRASE
 For each character in `scene_row.characters`:
@@ -82,9 +88,11 @@ Negative: ...
    punctuation, capitalization) → REGENERATE the Subject.
 2. **Word count check** — count words in the prompt body. If >320 → trim
    Setting and Style first. If <180 → expand Setting and Lighting.
-3. **Negative count check** — exactly 20 items max, comma-separated.
-4. **Cinema reference check** (for tiên hiệp / huyền huyễn / võ hiệp) —
-   "Crouching Tiger" or "Hero" appears in Style. If not → add it.
+3. **Negative count check** — 24 items max (10+5+5+4), comma-separated. The last
+   4 are the style negatives from `.work/active-style.md`.
+4. **Style reference check** — the `reference anchors` of the chosen style (from
+   `.work/active-style.md`) appears in the Style section. If not → add it. There
+   must be NO fixed cinema reference unless it IS the chosen style's anchor.
 5. **All 6 sections present** with exact headers `Camera:`, `Setting:`,
    `Subject:`, `Style:`, `Lighting:`, `Negative:`.
 

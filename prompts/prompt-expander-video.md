@@ -10,10 +10,13 @@ Format: Google Veo3 official 5-part formula.
 - `bible` — `character-bible.md` (filter to characters in scene)
 - `genre` — detected genre
 - `chapter_excerpt` — relevant chapter text ONLY
+- `active_style` — `.work/active-style.md` content (one chosen style entry)
 - existing `.work/scene-<NNN>.md` — image prompt is already there
 
 ## TASK
-1. Load `@references/visual-prompt-template.md` (video format section).
+1. Load `@references/visual-prompt-template.md` (video format section) AND
+   `.work/active-style.md`. The `Style & Ambiance` section uses the active style's
+   `Style block` + its `reference anchors`; do NOT inject a fixed cinema reference.
 2. Load `@references/scene-tag-camera-mapping.md` — pick row matching
    `scene_row.scene_tag` for Cinematography defaults.
 3. Build the prompt with these EXACT sections in order:
@@ -79,8 +82,9 @@ Use the Write tool to overwrite the file with image block + video block
 5. **Word count** — body ≤ 800 words.
 6. **All 5 sections present** with exact headers `Cinematography:`,
    `Subject:`, `Action:`, `Context:`, `Style & Ambiance:`.
-7. **Cinema reference** for tiên hiệp / huyền huyễn / võ hiệp in Style &
-   Ambiance.
+7. **Style reference** — the chosen style's `reference anchors` (from
+   `.work/active-style.md`) appears in Style & Ambiance. No fixed cinema reference
+   unless it IS the chosen style's anchor.
 
 ## STDOUT SUMMARY
 ```

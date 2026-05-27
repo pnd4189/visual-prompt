@@ -12,6 +12,7 @@ prompt Lyria 3 (instrumental) để dán vào Gemini app. Tái dùng genre + sce
 - `genre` — keyword genre đã detect (1 trong: tien-hiep, huyen-huyen, do-thi,
   co-dien, vo-hiep).
 - `.work/scene-plan.md` — bảng scene + nhịp cảm xúc đã có.
+- `.work/active-style.md` — style đã chọn; đọc field `music/score anchor`.
 - `music_override` (N) — nếu user truyền `--music N`.
 - `qa_hash`, `plan_hash` — để dựng cache_key.
 
@@ -38,6 +39,12 @@ Load `@references/music-mood-mapping.md`. Tra hàng `genre × mood` → lấy
 instrument palette, BPM, key/scale, descriptors. Dựng theo template DeepMind:
 
 `[Genre & style] + [Mood] + [Instrumentation] + [Tempo/BPM + key] + "Instrumental."`
+
+**Base style theo style đã chọn:** đọc `.work/active-style.md` field
+`music/score anchor`. Nếu có → dùng anchor đó làm "[Genre & style]" register (thay
+cho base style mặc định trong music-mood-mapping). Instrumentation/BPM/key/mood
+vẫn lấy từ bảng `genre × mood` như cũ — chỉ register tổng thể đổi theo style.
+Nếu active-style không có field này → dùng base style mặc định của genre.
 
 **HARD RULE — INSTRUMENTAL ONLY:** mỗi prompt PHẢI:
 - kết thúc cụm `Instrumental.`
@@ -74,7 +81,11 @@ Loop: seamless loop, no fade out, ~2-3 minutes
 Toàn bộ body sau frontmatter = đúng khối sẽ ghi vào file output (assemble_outputs
 lấy nguyên văn). KHÔNG thêm giải thích ngoài khối.
 
-## VÍ DỤ (tiên hiệp, vùng tension/battle, loop 3/4, chương 7-9)
+## VÍ DỤ (tiên hiệp, vùng tension/battle, loop 3/4, chương 7-9, style = painterly-realism-cinematic)
+
+(Register "Crouching Tiger" dưới đây = music/score anchor của style
+`painterly-realism-cinematic`. Style khác → đổi register theo anchor của nó, vd
+`donghua-xianxia` → "synth-orchestral donghua hybrid".)
 
 ```markdown
 ---

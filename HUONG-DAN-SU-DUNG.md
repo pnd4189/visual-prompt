@@ -1,7 +1,7 @@
 # Hướng Dẫn Sử Dụng — visual-prompt
 
-> Skill Antigravity tạo prompt ảnh + video 4K cinematic từ file truyện tiên hiệp /
-> võ hiệp tiếng Việt, dùng cho video audio YouTube.
+> Skill Antigravity tạo prompt ảnh + video từ file truyện tiên hiệp / võ hiệp
+> tiếng Việt (chọn được 1 trong 18 art style), dùng cho video audio YouTube.
 
 ---
 
@@ -64,16 +64,18 @@ phải chạy lại `setup.bat` để re-sync (xem [antigravity/INSTALL.md](anti
 /visual-prompt /path/to/truyen.txt
 ```
 
-Skill chạy 8 bước (mất ~5–50 phút tuỳ độ dài file):
+Skill chạy 9 bước (mất ~5–50 phút tuỳ độ dài file):
 1. Load chapters
 2. **QA hiệu đính** (luôn chạy) — sửa chữ Trung/Anh sót, chính tả, câu dịch máy
    lủng củng, tách câu dài → `chapters_qa.json` + `<file>_qa.txt`
 3. Trích xuất character bible (lưu cạnh file truyện)
 4. Detect thể loại
-5. Tính số scene (mặc định: 1 ảnh / ~200 từ, 1 video / 7 ảnh)
-6. Plan + expand scenes
-7. **Music prompts** — chia arc cảm xúc thành N vùng (mặc định 4) → prompt Lyria
-8. Assemble các file output
+5. **Chọn style** — gợi ý style theo thể loại + HỎI bạn chọn (Enter = #1, hoặc gõ
+   id khác). Có `--style <id>` → bỏ qua hỏi. Xem mục §5 "Chọn style".
+6. Tính số scene (mặc định: 1 ảnh / ~200 từ, 1 video / 7 ảnh)
+7. Plan + expand scenes (theo style đã chọn)
+8. **Music prompts** — chia arc cảm xúc thành N vùng (mặc định 4) → prompt Lyria
+9. Assemble các file output
 
 **Kết quả** nằm cạnh file input:
 - `truyen_qa.txt` (đưa vào TTS_Local — xem §6)
@@ -86,6 +88,49 @@ Skill chạy 8 bước (mất ~5–50 phút tuỳ độ dài file):
 ---
 
 ## 5. Sử dụng nâng cao
+
+### Chọn style — 18 art style
+
+Sau khi detect thể loại, skill gợi ý 1 style mặc định (#1) + vài lựa chọn khác,
+rồi **HỎI bạn chọn**: nhấn Enter để dùng #1, hoặc gõ một id khác. Style đã chọn
+áp dụng nhất quán cho TOÀN BỘ ảnh + video của run đó.
+
+**Bỏ qua bước hỏi** bằng flag `--style <id>`:
+
+```
+/visual-prompt truyen.txt --style donghua-xianxia
+```
+
+Sai id → skill báo lỗi và liệt kê id hợp lệ. Chạy headless / không trả lời câu
+hỏi → tự fallback về #1 (in cách override bằng `--style`). Đổi `--style` rồi chạy
+lại → scene tự regenerate (cache bust theo style).
+
+**Genre và style tách rời:** mọi style đều dùng được cho mọi thể loại; bảng dưới
+chỉ là gợi ý mềm.
+
+| Thể loại | Style #1 (mặc định) | Lựa chọn khác |
+|---|---|---|
+| tiên hiệp | `donghua-xianxia` | `painterly-realism-cinematic`, `game-cg-25d`, `ink-wash-stylized` |
+| huyền huyễn | `dark-fantasy-modao` | `game-cg-25d`, `concept-art-cityscape`, `donghua-xianxia` |
+| đô thị | `semi-realistic-digital-painting` | `manhua`, `scifi-donghua-kehuan` |
+| cổ điển | `painterly-realism-cinematic` | `watercolor-gouache`, `ink-wash-stylized` |
+| võ hiệp | `painterly-realism-cinematic` | `ink-wash-stylized`, `manhua` |
+
+**18 style theo nhóm** (chi tiết: [references/style-catalog.md](references/style-catalog.md)):
+
+- **narrative-safe (10)** — giữ nhất quán nhân vật tốt, dùng cho mọi scene:
+  `donghua-xianxia`, `painterly-realism-cinematic`, `semi-realistic-digital-painting`,
+  `light-novel-moe`, `concept-art-cityscape`, `dark-fantasy-modao`, `game-cg-25d`,
+  `dark-zhiguai-folk-horror`, `scifi-donghua-kehuan`, `manhua`.
+- **accent-title-card (7)** — look đẹp nhưng giữ mặt/dáng nhân vật KÉM qua nhiều
+  scene; hợp title card / montage hơn: `ink-wash-stylized`, `flat-poster-silhouette`,
+  `traditional-pattern-minimal`, `watercolor-gouache`, `minimalist-calligraphy-symbolic`,
+  `folk-nianhua`, `photobash-epic-poster`.
+- **video-oriented (1)** — thiết kế cho chuyển động, ảnh tĩnh trông dở:
+  `ink-wash-animation`.
+
+⚠ Chọn style nhóm accent/video cho cả run → nhân vật dễ "đổi mặt" giữa các cảnh.
+Skill sẽ cảnh báo lúc gợi ý. Muốn an toàn → chọn nhóm narrative-safe.
 
 ### `--series <name>` — Bộ truyện nhiều file
 

@@ -1,4 +1,4 @@
-description = "Generate cinematic 4K image + video prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
+description = "Generate styleable image + video prompts (18-style catalog) from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
 prompt = """
 Bạn là active Gemini Ultra agent thực thi pipeline visual-prompt v0.1.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
@@ -17,13 +17,14 @@ Args là 1 string. Parse như sau (regex Python):
 3. `--images (\\d+)`                     → images_override (optional, int)
 4. `--videos (\\d+)`                     → videos_override (optional, int)
 5. `--music (\\d+)`                      → music_override (optional, int; honored verbatim)
-6. `--force-redo`                        → force_redo = true (flag)
-7. Sau khi strip flags → còn lại là input_path (positional, required).
+6. `--style ([a-z0-9-]+)`                → style_override (kebab-case id, optional)
+7. `--force-redo`                        → force_redo = true (flag)
+8. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Validate:
 - input_path tồn tại (Path.exists()).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --force-redo`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo`
 
 Echo lại cho user:
 ```
@@ -34,6 +35,7 @@ Echo lại cho user:
   images     = <N | (auto)>
   videos     = <M | (auto)>
   music      = <N | (auto, default 4 trong [3,5])>
+  style      = <id | (recommend sau genre detect)>
   force_redo = <true | false>
 ```
 
@@ -122,6 +124,37 @@ output. In refusal message rồi exit.
 
 ---
 
+## STEP 3.5 — STYLE RECOMMEND + SELECT (mandatory)
+
+Chọn art style cho cả run. Genre và style tách rời — mọi style trong
+`@references/style-catalog.md` đều hợp lệ cho mọi genre.
+
+**Nếu `style_override` được set:**
+- Validate id ∈ style-catalog (đọc bảng tra nhanh id→category ở đầu
+  `@references/style-catalog.md`). Sai → HALT với VN error:
+  `Lỗi: --style '<id>' không hợp lệ. Id hợp lệ: <liệt kê 18 id từ bảng tra nhanh>`
+- `chosen_style = style_override` (KHÔNG hỏi).
+
+**Else (no flag):**
+- Load `@prompts/style-recommender.md` với `genre` đã detect → in recommend #1 +
+  2-3 alternatives + cảnh báo anchor (nếu style accent/video).
+- HỎI user: Enter = #1, hoặc gõ một id khác. Validate id ∈ catalog (sai → in lỗi
+  + hỏi lại). `chosen_style` = kết quả.
+- **FALLBACK (headless / không nhận được câu trả lời tương tác):**
+  `chosen_style = recommend #1`; in:
+  `Style mặc định: <id> (recommend cho <genre>). Override: --style <id>.`
+
+**Materialize:**
+- Copy NGUYÊN VĂN entry của `chosen_style` từ `style-catalog.md` (chỉ 1 entry,
+  từ dòng `### <id> — ...` tới ngay trước entry kế / hết phần Entries) →
+  `.work/active-style.md`.
+- `style_hash = sha1(file_bytes(.work/active-style.md))[:12]` → ghi `.work/style.hash`.
+- Print: `Style: <id> (<category>)`.
+
+(Từ đây image/video expander + music builder đọc `.work/active-style.md`.)
+
+---
+
 ## STEP 4 — SCENE COUNT
 
 ```bash
@@ -163,13 +196,13 @@ For mỗi scene row trong scene-plan (theo thứ tự scene_id 1..N):
   scene_path = `.work/scene-<NNN>.md` (NNN = zero-padded scene_id)
 
   expected_cache_key = sha1(
-      qa_hash + bible_hash + plan_hash + serialize(scene_row)
+      qa_hash + bible_hash + plan_hash + style_hash + serialize(scene_row)
   )[:16]
 
   a. Nếu scene_path tồn tại VÀ KHÔNG `--force-redo`:
      - Đọc frontmatter, lấy `cache_key`.
      - Match expected → skip ("scene NNN: cached"); GOTO next scene.
-     - Mismatch → WARN "scene NNN stale (input/bible/plan changed) — regenerating";
+     - Mismatch → WARN "scene NNN stale (input/bible/plan/style changed) — regenerating";
        xóa file, regenerate.
 
   b. Load relevant chapter text từ chapters_qa.json (chỉ chapter mà scene_row.chapter
@@ -253,6 +286,7 @@ Parse stdout JSON cho summary.
 
 Input:      <input_path>
 Genre:      <genre> (confidence <X.XX>)
+Style:      <chosen_style> (<category>)
 Bible:      <bible_path> (<N chars>)
 Scene plan: .work/scene-plan.md (<N> scenes, <M> video)
 
