@@ -1,6 +1,6 @@
 {
   "name": "visual-prompt",
-  "version": "0.1.0",
-  "description": "Generate cinematic 4K image + video prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos",
+  "version": "0.3.0",
+  "description": "Generate styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos",
   "contextFileName": "SKILL.md"
 }
