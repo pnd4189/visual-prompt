@@ -9,3 +9,5 @@ _visuals/
 output_*/
 # test fixtures may contain copyrighted excerpts
 plans/test-fixtures/
+# scratch work dirs (may contain copyrighted novel text)
+tmp_work*/

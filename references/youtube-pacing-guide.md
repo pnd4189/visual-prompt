@@ -10,12 +10,12 @@ algorithm de-promotes.
 ## Formula
 
 ```
-images = round(wordcount / 200)     # ≈ 1 image per ~200 words ≈ every 30–40s
-videos = round(images   / 7)        # ≈ 1 short video per ~7 images
+images = clamp(round(wordcount / 120), 120, 150)
+videos = max(20, round(images / 6))
 ```
 
-**Floor clamps:** `images >= 5`, `videos >= 2` (even very short clips need
-visual variety).
+Explicit `--images` / `--videos` overrides are honored exactly. The default is a
+production-heavy prompt pack; use overrides for quick tests.
 
 ## Pacing Tables
 
@@ -23,22 +23,24 @@ visual variety).
 
 | Item | Count | Cadence |
 |---|---|---|
-| Images | ~45 | one new image every ~80s (with 5–8s cuts) |
-| Videos | ~6 | one video clip every ~10 min (8s each → 48s total motion) |
+| Images | ~120 | one prompt per ~30s narration slot |
+| Videos | ~20 | one motion prompt every ~3 min |
 
 ### 2-hour audio (~18,000 Vietnamese words narration)
 
 | Item | Count | Cadence |
 |---|---|---|
-| Images | ~90 | one new image every ~80s |
-| Videos | ~13 | one video clip every ~9 min |
+| Images | ~150 | one prompt per ~45–50s narration slot |
+| Videos | ~25 | one motion prompt every ~5 min |
 
-## Why 1 video per ~7 images?
+## Why 20+ video prompts?
 
-- Videos cost ~10× more compute than images (Veo3 limits, generation time).
-- 1 video per ~10 minutes of audio is enough to refresh viewer attention.
-- Image variety alone (45–90 distinct images per hour) carries the visual
-  load. Videos are accents: openers, climax, transformation moments.
+- The final editor can choose fewer clips, but prompt generation should provide
+  enough strong motion candidates.
+- At least 20 clips gives coverage for openers, reveals, combat, ritual,
+  breakthrough, travel, crowd, and climax moments.
+- Image prompts carry the visual base; video prompts should be reserved for
+  scenes where motion matters.
 
 ## Scene Placement Rhythm (which scenes get videos)
 
@@ -56,12 +58,12 @@ Flag scenes for video when:
 
 ## Cadence Math (1h audio example)
 
-- 9,000 words / 45 images = 200 words per image
+- 9,000 words / 120 images = 75 words per image prompt slot
 - Average narration speed: 150 words/min Vietnamese
-- 200 words ≈ 80 seconds per image slot
+- 75 words ≈ 30 seconds per image prompt slot
 - Each image displays 5–8s, then crossfade/cut to next OR a video clip plays
   in that slot (8s motion, then back to images)
 
-YouTube algorithmic sweet spot: visual cut every 6–8s. A 45-image + 6-video
-plan over 60min gives **~57 visual events** = avg 63s per slot. Stay below
-80s/slot to keep retention high.
+YouTube algorithmic sweet spot: visual cut every 6–8s during editing. A
+120-image + 20-video prompt pack gives enough source material for that edit
+without forcing the editor to use every generated asset.

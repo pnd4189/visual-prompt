@@ -2,7 +2,7 @@
 
 > Related: [[genre-keywords]] · [[youtube-pacing-guide]]
 
-Knowledge table for building **instrumental** Lyria 3 prompts (Gemini app). Maps
+Knowledge table for building **instrumental** Lyria 3 prompts (Lyria app). Maps
 each supported genre × mood bucket → instrument palette, tempo (BPM), suggested
 key/scale, and English mood descriptors. Use these to fill the DeepMind Lyria
 template:

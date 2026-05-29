@@ -13,6 +13,9 @@ explicitly demands a different shot.
 |---|---|---|---|---|
 | **establishing** | Wide / extreme wide | 24mm | Slow push-in or static | Open chapter; new location; reveal a landscape, sect compound, city |
 | **action** | Medium-wide tracking | 35mm | Handheld follow with motion blur | Duels, chases, escapes, combat |
+| **combat-map** | Extreme wide to wide | 24mm | Slow aerial push or sweeping lateral move | Army clash, sect battlefield, city-scale siege, mountain-pass fight |
+| **daoist-magic** | Symmetrical wide | 28mm | Slow orbit or push through glowing formation | Talismans, spell circles, flying swords, artifacts, breakthrough effects |
+| **group** | Wide group tableau | 35mm | Slow dolly across ranks | Allies vs enemies, disciples, soldiers, courtroom/council crowd |
 | **dialogue** | Medium two-shot OR shot-reverse-shot | 50mm | Static / slight handheld breath | Two characters talking face to face |
 | **reveal** | Medium close-up → wide | 50mm zoom OR 35mm dolly back | Slow pull-out or rapid push-in | Big reveal: identity, artifact, true power |
 | **emotional** | Close-up | 85mm | Static, slight rack focus | Inner moment, grief, decision, breakthrough |

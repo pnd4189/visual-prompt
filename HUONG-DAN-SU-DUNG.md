@@ -9,23 +9,24 @@
 
 Bạn có 1 file truyện tiên hiệp / huyền huyễn / võ hiệp tiếng Việt (2k–18k từ,
 phù hợp video 1–2 giờ audio). Không cần proofread trước — skill tự hiệu đính.
-Bạn muốn làm video YouTube với ~45 ảnh + 6 video clip + nhạc nền cho 1 giờ audio.
+Bạn muốn làm video YouTube với khoảng 120-150 ảnh + tối thiểu 20 video clip +
+nhạc nền cho 1 giờ audio.
 
 `/visual-prompt <file.txt>` đọc truyện → tạo 4 file:
 - `<file>_qa.txt` — bản truyện đã hiệu đính, đưa THẲNG vào TTS_Local đọc giọng
-- `<file>_image_prompts.txt` — paste vào Gemini / Qwen / ChatGPT để gen ảnh
+- `<file>_image_prompts.txt` — paste vào công cụ tạo ảnh để gen ảnh
 - `<file>_video_prompts.txt` — paste vào Veo3 / Seedance để gen video clip
-- `<file>_music_prompts.txt` — paste vào Lyria 3 (Gemini app) để gen nhạc nền
+- `<file>_music_prompts.txt` — paste vào Lyria 3 (Lyria app) để gen nhạc nền
 
-Toàn bộ workflow do Gemini Ultra agent điều khiển. Python chỉ làm I/O file.
+Toàn bộ workflow do active Antigravity/Agy model điều khiển. Python chỉ làm I/O file.
 
 ---
 
 ## 2. Yêu cầu
 
-- **Antigravity CLI** (hoặc Gemini CLI) — đã cài và chạy được
+- **Antigravity/Agy CLI** — đã cài và chạy được
 - **Python 3.10+** (`python3 --version`)
-- **Gemini Ultra** active (skill này dùng LLM nặng để plan + expand scenes)
+- Active Agy model đủ mạnh (skill này dùng LLM nặng để plan + expand scenes)
 - (Optional) `python-docx` nếu input là `.docx`: `pip install python-docx`
 
 ---
@@ -64,7 +65,7 @@ phải chạy lại `setup.bat` để re-sync (xem [antigravity/INSTALL.md](anti
 /visual-prompt /path/to/truyen.txt
 ```
 
-Skill chạy 9 bước (mất ~5–50 phút tuỳ độ dài file):
+Skill chạy 9 bước (mất lâu hơn bản cũ vì mặc định tạo 120-150 ảnh và 20+ video):
 1. Load chapters
 2. **QA hiệu đính** (luôn chạy) — sửa chữ Trung/Anh sót, chính tả, câu dịch máy
    lủng củng, tách câu dài → `chapters_qa.json` + `<file>_qa.txt`
@@ -72,7 +73,7 @@ Skill chạy 9 bước (mất ~5–50 phút tuỳ độ dài file):
 4. Detect thể loại
 5. **Chọn style** — gợi ý style theo thể loại + HỎI bạn chọn (Enter = #1, hoặc gõ
    id khác). Có `--style <id>` → bỏ qua hỏi. Xem mục §5 "Chọn style".
-6. Tính số scene (mặc định: 1 ảnh / ~200 từ, 1 video / 7 ảnh)
+6. Tính số scene (mặc định: 120-150 ảnh, tối thiểu 20 video; override bằng flag)
 7. Plan + expand scenes (theo style đã chọn)
 8. **Music prompts** — chia arc cảm xúc thành N vùng (mặc định 4) → prompt Lyria
 9. Assemble các file output
@@ -157,13 +158,15 @@ Giá trị hỗ trợ: `tien-hiep`, `huyen-huyen`, `do-thi`, `co-dien`, `vo-hiep
 
 ### `--images N --videos M` — Override số lượng
 
-Mặc định: `N = round(wc/200)`, `M = round(N/7)`. Muốn ép số khác:
+Mặc định: `N = clamp(round(wc/120), 120, 150)`, `M = max(20, round(N/6))`.
+Muốn ép số khác:
 
 ```
 /visual-prompt truyen.txt --images 30 --videos 4
 ```
 
-Có thể chỉ override 1 cái (cái kia auto-compute từ cái còn lại).
+Có thể chỉ override 1 cái; cái còn lại vẫn dùng auto default từ wordcount/công thức
+mặc định, không tự suy ra từ override kia.
 
 ### `--music N` — Số loop nhạc nền
 
@@ -187,6 +190,24 @@ Resume cache bỏ qua bước đã có file. Muốn re-gen toàn bộ:
 
 Xoá `.work/qa-chapter-*.md`, `.work/scene-*.md`, `.work/music-*.md` trước khi
 vào các loop. Bible không bị xoá.
+
+### `--epic` — Bơm scale hoành tráng
+
+```
+/visual-prompt truyen.txt --epic
+```
+
+Nâng mục tiêu hành động/đại cảnh lên một nấc (band content-aware bump một bậc),
+ưu tiên wide establishing + nhóm đông + scale lớn. **Vẫn KHÔNG bịa combat/đại
+quân** không có trong truyện — chỉ khuếch đại cảnh có thật. Dùng khi truyện thực
+sự hợp với quy mô lớn.
+
+> **Đa dạng cảnh theo nội dung (v0.5).** Pipeline tự đo "mật độ hành động" của
+> truyện (quét từ khoá combat) rồi đặt tỉ lệ cảnh thực tế: truyện thiên về đối
+> thoại → ít cảnh combat, lấy đa dạng từ góc máy/khung hình/nhóm nhân vật/chi
+> tiết vật phẩm/hồi tưởng thay vì bịa trận đánh. Hai cổng tự động (plan gate +
+> depth gate) loại cảnh trùng lặp liền kề, synopsis vụn, và block prompt nông
+> (thiếu header / sai độ dài / video >3800 ký tự) rồi tự regen có giới hạn.
 
 ---
 
@@ -213,7 +234,7 @@ python tts_cli.py /path/to/truyen_qa.txt \
 `--mp3` xuất thêm file MP3 sẵn sàng cho YouTube. Bỏ `--voice` để dùng giọng mặc
 định của engine; xem danh sách giọng trong TTS_Local.
 
-### Gemini Imagen (image)
+### Công cụ tạo ảnh
 
 1. Mở https://gemini.google.com → New chat → chọn model có image gen
 2. Mở `truyen_image_prompts.txt`
@@ -244,12 +265,12 @@ Tương tự Gemini. Qwen chấp prompt CN/EN mixed, không cần dịch lại.
 
 Tương tự Veo3. Nếu prompt > 600 từ → trim phần Context.
 
-### Lyria 3 — nhạc nền từ `_music_prompts.txt` (Gemini app)
+### Lyria 3 — nhạc nền từ `_music_prompts.txt` (Lyria app)
 
 File `<truyen>_music_prompts.txt` chứa N khối, mỗi khối là 1 prompt nhạc nền
 instrumental cho 1 vùng cảm xúc của truyện.
 
-1. Mở Gemini app → chọn Lyria 3 (music generation)
+1. Mở Lyria app → chọn Lyria 3 (music generation)
 2. Mở `truyen_music_prompts.txt`
 3. Copy 1 khối giữa 2 dòng `--- LOOP i / N — Chương X-Y — mood: ... ---`
    (chỉ copy phần prompt tiếng Anh + dòng Negative + dòng Loop, KHÔNG copy dòng
@@ -278,11 +299,12 @@ regen loop nhạc nếu ranh giới vùng đổi. Muốn gen sạch → dùng `-
 
 | Audio length | Wordcount | Images | Videos | Cadence |
 |---|---|---|---|---|
-| 1 giờ | ~9k từ | ~45 | ~6 | 1 visual / 60–80s |
-| 2 giờ | ~18k từ | ~90 | ~13 | 1 visual / 60–80s |
+| 1 giờ | ~9k từ | ~120 | ~20 | 1 prompt / ~30s audio slot |
+| 2 giờ | ~18k từ | ~150 | ~25 | 1 prompt / ~45–50s audio slot |
 
-**Lý do:** YouTube algorithm phạt frame static >8s. Cắt visual mỗi 6–8s giữ
-retention cao. Chi tiết: [references/youtube-pacing-guide.md](references/youtube-pacing-guide.md).
+**Lý do:** output nhiều hơn giúp tránh video audio quá tĩnh; editor vẫn có thể
+chọn lọc hoặc dùng `--images` / `--videos` để chạy nhanh. Chi tiết:
+[references/youtube-pacing-guide.md](references/youtube-pacing-guide.md).
 
 ---
 
@@ -367,7 +389,8 @@ A: Sửa `references/genre-keywords.md` thêm 1 section, sửa
 `prompts/genre-detector.md` thêm vào allowlist.
 
 **Q: Veo3 truncate video clip của tôi.**
-A: Check prompt body ≤800 từ + ≤3 beats + tổng ≤8.0s. Hard cap của Veo3.
+A: Check prompt body ≤900 từ + ≤3 beats + tổng ≤8.0s. Hard cap của skill là 900,
+nhưng nếu tool cụ thể vẫn truncate thì trim `Context` trước.
 
 **Q: Có thiếu FAQ — báo ở đâu?**
 A: Open issue tại GitHub repo (link trong README.md).

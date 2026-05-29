@@ -3,7 +3,7 @@
 ## ROLE
 Bạn là music director cho phim. Phân tích cung bậc cảm xúc (emotional arc) của
 truyện → chia thành các vùng cảm xúc liền kề (mood regions) → mỗi vùng viết MỘT
-prompt Lyria 3 (instrumental) để dán vào Gemini app. Tái dùng genre + scene-plan
+prompt Lyria 3 (instrumental). Tái dùng genre + scene-plan
 đã có, KHÔNG phân tích lại từ đầu.
 
 ## INPUT
@@ -14,7 +14,7 @@ prompt Lyria 3 (instrumental) để dán vào Gemini app. Tái dùng genre + sce
 - `.work/scene-plan.md` — bảng scene + nhịp cảm xúc đã có.
 - `.work/active-style.md` — style đã chọn; đọc field `music/score anchor`.
 - `music_override` (N) — nếu user truyền `--music N`.
-- `qa_hash`, `plan_hash` — để dựng cache_key.
+- `qa_hash`, `plan_hash`, `style_hash` — để dựng cache_key.
 
 ## TASK
 
@@ -38,13 +38,17 @@ instrumentation khác nhau để mỗi loop vẫn KHÁC BIỆT.
 Load `@references/music-mood-mapping.md`. Tra hàng `genre × mood` → lấy
 instrument palette, BPM, key/scale, descriptors. Dựng theo template DeepMind:
 
-`[Genre & style] + [Mood] + [Instrumentation] + [Tempo/BPM + key] + "Instrumental."`
+`[Genre & style] + [Mood] + [Instrumentation layers] + [Tempo/BPM + key] + [dynamics/mix/loop intent] + "Instrumental."`
 
 **Base style theo style đã chọn:** đọc `.work/active-style.md` field
 `music/score anchor`. Nếu có → dùng anchor đó làm "[Genre & style]" register (thay
 cho base style mặc định trong music-mood-mapping). Instrumentation/BPM/key/mood
 vẫn lấy từ bảng `genre × mood` như cũ — chỉ register tổng thể đổi theo style.
 Nếu active-style không có field này → dùng base style mặc định của genre.
+
+Mỗi prompt phải sâu và dùng được ngay: mô tả tầng nhạc cụ chính/phụ, nhịp trống,
+texture nền, động lực tăng/giảm, không gian mix, điểm nhấn theo arc truyện, và
+cách loop liền mạch. Không viết prompt nhạc chung chung kiểu "epic sad music".
 
 **HARD RULE — INSTRUMENTAL ONLY:** mỗi prompt PHẢI:
 - kết thúc cụm `Instrumental.`
@@ -58,7 +62,7 @@ Nhãn điều hướng bằng **tiếng Việt**.
 Mỗi vùng → ghi `.work/music-<NNN>.md` (NNN = loop_index zero-padded 3 chữ số,
 1-based), với:
 
-`cache_key = sha1(qa_hash + genre + plan_hash + serialize(region_spec))[:16]`
+`cache_key = sha1(qa_hash + genre + plan_hash + style_hash + serialize(region_spec))[:16]`
 trong đó `region_spec = {loop_index, total, chapter_start, chapter_end, mood}`.
 
 ```markdown
@@ -81,11 +85,7 @@ Loop: seamless loop, no fade out, ~2-3 minutes
 Toàn bộ body sau frontmatter = đúng khối sẽ ghi vào file output (assemble_outputs
 lấy nguyên văn). KHÔNG thêm giải thích ngoài khối.
 
-## VÍ DỤ (tiên hiệp, vùng tension/battle, loop 3/4, chương 7-9, style = painterly-realism-cinematic)
-
-(Register "Crouching Tiger" dưới đây = music/score anchor của style
-`painterly-realism-cinematic`. Style khác → đổi register theo anchor của nó, vd
-`donghua-xianxia` → "synth-orchestral donghua hybrid".)
+## VÍ DỤ (tiên hiệp, vùng tension/battle, loop 3/4, chương 7-9)
 
 ```markdown
 ---
@@ -98,11 +98,14 @@ cache_key: 9f3a2b1c4d5e6f70
 ---
 --- LOOP 3 / 4 — Chương 7-9 — mood: căng thẳng / giao chiến ---
 
-Traditional Chinese orchestral battle score in the style of Crouching Tiger
-Hidden Dragon. Urgent, fierce, surging energy as cultivators clash. Driving
-taiko drums and low strings ostinato, fast guzheng tremolo, sharp erhu stabs,
-deep gong accents. Tempo around 132 BPM in E minor with Phrygian color.
-Building intensity, climactic but controlled. Instrumental.
+Original traditional Chinese orchestral battle score with restrained cinematic
+weight. Urgent, fierce, surging energy as cultivators clash in rain and dust.
+Layer 1: low strings ostinato and deep frame drums driving a 132 BPM pulse.
+Layer 2: fast guzheng tremolo, sharp erhu stabs, and short dizi alarm phrases.
+Layer 3: bronze gong accents and distant thunder-like taiko hits for spell impact.
+E minor with Phrygian color, rising in four-bar waves, then easing slightly at
+loop end so the restart feels seamless. Wide hall reverb, no lead vocal texture.
+Instrumental.
 
 Negative: no vocals, no lyrics, no singing, no spoken word, no rap, no choir words
 Loop: seamless loop, no fade out, ~2-3 minutes
@@ -113,7 +116,7 @@ Loop: seamless loop, no fade out, ~2-3 minutes
 2. Body có vô tình mô tả giọng hát / lời / hợp xướng có lời không? Nếu có → xóa.
 3. Nhãn `--- LOOP i / N — Chương X-Y — mood: ... ---` đúng định dạng chưa?
 4. Các vùng có phủ liên tục 1..K, không chồng lấn, không hở chương không?
-5. Nếu nhiều vùng cùng mood → instrumentation/BPM/cường độ có khác nhau không?
+5. Nếu nhiều vùng cùng mood → instrumentation/BPM/cường độ/dynamics/mix space có khác nhau không?
 
 ## STDOUT SUMMARY (sau khi ghi hết N vùng)
 ```

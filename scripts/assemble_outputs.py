@@ -35,6 +35,69 @@ _VIDEO_RE = re.compile(
 )
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
 
+# --- Depth-gate config -------------------------------------------------------
+# Google Flow / Veo3 hard-reject video prompts over 4000 chars; 3800 leaves margin
+# for counting drift. This is the binding limit (replaces the old 900-word cap).
+VIDEO_CHAR_CAP = 3800
+IMAGE_WORD_MIN = 350
+IMAGE_WORD_MAX = 650
+# Layers 1+3+4 of the negative list are always-include = 19 items; floor 20 catches
+# truncation without false positives (cap stays 28).
+NEGATIVE_MIN = 20
+
+_IMAGE_HEADERS = ['Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
+                  'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative']
+_VIDEO_HEADERS = ['Cinematography', 'Subject', 'Action', 'Context', 'Style & Ambiance']
+_TIMESTAMP_RE = re.compile(r'\[\d{2}:\d{2}')
+_NEGATIVE_SECTION_RE = re.compile(r'(?ims)^Negative\s*:\s*(.*?)\Z')
+
+
+def _missing_headers(block: str, headers: list[str]) -> list[str]:
+    missing = []
+    for h in headers:
+        if not re.search(r'(?im)^\s*' + re.escape(h) + r'\s*:', block):
+            missing.append(h)
+    return missing
+
+
+def _body_word_count(block: str, headers: list[str]) -> int:
+    """Body words excluding the section labels (matches the expander self-check)."""
+    stripped = re.sub(
+        r'(?im)^\s*(' + '|'.join(re.escape(h) for h in headers) + r')\s*:',
+        '', block,
+    )
+    return len(stripped.split())
+
+
+def check_image(block: str) -> list[str]:
+    problems: list[str] = []
+    missing = _missing_headers(block, _IMAGE_HEADERS)
+    if missing:
+        problems.append(f"missing image header(s): {', '.join(missing)}")
+    wc = _body_word_count(block, _IMAGE_HEADERS)
+    if wc < IMAGE_WORD_MIN:
+        problems.append(f"image body too short: {wc} words (<{IMAGE_WORD_MIN})")
+    elif wc > IMAGE_WORD_MAX:
+        problems.append(f"image body too long: {wc} words (>{IMAGE_WORD_MAX})")
+    m = _NEGATIVE_SECTION_RE.search(block)
+    neg_count = len([x for x in m.group(1).split(',') if x.strip()]) if m else 0
+    if neg_count < NEGATIVE_MIN:
+        problems.append(f"negative list too thin: {neg_count} items (<{NEGATIVE_MIN})")
+    return problems
+
+
+def check_video(block: str) -> list[str]:
+    problems: list[str] = []
+    missing = _missing_headers(block, _VIDEO_HEADERS)
+    if missing:
+        problems.append(f"missing video header(s): {', '.join(missing)}")
+    beats = len(_TIMESTAMP_RE.findall(block))
+    if beats < 2 or beats > 3:
+        problems.append(f"video beat count out of range: {beats} (need 2-3)")
+    if len(block) > VIDEO_CHAR_CAP:
+        problems.append(f"video prompt too long: {len(block)} chars (>{VIDEO_CHAR_CAP})")
+    return problems
+
 
 def _scene_num(path: Path) -> int:
     m = _SCENE_NUM_RE.search(path.name)
@@ -86,6 +149,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     image_blocks: list[tuple[int, str]] = []
     video_blocks: list[tuple[int, str]] = []
     warnings: list[str] = []
+    violations: list[dict] = []
 
     for sp in scenes_paths:
         sc = parse_scene(sp)
@@ -93,8 +157,12 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
             warnings.append(f"scene-{sc['scene_id']:03d}.md missing '## Image Prompt' block — skipped")
             continue
         image_blocks.append((sc['scene_id'], sc['image']))
+        for detail in check_image(sc['image']):
+            violations.append({'scene_id': sc['scene_id'], 'kind': 'image', 'detail': detail})
         if sc['video']:
             video_blocks.append((sc['scene_id'], sc['video']))
+            for detail in check_video(sc['video']):
+                violations.append({'scene_id': sc['scene_id'], 'kind': 'video', 'detail': detail})
 
     def _join(blocks: list[tuple[int, str]]) -> str:
         parts = []
@@ -133,6 +201,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
         'music_count': len(music_blocks),
         'music_path': str(music_path) if music_path else None,
         'warnings': warnings,
+        'violations': violations,
     }
 
 

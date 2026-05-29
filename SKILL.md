@@ -1,14 +1,14 @@
 ---
 name: visual-prompt
-version: 0.3.0
-description: Generate styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos
+version: 0.5.0
+description: Generate deep, copyright-safe, styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
 license: MIT
 contextFileName: SKILL.md
 ---
 
 # Visual Prompt Skill
 
-LLM-driven workflow that reads a Vietnamese xianxia/wuxia novel file
+Antigravity/Agy CLI LLM-driven workflow that reads a Vietnamese xianxia/wuxia novel file
 (.txt / .md / .docx, 2k–18k words, suitable for a 1–2h audio video). The skill
 self-QAs the text first (no pre-proofread required), then emits four
 paste-ready files:
@@ -16,10 +16,10 @@ paste-ready files:
 - `<input>_qa.txt` — proofread, TTS-ready source of truth (residual Chinese/
   English removed, grammar fixed, long sentences split). Feed straight into
   TTS_Local (VieNeu / VietVoice).
-- `<input>_image_prompts.txt` — hybrid 200–300 word sectioned image prompts
-  (Camera / Setting / Subject / Style / Lighting / Negative) for Gemini, Qwen,
-  ChatGPT, etc.
-- `<input>_video_prompts.txt` — Google Veo3 5-part formula video prompts
+- `<input>_image_prompts.txt` — deep 350–550 word sectioned image prompts
+  (Camera / Story DNA / Setting / Composition / Subject / Action-Energy /
+  Style / Lighting-Color / Atmosphere / Negative).
+- `<input>_video_prompts.txt` — deep Veo3 5-part formula video prompts
   (Cinematography → Subject → Action `[00:00–00:02.5]` → Context →
   Style & Ambiance, audio embedded as scene layer).
 - `<input>_music_prompts.txt` — instrumental Lyria 3 music prompts, one per
@@ -27,8 +27,20 @@ paste-ready files:
 
 ## Philosophy
 
-- **LLM is the loop driver.** Gemini Ultra reads input, plans scenes, writes
-  prompts. Python only handles I/O the model can't do safely.
+- **Agy model is the loop driver.** The active Antigravity/Agy model reads input,
+  plans scenes, writes prompts, and runs self-checks. Python only handles I/O the
+  model can't do safely.
+- **Deep prompt quality is mandatory.** Image/video/music prompts must include
+  layered story DNA, character/prop locks, map-scale environment, foreground/
+  midground/background composition, lighting/palette, action/energy/audio, and
+  negative/safety rules. Shallow prompts are invalid.
+- **Content-aware diversity.** Scene-mix targets follow the story's measured action
+  density (combat-vocab scan): talky stories get a low action band and draw variety
+  from camera/scale/group/insert/flashback — never from fabricated combat. Combat
+  vocab stays available for stories that genuinely have it. `--epic` amplifies real
+  scale on demand without inventing battles.
+- **Original outputs only.** Do not copy web images, famous faces, celebrity
+  likenesses, known-character faces, or exact IP/artist styles.
 - **QA-first.** A proofread gate runs before everything else and produces the
   single QA'd source of truth that all downstream steps (bible, genre, scenes,
   music) consume. The skill no longer assumes pre-proofread input.
@@ -57,10 +69,15 @@ paste-ready files:
    `style_hash` into the scene cache key. Genre and style are decoupled — any of
    the 18 styles works for any genre.
 6. **Scene count** — `python3 scripts/calc_scene_count.py` →
-   default `images = round(wc/200)`, `videos = round(images/7)`; CLI overrides.
+   default `images = clamp(round(wc/120), 120, 150)`, `videos = max(20, round(images/6))`;
+   CLI overrides are honored exactly.
 7. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
    `.work/scene-NNN.md` files, using the chosen style for Style + negatives.
-   Resume-safe via SHA1 cache (busts when style changes).
+   Resume-safe via SHA1 cache (busts when style changes). Two deterministic gates
+   guard quality: a **plan gate** (`validate_scene_plan.py`) rejects adjacent
+   near-duplicate scenes + fragment synopses (bounded revise loop), and a **depth
+   gate** at assembly rejects shallow blocks (missing headers, word count out of
+   range, thin negatives, video over 3800 chars) and regenerates them (bounded).
 8. **Music prompts** — LLM segments the emotional arc into N mood regions
    (default 4, clamp [3,5]; `--music N` honored verbatim) → one instrumental
    Lyria prompt per region in `.work/music-NNN.md`. Score register follows the
@@ -72,13 +89,17 @@ paste-ready files:
 
 ```
 /visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
-                            [--images N] [--videos M] [--music N] [--force-redo]
+                            [--images N] [--videos M] [--music N] [--epic] [--force-redo]
 ```
 
 `--style <id>` picks an art style up-front (skips the interactive recommend step);
 ids are in `references/style-catalog.md`. Omit it to get a recommendation and
 choose interactively. `--music N` sets the exact number of music loops (honored
 verbatim, no clamp); omit it for adaptive segmentation (default 4, clamped to [3,5]).
+`--epic` amplifies scale — bumps the recommended scene-mix action band one notch
+and favors wide spectacle — but still never fabricates combat/armies the story
+does not contain (it amplifies real beats only). Best for stories that genuinely
+support grand scale.
 
 ## Input Spec
 
@@ -130,7 +151,7 @@ visual-prompt/
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
 ├── references/               ← 9 static knowledge files (incl. music-mood-mapping, style-catalog, genre-style-recommendation)
-└── scripts/                  ← 6 Python I/O helpers (incl. assemble_qa)
+└── scripts/                  ← 7 Python I/O helpers (incl. assemble_qa, validate_scene_plan)
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.

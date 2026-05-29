@@ -1,8 +1,15 @@
-description = "Generate styleable image + video prompts (18-style catalog) from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
+description = "Generate deep, styleable image + video prompts (18-style catalog) from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
 prompt = """
-Bạn là active Gemini Ultra agent thực thi pipeline visual-prompt v0.1.
+Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.5.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
+
+Chất lượng bắt buộc: mọi image/video/music prompt phải sâu, giàu chi tiết, có
+story DNA, character/prop locks, foreground-midground-background, map scale,
+lighting/palette, action/energy/audio, và negative/safety rõ. Không sinh prompt
+qua loa kiểu "wide shot, cinematic, beautiful". Không copy ảnh trên mạng, không
+copy mặt người nổi tiếng/nhân vật nổi tiếng, không yêu cầu bắt chước y hệt IP,
+phim, game, anime, studio, hoặc living artist.
 
 Input args: {{args}}
 
@@ -19,12 +26,13 @@ Args là 1 string. Parse như sau (regex Python):
 5. `--music (\\d+)`                      → music_override (optional, int; honored verbatim)
 6. `--style ([a-z0-9-]+)`                → style_override (kebab-case id, optional)
 7. `--force-redo`                        → force_redo = true (flag)
-8. Sau khi strip flags → còn lại là input_path (positional, required).
+8. `--epic`                              → epic = true (flag)
+9. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Validate:
 - input_path tồn tại (Path.exists()).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo, --epic`
 
 Echo lại cho user:
 ```
@@ -37,7 +45,12 @@ Echo lại cho user:
   music      = <N | (auto, default 4 trong [3,5])>
   style      = <id | (recommend sau genre detect)>
   force_redo = <true | false>
+  epic       = <true | false>
 ```
+
+(`--epic` bơm scale: bump `recommended_mix` band một nấc + ưu tiên spectacle rộng
+ở planner/expander, NHƯNG vẫn giữ no-fabrication — chỉ amplify cảnh có thật, không
+bịa combat/đại quân.)
 
 ---
 
@@ -137,7 +150,7 @@ Chọn art style cho cả run. Genre và style tách rời — mọi style trong
 
 **Else (no flag):**
 - Load `@prompts/style-recommender.md` với `genre` đã detect → in recommend #1 +
-  2-3 alternatives + cảnh báo anchor (nếu style accent/video).
+  2-3 alternatives + cảnh báo consistency (nếu style accent/video).
 - HỎI user: Enter = #1, hoặc gõ một id khác. Validate id ∈ catalog (sai → in lỗi
   + hỏi lại). `chosen_style` = kết quả.
 - **FALLBACK (headless / không nhận được câu trả lời tương tác):**
@@ -161,12 +174,21 @@ Chọn art style cho cả run. Genre và style tách rời — mọi style trong
 python3 scripts/calc_scene_count.py \\
     --input "<input_path>" \\
     --chapters-json .work/chapters_qa.json \\
-    [--images <N>] [--videos <M>]
+    [--images <N>] [--videos <M>] [--epic]
 ```
 
-Parse stdout JSON → lưu `images_n`, `videos_m`.
+(Thêm `--epic` vào lệnh nếu `epic` flag set ở STEP 0.)
 
-Print: `Sẽ tạo: <images_n> ảnh + <videos_m> video clip.`
+Parse stdout JSON → lưu `images_n`, `videos_m`, `action_density`, `recommended_mix`.
+
+Default auto path tạo khoảng 120–150 image prompts và tối thiểu 20 video prompts.
+Nếu user truyền `--images` hoặc `--videos`, tôn trọng override đúng số đó.
+
+`action_density` (low/medium/high) đo bằng combat-vocab scan — quyết định
+`recommended_mix` band. Truyện ít hành động → action band thấp, KHÔNG ép quota
+combat. Band này được truyền vào scene-planner ở STEP 5.
+
+Print: `Sẽ tạo: <images_n> ảnh + <videos_m> video clip. (action_density: <density>)`
 
 ---
 
@@ -179,11 +201,41 @@ Nếu `.work/scene-plan.md` tồn tại VÀ KHÔNG có `--force-redo`:
   → tiếp tục.
 
 Load `@prompts/scene-planner.md` + execute → write `.work/scene-plan.md`.
+Truyền vào context của planner: `images_n`, `videos_m`, `action_density`,
+`recommended_mix` (từ STEP 4), và `epic` (true nếu flag set — planner dùng band
+đã bump + ưu tiên spectacle, nhưng KHÔNG fabricate combat).
 
 Compute `plan_hash = sha1(file_bytes(scene-plan.md))[:12]` → ghi vào
 `.work/plan.hash`.
 
 Print: `Scene plan: <N> scenes, <M> flagged for video.`
+
+---
+
+## STEP 5.5 — PLAN VARIATION GATE (deterministic backstop)
+
+Chạy sau khi scene-plan ghi xong. Bắt monotony (adjacent-duplicate) + synopsis
+fragment để không lọt im lặng xuống expander.
+
+```bash
+python3 scripts/validate_scene_plan.py --plan .work/scene-plan.md
+```
+
+Parse stdout JSON `{total, violations, ok}`. Exit 0 = ok, 2 = có violations,
+1 = IO error (in lỗi rồi proceed).
+
+**Bounded revise loop (tối đa 2 lần):**
+- Nếu `ok: true` → proceed STEP 6.
+- Nếu có violations VÀ còn lượt retry:
+  - Gom `scene_ids` bị flag. Load `@prompts/scene-planner.md` và yêu cầu CHỈ
+    sửa các row bị flag (revise-flagged contract): đổi scene_tag / nhân vật focus
+    cho `adjacent_duplicate`; viết lại synopsis thành 1 câu mạch lạc cho
+    `fragment_synopsis`. Ghi đè scene-plan.md, recompute `plan_hash`.
+  - Chạy lại validator.
+- Sau 2 lượt mà vẫn còn violations → WARN liệt kê violations còn lại, KHÔNG
+  hard-block, proceed STEP 6.
+
+Print: `Plan gate: <ok | N violations sau <r> revise>`.
 
 ---
 
@@ -243,20 +295,22 @@ Nếu `--force-redo`: `rm -f .work/music-*.md` TRƯỚC khi vào loop.
 
 Load `@prompts/music-prompt-builder.md` để LLM phân vùng arc thành N vùng cảm
 xúc liền kề (mỗi vùng = dải `Chương X-Y`, phủ hết 1..K, không chồng lấn), dùng
-`genre`, `.work/scene-plan.md`, `.work/chapters_qa.json`, `qa_hash`, `plan_hash`.
+`genre`, `.work/scene-plan.md`, `.work/chapters_qa.json`, `.work/active-style.md`,
+`qa_hash`, `plan_hash`, `style_hash`.
 
 For mỗi vùng region (loop_index 1..N):
 
   music_path = `.work/music-<NNN>.md` (NNN = zero-padded loop_index)
 
   expected_cache_key = sha1(
-      qa_hash + genre + plan_hash + serialize(region_spec)
+      qa_hash + genre + plan_hash + style_hash + serialize(region_spec)
   )[:16]
   (region_spec = {loop_index, total, chapter_start, chapter_end, mood})
 
   a. Nếu music_path tồn tại VÀ KHÔNG `--force-redo`:
      - Đọc frontmatter `cache_key`. Match → skip ("music NNN: cached").
-     - Mismatch → WARN "music NNN stale — regenerating"; xóa, regenerate.
+     - Mismatch → WARN "music NNN stale (input/plan/style changed) — regenerating";
+       xóa, regenerate.
 
   b. Execute music-prompt-builder cho vùng này → write music_path với
      frontmatter `{loop_index, total, chapter_start, chapter_end, mood, cache_key}`
@@ -269,13 +323,28 @@ For mỗi vùng region (loop_index 1..N):
 
 ---
 
-## STEP 7 — ASSEMBLE OUTPUTS
+## STEP 7 — ASSEMBLE + DEPTH GATE (assemble → validate → bounded regen)
 
 ```bash
 python3 scripts/assemble_outputs.py --input "<input_path>"
 ```
 
-Parse stdout JSON cho summary.
+Parse stdout JSON. Ngoài summary, đọc `violations: [{scene_id, kind, detail}]`.
+Mỗi violation = block nông: thiếu header / sai word-count / negative < 20 (image)
+hoặc thiếu header / sai beat count / >3800 chars (video). assemble VẪN ghi `.txt`
+(nên run cuối cùng luôn dùng được) — nhưng cố làm sạch violations trước.
+
+**Bounded regen loop (tối đa 2 lần):**
+- Nếu `violations` rỗng → proceed POST-RUN SUMMARY.
+- Nếu có violations VÀ còn lượt retry:
+  - Với mỗi `scene_id` bị flag: `rm -f .work/scene-<NNN>.md`, chạy lại STEP 6
+    expander cho scene đó (image; thêm video nếu scene có video hoặc bị flag
+    `kind: video`), tôn trọng self-check sâu + char cap 3800.
+  - Chạy lại `assemble_outputs.py`, đọc lại `violations`.
+- Sau 2 lượt mà vẫn còn violations → WARN liệt kê violations còn lại, giữ output
+  tốt nhất, proceed (KHÔNG vòng lặp vô hạn, KHÔNG crash).
+
+Print: `Depth gate: <clean | N violations sau <r> regen>`.
 
 ---
 
@@ -302,10 +371,10 @@ Warnings:
 Bước tiếp:
   1. Đưa `<stem>_qa.txt` vào TTS_Local để tạo giọng đọc
      (VieNeu hoặc VietVoice). Xem HUONG-DAN-SU-DUNG.md §TTS.
-  2. Mở Gemini/Qwen/ChatGPT → paste từng block `--- SCENE NNN ---` từ
+  2. Mở công cụ tạo ảnh → paste từng block `--- SCENE NNN ---` từ
      file ảnh để generate hình.
   3. Mở Veo3/Seedance → paste từng block từ file video để generate clip.
-  4. Mở Lyria 3 (Gemini app) → paste từng block `--- LOOP i / N ---` từ
+  4. Mở Lyria 3 → paste từng block `--- LOOP i / N ---` từ
      file nhạc để tạo nhạc nền instrumental. Xem HUONG-DAN-SU-DUNG.md §Lyria.
   5. Xem chi tiết: HUONG-DAN-SU-DUNG.md §6 (Cách paste vào AI tools).
 ```

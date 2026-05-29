@@ -21,6 +21,11 @@ the image/video models understand. Use these to translate scene tags
 | linh thạch | glowing crystal stones, faint pulsing light, embedded in jade trays |
 | pháp bảo | floating ancient artifact, runic inscriptions, soft golden glow |
 | phi kiếm | airborne flying sword, trailing silver streak, ribbon of qi |
+| trận pháp | circular daoist formation, luminous talisman geometry, rotating seal marks |
+| đấu pháp | two cultivators trading spell arcs, colliding qi shields, debris shockwave |
+| pháp thuật | visible spell geometry, glowing hand seals, elemental qi ribbons |
+| linh thú | mythic spiritual beast with Chinese features, jade scales, antlered silhouette |
+| đệ tử | rows of sect disciples in matching robes, ranked formation, banners |
 | nguyên anh | tiny translucent humanoid soul inside dantian, blue-white glow |
 | tông môn | mountain-top sect compound, terraced halls, red wood pillars, tile roofs |
 | thiên kiếp | lightning storm, sky cracked open, purple-black clouds, descending bolt |
@@ -41,6 +46,10 @@ the image/video models understand. Use these to translate scene tags
 | thần khí | divine weapon, golden filigree, ancient inscriptions, halo aura |
 | huyết mạch | bloodline awakening, eyes shifting color, body glowing |
 | đại lục | vast continent map, mountain ranges, hand-painted ink style |
+| quân đoàn | massed fantasy army, flags, dust columns, cavalry silhouettes |
+| chiến trường | wide battlefield, broken banners, smoke, cratered earth, wounded soldiers |
+| bí cảnh | vast secret realm, floating islands, ancient gates, impossible scale |
+| cự thú | colossal beast silhouette, mountain-scale body, dust and birds scattering |
 | thượng cổ | primordial era ruins, weathered stone gates, overgrown jade temples |
 | thần ma | godlike entity, towering silhouette, robes flowing in cosmic wind |
 
@@ -74,6 +83,8 @@ Genre note: modern dress, NOT xianxia robes unless flashback.
 | công chúa | princess, layered silk robes, elaborate hair ornaments, jade circlet |
 | tướng quân | general, lamellar armor (NOT European plate), horse-tail helmet, sword |
 | chiến trận | battlefield, banners, formations of soldiers, dust clouds, no magic |
+| công thành | siege ladders, city walls, drums, flags, smoke columns, crowded ramparts |
+| đại quân | massed soldiers in lamellar armor, spear ranks, command banners |
 | thi thư | scholar's study, scrolls, ink stones, calligraphy brushes, lantern light |
 | cổ trang | period costume Tang/Song/Ming, silk and brocade, traditional cuts |
 
@@ -89,6 +100,9 @@ Genre note: modern dress, NOT xianxia robes unless flashback.
 | khinh công | airborne leap, robes flowing, defying gravity briefly (no flight) |
 | nội công | internal energy strike, faint shimmer around fist or palm |
 | đao kiếm | jian (straight sword) OR dao (curved saber), lacquered sheath, silk tassel |
+| quyết đấu | choreographed duel, blade parry, sleeve motion, footwork over tiles |
+| quần chiến | multi-person melee, crossed blades, tables breaking, dust and cloth motion |
+| ám khí | hidden darts, sleeve flick, metallic glint, sudden evasive movement |
 | khách điếm | rural Chinese inn, wooden tables, paper lanterns, traveling guests |
 | trúc lâm | bamboo forest, dappled green light, mist between stalks |
 | tửu lâu | two-story wooden tavern, balcony, hanging lanterns |

@@ -2,12 +2,12 @@
 
 > Related: [[visual-prompt-template]] · [[genre-keywords]] · [[style-catalog]]
 
-Four-layer negative prompt construction. Append all four layers to the
+Five-layer negative prompt construction. Append all five layers to the
 `Negative:` section of every image prompt. For Veo3 videos: embed inline in
 Style & Ambiance ("avoiding X, X, X") since Veo3 ignores standalone negative
 sections.
 
-**Max 24 items total** across all 4 layers (token budget): 10 + 5 + 5 + 4.
+**Max 28 items total** across all 5 layers (token budget): 10 + 5 + 5 + 4 + 4.
 
 ---
 
@@ -59,7 +59,20 @@ no logo, no watermark, no text overlay, no distorted hands, no extra fingers
 
 ---
 
-## Layer 4 — Style Negatives (from active style, 4 items)
+## Layer 4 — Likeness / Copyright Safety (always include, 4 items)
+
+```
+no copied web image, no celebrity face, no known-character likeness,
+no exact branded costume
+```
+
+These items prevent the model from cloning a public figure, internet image, or
+recognizable copyrighted character design. Use original faces from the character
+bible and original costumes from the story context.
+
+---
+
+## Layer 5 — Style Negatives (from active style, 4 items)
 
 Take the first **4** items from the `style negatives` field of the chosen style
 entry in `.work/active-style.md` (materialized from [[style-catalog]]). These
@@ -83,10 +96,11 @@ no blonde hair as default, no blue eyes as default, no Renaissance fair
 costume, no fur cloaks, no Viking horns, no celtic knotwork, no crusader
 cross, no jeans, no sneakers, no glasses, no neon lighting, no automatic
 firearms, no logo, no watermark, no text overlay, no distorted hands,
-no extra fingers, no live-action photographic skin, no muted live-action
-desaturation, no Western 3D cartoon proportions, no claymation
+no extra fingers, no copied web image, no celebrity face, no known-character
+likeness, no exact branded costume, no live-action photographic skin,
+no muted live-action desaturation, no Western 3D cartoon proportions, no claymation
 ```
 
-Exactly 24 items (10 + 5 + 5 + 4). Comma-separated. Single line in the prompt's
-Negative section. The last 4 (Layer 4) come from `.work/active-style.md` and change
+Exactly 28 items (10 + 5 + 5 + 4 + 4). Comma-separated. Single line in the prompt's
+Negative section. The last 4 (Layer 5) come from `.work/active-style.md` and change
 with the chosen style. DALL-E paste: convert to "avoiding X, X, X" in the Style line.

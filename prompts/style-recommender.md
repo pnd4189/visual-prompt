@@ -2,7 +2,7 @@
 
 ## ROLE
 After genre is detected, recommend an art style for the whole run. Output a #1
-default + 2-3 alternatives + an anchor warning when relevant. You do NOT pick the
+default + 2-3 alternatives + a consistency warning when relevant. You do NOT pick the
 final style — STEP 3.5 in the command asks the user; you only inform that choice.
 
 ## INPUT
@@ -15,9 +15,9 @@ final style — STEP 3.5 in the command asks the user; you only inform that choi
 1. Load `@references/genre-style-recommendation.md` — find the row for `genre`.
    Its #1 is the default; its alternatives are the suggested others.
 2. Load `@references/style-catalog.md` — for each style you list, read its
-   `category`, one-line description, and `anchor consistency`.
+   `category`, one-line description, and `identity consistency`.
 3. If #1 or any listed style is `accent-title-card` or `video-oriented`, add the
-   anchor warning (see OUTPUT). The default #1 per genre is always narrative-safe,
+   consistency warning (see OUTPUT). The default #1 per genre is always narrative-safe,
    so the warning usually applies only to alternatives.
 4. Keep it short. This is a console prompt the user reads before choosing.
 
