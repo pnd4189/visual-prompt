@@ -1,0 +1,147 @@
+description = "Batch-generate images from a prompt file (auto-detect separator), then resize to 16:9 Full HD (1920×1080) using Lanczos or Real-ESRGAN"
+prompt = """
+Bạn là active Antigravity/Agy CLI model thực thi skill /make-image.
+Skill này ĐỘC LẬP HOÀN TOÀN với /visual-prompt — không share state, không import.
+
+Input args: {{args}}
+
+---
+
+## STEP 0 — PARSE ARGS (bắt buộc, chạy trước)
+
+Args là 1 string. Parse như sau:
+
+1. `--output <path>` → output_dir (BẮT BUỘC)
+2. Sau khi strip flags → còn lại là prompt_file (positional, required)
+
+Validate:
+- prompt_file tồn tại.
+- Nếu thiếu `--output` → HALT: `Lỗi: thiếu --output <dir>. Cú pháp: /make-image <file.txt> --output <dir>`
+- Nếu prompt_file không tồn tại → HALT: `Lỗi: file không tồn tại: <path>`
+
+Tạo output_dir nếu chưa có: `os.makedirs(output_dir, exist_ok=True)`
+
+Echo:
+```
+Đã nhận:
+  prompt_file = <path>
+  output_dir  = <path>
+```
+
+---
+
+## STEP 1 — ĐỌC & TÁCH SCENES (AUTO-DETECT SEPARATOR)
+
+Đọc prompt_file (UTF-8). Tự động nhận diện separator bằng cách scan toàn bộ file.
+
+**Thứ tự ưu tiên detect (dừng ở pattern đầu tiên match):**
+
+1. Dòng bắt đầu và kết thúc bằng 3+ dấu gạch ngang, chứa từ SCENE ở giữa (có hoặc không có số) — ví dụ: `--- SCENE ---`, `--- SCENE 001 ---`, `--- SCENE 42 ---`
+2. Dòng bắt đầu và kết thúc bằng 3+ dấu bằng — ví dụ: `=== SCENE ===`, `==========`
+3. Heading markdown chứa từ Scene kèm số — ví dụ: `## Scene 1`, `# Scene 01`, `### Scene 42`
+4. Dòng bắt đầu và kết thúc bằng 3+ dấu gạch ngang, chứa từ PROMPT ở giữa — ví dụ: `--- PROMPT ---`, `--- PROMPT 1 ---`
+5. Dòng bắt đầu và kết thúc bằng 3+ dấu gạch ngang, chứa từ IMAGE ở giữa — ví dụ: `--- IMAGE ---`, `--- IMAGE 5 ---`
+6. Dòng chỉ chứa 3+ dấu gạch ngang (horizontal rule) — ví dụ: `---`, `-----`
+7. Hai hoặc nhiều dòng trống liên tiếp — fallback cuối cùng
+
+**Logic:**
+- Scan toàn bộ file, tìm pattern nào xuất hiện >= 2 lần, dùng pattern đó làm separator.
+- Split file theo separator đã detect. Bỏ qua block rỗng (chỉ whitespace).
+- Nếu KHÔNG detect được pattern nào, WARN rồi thử split bằng 2 dòng trống (pattern 7).
+- Nếu sau split chỉ có 1 block (không có separator), coi toàn bộ file là 1 scene duy nhất.
+
+Print:
+```
+Đã detect separator: <mô tả pattern, VD: "--- SCENE NNN ---" hoặc "dòng trống kép">
+Đã tách được N scenes từ file.
+```
+
+---
+
+## STEP 2 — HỎI USER CHỌN UPSCALER
+
+Dùng tool AskUserQuestion để hỏi user:
+
+```
+Chọn phương pháp resize ảnh:
+
+1. Lanczos (PIL) — Nhanh (~50ms/ảnh), chất lượng tốt, không cần cài thêm gì
+2. Real-ESRGAN — Sắc nét hơn (~3-8s/ảnh CPU), cần binary realesrgan-ncnn-vulkan
+```
+
+Ghi nhận lựa chọn → method = "lanczos" hoặc "esrgan".
+
+---
+
+## STEP 3 — GENERATE IMAGES (loop)
+
+Cho mỗi scene i (1..N):
+
+### 3a. Chuẩn bị prompt
+
+Thêm letterbox directive ĐẦU prompt:
+
+```
+A cinematic movie still. Very importantly, the image MUST have thick black
+cinematic letterboxing bars on the top and the bottom, so that the actual
+drawn image in the center forms a perfect 16:9 horizontal rectangle. Do NOT
+draw anything in the top 22% and bottom 22% of the image, leave it PURE BLACK.
+```
+
+Sau đó nối nguyên văn scene prompt của user.
+
+### 3b. Gọi generate_image
+
+Gọi tool `generate_image` với:
+- ImageName: `scene_<NNN>` (NNN = zero-padded 3 chữ số, ví dụ scene_001)
+- Prompt: prompt đã chuẩn bị ở 3a
+
+Ghi nhận artifact path trả về.
+
+### 3c. Resize & Save
+
+Chạy:
+```bash
+python3 scripts/resize_16_9.py --src "<artifact_path>" --dest "<output_dir>/scene_<NNN>.png" --method <method>
+```
+
+(scripts/ path là relative tới thư mục gốc của plugin visual-prompt.
+Nếu cần, dùng absolute path tới scripts/resize_16_9.py.)
+
+### 3d. Log
+
+Print: `Scene <i>/<N> done → scene_<NNN>.png`
+
+**Song song hóa:** Có thể gọi generate_image cho nhiều scene cùng lúc (tối đa 8
+song song), nhưng resize chạy tuần tự sau khi mỗi ảnh generate xong.
+
+**Xử lý lỗi:** Nếu generate_image fail cho 1 scene → log lỗi, tiếp tục scene kế.
+Không dừng toàn bộ batch.
+
+---
+
+## STEP 4 — SUMMARY
+
+Print:
+```
+✅ /make-image hoàn tất.
+
+Input:     <prompt_file>
+Upscaler:  <method>
+Output:    <output_dir>
+Images:    <success_count>/<N> scenes thành công
+Resolution: 1920×1080 (16:9 Full HD)
+
+<nếu có lỗi>
+⚠ Scenes bị lỗi: <danh sách scene bị fail>
+```
+
+---
+
+## LƯU Ý QUAN TRỌNG
+
+- KHÔNG import hay reference bất kỳ file nào của /visual-prompt
+- KHÔNG đọc .work/, character-bible.md, chapters.json, hay bất kỳ state nào của visual-prompt
+- Đây là skill HOÀN TOÀN ĐỘC LẬP
+- Script resize_16_9.py tự động detect letterbox, crop, resize — không hardcode tỷ lệ cắt
+"""
