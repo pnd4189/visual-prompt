@@ -26,6 +26,10 @@ from pathlib import Path
 WINDOW = 10
 CHAR_OVERLAP_THRESHOLD = 0.70
 MIN_SYNOPSIS_WORDS = 4
+# Anti-monotony diversity gates (the protagonist-spotlight failure):
+PROTAGONIST_PRESENCE_MAX = 0.70   # one character present in > this fraction of scenes
+SOLO_SCENE_MAX = 0.35             # scenes with exactly one character > this fraction
+TAG_SHARE_MAX = 0.35              # any single scene_tag > this fraction
 
 _ROW_RE = re.compile(r'^\s*\|(.+)\|\s*$')
 
@@ -115,9 +119,57 @@ def check_synopsis(rows: list[dict]) -> list[dict]:
     return violations
 
 
+def check_diversity(rows: list[dict]) -> list[dict]:
+    """Plan-wide anti-monotony: catch protagonist over-spotlight, too many solo
+    shots, and one scene_tag dominating — the failure mode where every frame is
+    the hero alone."""
+    violations: list[dict] = []
+    n = len(rows)
+    if n < 10:  # too few scenes to judge distribution meaningfully
+        return violations
+
+    # Protagonist presence: the single most-present character across all scenes.
+    presence: dict[str, int] = {}
+    for r in rows:
+        for c in r['characters']:
+            presence[c] = presence.get(c, 0) + 1
+    if presence:
+        top_char, top_count = max(presence.items(), key=lambda kv: kv[1])
+        if top_count / n > PROTAGONIST_PRESENCE_MAX:
+            violations.append({
+                'type': 'protagonist_overspotlight', 'scene_ids': [],
+                'reason': (f"'{top_char}' present in {top_count}/{n} scenes "
+                           f"({top_count/n:.0%} > {PROTAGONIST_PRESENCE_MAX:.0%}) — "
+                           f"add scenes centered on other characters / groups / environment"),
+            })
+
+    # Solo-shot ratio: scenes with exactly one character.
+    solo = sum(1 for r in rows if len(r['characters']) == 1)
+    if solo / n > SOLO_SCENE_MAX:
+        violations.append({
+            'type': 'too_many_solo', 'scene_ids': [],
+            'reason': (f"{solo}/{n} scenes are solo ({solo/n:.0%} > {SOLO_SCENE_MAX:.0%}) — "
+                       f"add multi-character / crowd / group tableaus"),
+        })
+
+    # Tag monotony: any single scene_tag dominating.
+    tags: dict[str, int] = {}
+    for r in rows:
+        tags[r['scene_tag']] = tags.get(r['scene_tag'], 0) + 1
+    if tags:
+        top_tag, top_tag_count = max(tags.items(), key=lambda kv: kv[1])
+        if top_tag_count / n > TAG_SHARE_MAX:
+            violations.append({
+                'type': 'tag_monotony', 'scene_ids': [],
+                'reason': (f"scene_tag '{top_tag}' is {top_tag_count}/{n} ({top_tag_count/n:.0%} "
+                           f"> {TAG_SHARE_MAX:.0%}) — diversify tags (establishing/group/combat-map/daoist-magic/travel)"),
+            })
+    return violations
+
+
 def validate(text: str) -> dict:
     rows = parse_plan(text)
-    violations = check_duplicates(rows) + check_synopsis(rows)
+    violations = check_duplicates(rows) + check_synopsis(rows) + check_diversity(rows)
     return {'total': len(rows), 'violations': violations, 'ok': not violations}
 
 

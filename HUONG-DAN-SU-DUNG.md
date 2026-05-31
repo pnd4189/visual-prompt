@@ -191,23 +191,30 @@ Resume cache bỏ qua bước đã có file. Muốn re-gen toàn bộ:
 Xoá `.work/qa-chapter-*.md`, `.work/scene-*.md`, `.work/music-*.md` trước khi
 vào các loop. Bible không bị xoá.
 
-### `--epic` — Bơm scale hoành tráng
+### Spectacle mặc định + `--epic` / `--faithful`
+
+> **Mặc định = spectacle (v0.6).** Đây là pipeline cho video YouTube giải trí, nên
+> mặc định dựng cảnh giàu kịch tính: phong cảnh/map rộng, đông nhân vật trong
+> khung, combat, đấu pháp, daoist magic — và ĐƯỢC PHÉP dramatize vượt nội dung
+> chương để hình đẹp mắt, miễn giữ 3 rào: đúng thể loại (xianxia vẫn xianxia),
+> đúng nhận diện nhân vật (anchor bible nguyên văn), không mâu thuẫn tình tiết đã
+> nêu. Không còn xoay quanh mỗi nhân vật chính.
 
 ```
-/visual-prompt truyen.txt --epic
+/visual-prompt truyen.txt            # spectacle (mặc định)
+/visual-prompt truyen.txt --epic     # bơm scale mạnh hơn (map/đại quân/đám đông lớn)
+/visual-prompt truyen.txt --faithful # trung thành text, KHÔNG bịa combat
 ```
 
-Nâng mục tiêu hành động/đại cảnh lên một nấc (band content-aware bump một bậc),
-ưu tiên wide establishing + nhóm đông + scale lớn. **Vẫn KHÔNG bịa combat/đại
-quân** không có trong truyện — chỉ khuếch đại cảnh có thật. Dùng khi truyện thực
-sự hợp với quy mô lớn.
+- `--epic`: đẩy band spectacle lên một nấc — map cực rộng, quân đội/đám đông lớn,
+  spectacle tối đa.
+- `--faithful`: TẮT dramatize — đo mật độ hành động thật của truyện rồi đặt tỉ lệ
+  cảnh đúng nội dung; truyện thiên thoại → ít combat, lấy đa dạng từ góc máy/nhóm
+  nhân vật có thật/chi tiết vật phẩm/thời tiết. Dùng khi muốn hình khớp 100% lời kể.
 
-> **Đa dạng cảnh theo nội dung (v0.5).** Pipeline tự đo "mật độ hành động" của
-> truyện (quét từ khoá combat) rồi đặt tỉ lệ cảnh thực tế: truyện thiên về đối
-> thoại → ít cảnh combat, lấy đa dạng từ góc máy/khung hình/nhóm nhân vật/chi
-> tiết vật phẩm/hồi tưởng thay vì bịa trận đánh. Hai cổng tự động (plan gate +
-> depth gate) loại cảnh trùng lặp liền kề, synopsis vụn, và block prompt nông
-> (thiếu header / sai độ dài / video >3800 ký tự) rồi tự regen có giới hạn.
+> Hai cổng tự động (plan gate + depth gate) loại cảnh trùng lặp liền kề, synopsis
+> vụn, và block prompt nông (thiếu header / sai độ dài / video >3800 ký tự) rồi tự
+> regen có giới hạn — chạy ở cả hai chế độ.
 
 ---
 

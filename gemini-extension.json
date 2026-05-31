@@ -1,6 +1,6 @@
 {
   "name": "visual-prompt",
-  "version": "0.5.0",
-  "description": "Generate deep, copyright-safe, styleable image + video prompts (18-style catalog) with content-aware scene diversity, a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos",
+  "version": "0.8.0",
+  "description": "Generate deep, copyright-safe, styleable image + video prompts (18-style catalog) with spectacle-by-default cinematic scene diversity (--faithful for text-accurate mode), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos",
   "contextFileName": "SKILL.md"
 }

@@ -24,7 +24,7 @@ _SCRIPT_DIR = str(Path(__file__).parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-from _io_utils import atomic_write_json, atomic_write_text  # type: ignore
+from _io_utils import atomic_write_json, atomic_write_text, read_text_checked  # type: ignore
 
 _QA_NUM_RE = re.compile(r'qa-chapter-(\d+)\.md$')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
@@ -56,7 +56,7 @@ def _parse_frontmatter(text: str) -> dict:
 
 
 def parse_qa_chapter(path: Path) -> dict:
-    text = path.read_text(encoding='utf-8')
+    text = read_text_checked(path)
     fm = _parse_frontmatter(text)
     body = _FRONTMATTER_RE.sub('', text, count=1).strip()
     fallback_id = _qa_num(path)

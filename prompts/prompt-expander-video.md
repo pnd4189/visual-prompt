@@ -38,10 +38,12 @@ Format: Google Veo3 official 5-part formula.
    layer. Example: `Audio: steel ringing, low wind through bamboo, distant
    temple bell, no music.` NEVER append `[audio: ...]` as a tag at the end.
 6. Hard cap: 3 beats, 8.0s total duration. Veo3 will truncate beyond that.
-7. Build motion-rich clips: action/combat, daoist magic, ritual energy, crowd
-   movement, terrain scale, spell geometry, weapon impact, debris, cloth motion,
-   and ambient reaction when the scene supports it. Avoid static solo portrait
-   clips.
+7. **SPECTACLE BY DEFAULT.** Build motion-rich, cinematic clips: action/combat,
+   spell-duels, daoist magic, ritual energy, crowd/army movement, terrain scale,
+   spell geometry, weapon impact, debris, cloth motion, ambient reaction. You may
+   amplify beyond the literal chapter (add supporting figures, scale, dramatic
+   energy) within the genre/identity/continuity rails. NEVER produce a static solo
+   portrait clip. (If `mode = faithful`, dramatize only what the text supports.)
 
 ## ACTION BEAT RULES
 - Each beat: ONE concrete physical action (step, turn, draw, strike, gaze).

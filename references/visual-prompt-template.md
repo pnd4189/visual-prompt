@@ -14,12 +14,19 @@ props, layered background, color DNA, camera language, lighting, action/energy,
 audio when relevant, and explicit negatives.
 
 Never output a shallow prompt such as "wide shot, ancient room, cinematic,
-beautiful." If the scene can support it, include:
+beautiful." **Spectacle is the default** (YouTube entertainment) — actively build:
 - foreground / midground / background composition
-- multiple characters or unnamed supporting groups
-- wide map-scale geography or architecture
-- visible combat, daoist magic, ritual, travel, aftermath, or crowd motion
+- multiple characters or unnamed supporting groups (do NOT default to the
+  protagonist alone)
+- wide map-scale geography or architecture, sweeping landscapes
+- visible combat, spell-duels (đấu pháp), daoist magic, ritual, travel, aftermath,
+  or crowd/army motion
 - concrete costume, weapon, prop, terrain, weather, particles, and light direction
+
+You may DRAMATIZE beyond the literal chapter for cinematic richness, as long as it
+stays genre-consistent, identity-consistent (verbatim bible anchor for named
+characters), and does not contradict stated plot facts. (`--faithful` mode disables
+this — render only what the text supports.)
 
 Originality and likeness safety:
 - Do not copy a web image, thumbnail, poster, frame, or composition.

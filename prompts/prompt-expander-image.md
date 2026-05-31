@@ -8,6 +8,7 @@ matching the format spec in `@references/visual-prompt-template.md` exactly.
 - `scene_row` — `{scene_id, chapter, scene_tag, characters, synopsis, ...}`
 - `bible` — `character-bible.md` content (filter to characters in this scene)
 - `genre` — detected genre keyword
+- `mode` — `spectacle` (default) | `faithful` (controls amplification, see TASK 8)
 - `chapter_excerpt` — the relevant chapter text ONLY (NOT full chapters.json)
 - `active_style` — `.work/active-style.md` content (one chosen style entry)
 - `cache_key` — SHA1(input.hash + bible.hash + plan.hash + style.hash + scene_row_text)
@@ -49,10 +50,24 @@ Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
 7. The `Style` section MUST use the `Style block` of `.work/active-style.md` and
    must NOT inject named IP, living artist, celebrity, or famous-character likeness
    references. The chosen style decides the look through original descriptors.
-8. Prefer rich compositions: action/combat, daoist magic, multi-character framing,
-   wide map-scale landscape, foreground/midground/background, crowd or faction
-   presence when supported by the chapter. Do not default to a lone protagonist
-   standing or gazing unless the scene row demands it.
+8. **SPECTACLE BY DEFAULT — dramatize for visual richness.** This is YouTube
+   entertainment. Build cinematic, layered compositions: action/combat, spell-duels
+   (đấu pháp), daoist magic, multi-character framing, wide map-scale landscape,
+   crowds/factions, foreground/midground/background depth. You are ALLOWED to
+   amplify beyond the literal chapter — add supporting characters, vistas, and
+   dramatic energy — as long as it stays genre-consistent (xianxia stays xianxia),
+   identity-consistent (verbatim bible anchor for named chars; freely add UNNAMED
+   groups), and does not contradict stated plot facts. NEVER default to a lone
+   protagonist standing or gazing. (If `mode = faithful` is passed, do not invent
+   combat/crowds absent from the chapter — render only what the text supports, but
+   still richly composed.)
+
+## SUBJECT = THIS SCENE'S CHARACTERS ONLY (no global hero-lock)
+The Subject characters are EXACTLY `scene_row.characters` for this scene — no more,
+no less. If the protagonist is NOT in `scene_row.characters`, do NOT insert them.
+NEVER apply a blanket "every image features the protagonist" template — that is the
+exact monotony failure this skill forbids. When the row lists multiple characters or
+a group, frame them ALL, not just the most important one.
 
 ## IDENTITY ANCHOR — VERBATIM, NOT PARAPHRASE
 For each character in `scene_row.characters`:
@@ -120,6 +135,13 @@ Negative: ...
 6. **All sections present** with exact headers `Camera:`, `Story DNA:`,
    `Setting:`, `Composition:`, `Subject:`, `Action / Energy:`, `Style:`,
    `Lighting / Color:`, `Atmosphere:`, `Negative:`.
+7. **No-boilerplate check** — `Setting`, `Composition`, and `Atmosphere` MUST be
+   specific to THIS scene's chapter excerpt and shot. Do NOT paste an identical
+   paragraph reused across scenes. If your Setting/Composition/Atmosphere could be
+   dropped unchanged into a different scene → REWRITE with this scene's concrete
+   location, layout, characters, and action.
+8. **Subject scope check** — Subject contains exactly `scene_row.characters`. If you
+   added the protagonist to a scene that did not list them → REGENERATE.
 
 ## STDOUT SUMMARY
 ```

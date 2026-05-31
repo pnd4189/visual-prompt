@@ -11,3 +11,14 @@ output_*/
 plans/test-fixtures/
 # scratch work dirs (may contain copyrighted novel text)
 tmp_work*/
+# python venv
+.venv/
+# per-run skill outputs (belong in the user's project dir, not the skill repo)
+*_qa.txt
+*_image_prompts.txt
+*_video_prompts.txt
+*_music_prompts.txt
+pipeline_execution.log
+# agent scratch assets dumped into repo root
+blank_*.png
+selected_*_prompts.txt

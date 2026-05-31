@@ -11,9 +11,10 @@ video expansion.
 - `genre` — detected genre keyword
 - `images_n` — total image count target (default auto path: 120–150)
 - `videos_m` — total video count target (default auto path: at least 20)
+- `mode` — `spectacle` (default) | `faithful` from `calc_scene_count.py`
 - `action_density` — `low` | `medium` | `high` from `calc_scene_count.py`
-- `recommended_mix` — content-aware scene-mix band from `calc_scene_count.py`
-  (e.g. `{action: 5-15%, establishing: 25-35%, group: 20-30%, dialogue_emotional: remainder}`)
+- `recommended_mix` — scene-mix band from `calc_scene_count.py` (spectacle band by
+  default, e.g. `{action: 25-35%, establishing: 25-35%, group: 20-30%, dialogue_emotional: remainder}`)
 
 ## TASK
 1. Read all chapters in order. Identify the narrative arc: setup, rising
@@ -33,60 +34,87 @@ video expansion.
    dialogue or static meditation.
 5. Distribute scenes ROUGHLY evenly across chapters (don't dump 30 scenes
    into chapter 1 and 2 into chapter 10).
-6. For high-count runs, avoid monotonous protagonist-only portraits. If chapter
-   context supports it, include unnamed supporting groups (disciples, soldiers,
-   villagers, guards, beasts) and large-scale environment beats. Named characters
-   must come from bible/chapter; do not invent named people.
+6. AVOID monotonous protagonist-only portraits (the #1 failure mode). By default
+   (spectacle), actively add unnamed supporting groups (disciples, soldiers,
+   villagers, guards, beasts, crowds) and large-scale environment/map beats, and
+   rotate the focus across side characters and factions — do not let the
+   protagonist occupy every frame. Named characters must come from the bible; you
+   may freely add UNNAMED groups. (See CINEMATIC AMPLIFICATION below.)
 
-## SCENE MIX TARGETS — CONTENT-AWARE
+## SCENE MIX TARGETS — SPECTACLE BY DEFAULT
 
-Use the `recommended_mix` band passed in INPUT. It is derived from the story's
-measured `action_density`, so a talky story gets a LOW action target and a
-combat-heavy story keeps the high band. Do NOT impose a fixed 35–45% action quota
-on every run — that is the high-density band only.
+This pipeline feeds YouTube entertainment videos. The DEFAULT register is
+**spectacle**: build visually rich, varied, cinematic scenes — wide map-scale
+landscapes, multi-character framing, combat, spell-duels (đấu pháp), daoist magic,
+grand environments — NOT a string of protagonist close-ups.
+
+Use the `recommended_mix` band passed in INPUT (spectacle band by default):
 
 | Category | Target |
 |---|---|
-| action / combat / ritual / reveal | `recommended_mix.action` |
-| wide environment / map / establishing | `recommended_mix.establishing` |
-| multi-character interaction / group | `recommended_mix.group` |
+| action / combat / spell-duel / ritual / reveal | `recommended_mix.action` |
+| wide environment / map / landscape / establishing | `recommended_mix.establishing` |
+| multi-character interaction / group / crowd | `recommended_mix.group` |
 | close-up / emotional / dialogue | `recommended_mix.dialogue_emotional` (remainder) |
 
-Hit the action band by drawing on scenes that GENUINELY have action in the text.
-If the chapters do not contain combat/armies/spell-duels, do NOT fabricate them to
-fill a quota — draw anti-monotony from VISUAL VARIETY instead (next section).
+## CINEMATIC AMPLIFICATION (default directive)
 
-## VISUAL-VARIETY RULE (anti-monotony without fabrication)
+You are ALLOWED — and expected — to DRAMATIZE the story for visual richness, even
+beyond what a given chapter states literally. Proactively, across the run:
 
-When a story is talky (low action_density), variety comes from how you SHOOT what
-is actually in the chapter — never from invented battles. Vary across the run:
+- **Vast landscapes / maps:** open chapters and transitions with sweeping
+  geography — sect mountains, cloud seas, ancient cities, frontiers, secret realms,
+  battlefields, star-altars — at map scale, not a single room.
+- **More characters in frame:** populate scenes with allies, rivals, sect members,
+  elders, disciples, soldiers, crowds, beasts. Do NOT default to the protagonist
+  alone. Named characters must come from the bible; you may freely add UNNAMED
+  supporting groups to fill and enrich the frame.
+- **Combat & spell-duels:** dramatize martial clashes, flying-sword duels, talisman
+  formations, qi shockwaves, breakthroughs, artifact reveals, beast battles —
+  cinematic and beautiful — wherever the arc can carry them.
+- **Vary the focus character:** not every scene centers the protagonist. Feature
+  side characters, antagonists, factions, and pure-environment beats.
+- **Camera / scale / weather variety:** alternate wide/medium/close, low/high
+  angles, dawn/dusk/storm/mist — never repeat the same framing back to back.
 
-- **Camera / scale:** alternate wide establishing, medium two-shots, close-up
-  inserts, low/high angles, over-the-shoulder — do not repeat the same framing.
-- **Group tableaus of characters ACTUALLY present:** when a chapter has multiple
-  people in a scene, frame them together (sect hall, classroom, gathering) instead
-  of a lone portrait. Only people the chapter places there.
-- **Object / detail inserts:** named props from the text (a book, talisman, jade
-  pendant, brewing pot, letter) as their own macro/detail shot.
-- **Flashback / symbolic shots:** a memory or symbolic image the chapter implies.
-- **Weather / time-of-day shifts:** dawn, dusk, rain, mist, lamplight — vary the
-  environment beat across nearby scenes.
+**CONSISTENCY RAILS (the only hard limits):** amplification must stay
+- **genre-consistent** (xianxia stays xianxia — no Western armor, no modern items);
+- **identity-consistent** (named characters use the verbatim bible anchor; do not
+  invent named people or change a character's established look);
+- **continuity-consistent** (do not contradict explicit stated plot facts — e.g.
+  do not show a character the story has killed, or reverse a stated outcome).
+Within those rails, dramatize freely. Copyright/likeness safety negatives still
+apply (no celebrity face, no copied web image — handled in the expander).
 
-**NO-FABRICATION GUARD (hard):** never add combat, armies, spell-duels, weapons,
-or crowds that the referenced chapter does not contain. Amplifying framing of real
-content is allowed; inventing plot events is forbidden.
+## HARD DIVERSITY QUOTA (validator-enforced — `validate_scene_plan.py`)
 
-**EPIC MODE (`epic = true`):** `recommended_mix` already arrives bumped one notch.
-Favor wide establishing shots, larger group tableaus of characters actually
-present, and grander scale cues for the beats the story DOES have. The
-NO-FABRICATION GUARD still holds above this note — epic amplifies real scenes, it
-never invents battles or armies absent from the chapter.
+The #1 failure is every frame being the protagonist alone. These are NOT
+suggestions — the plan gate REJECTS a plan that breaks them and you will be told to
+revise:
 
-Video flags prioritize the most motion-rich scenes the story ACTUALLY has: for an
-action story that means combat/chase/spell/breakthrough; for a talky story that
-means the liveliest real beats (a reveal, a heated exchange, a journey, a ritual,
-a weather event, a meaningful gesture). Flag exactly `videos_m` scenes, and by
-default this means at least 20.
+- **Protagonist presence ≤ 70% of scenes.** At least ~30% of scenes must NOT
+  include the protagonist at all — center them on other named characters,
+  antagonists, factions, crowds, beasts, or pure environment/map.
+- **Solo scenes ≤ 35%.** The majority of scenes have 2+ characters (allies, rivals,
+  elders, disciples, soldiers, crowds — named from bible or unnamed groups).
+- **No single scene_tag > 35%.** Spread across establishing, group, combat-map,
+  daoist-magic, travel, reveal, ritual, dialogue, emotional, action.
+
+Plan the FULL run to satisfy these before writing. A protagonist-locked plan is
+invalid output.
+
+**EPIC MODE (`epic = true`):** band arrives bumped one notch — push even harder on
+map scale, army/crowd size, and spectacle.
+
+**FAITHFUL MODE (`faithful = true`):** the band is content-aware instead; in this
+mode do NOT invent combat/armies absent from the text — draw variety only from
+camera/scale, real group tableaus, object inserts, and weather shifts. (Spectacle
+is the default; faithful is the opt-in for documentary-style accuracy.)
+
+Video flags prioritize the most motion-rich, spectacular scenes: combat, chases,
+spell formations, breakthroughs, crowd/army movement, map-scale traversal, and
+major openers/climaxes. Flag exactly `videos_m` scenes, and by default this means
+at least 20.
 
 ## SCENE TAGS (must be one of)
 `establishing`, `action`, `combat-map`, `daoist-magic`, `group`, `dialogue`,
@@ -157,8 +185,18 @@ for byte. Re-emit the full table with just those rows fixed:
 - `fragment_synopsis` → rewrite that row's `synopsis` as one coherent sentence per
   the SYNOPSIS RULE (no raw text slice, starts with a capital, subject + verb).
 
-Do not renumber, reorder, or drop unflagged rows. Re-run the self-checks, then
-rewrite `.work/scene-plan.md`.
+For plan-wide violations (`scene_ids` empty), REBALANCE the whole plan, not single
+rows:
+- `protagonist_overspotlight` → convert enough protagonist scenes into ones centered
+  on other named characters, antagonists, factions, crowds, or pure environment so
+  the protagonist drops to ≤70% presence.
+- `too_many_solo` → add characters/groups to enough solo scenes to get solo ≤35%.
+- `tag_monotony` → re-tag enough scenes (establishing/group/combat-map/daoist-magic/
+  travel/reveal) so no tag exceeds 35%.
+
+Keep changes grounded in the chapters' world (spectacle dramatization allowed; do
+not break genre/identity/continuity). Re-run the self-checks, then rewrite
+`.work/scene-plan.md`.
 
 ## STDOUT SUMMARY
 ```

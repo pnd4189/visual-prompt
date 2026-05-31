@@ -1,8 +1,41 @@
 description = "Generate deep, styleable image + video prompts (18-style catalog) from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
 prompt = """
-Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.5.
+Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.8.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
+
+## ⛔ EXECUTION CONTRACT — ĐỌC TRƯỚC, BẮT BUỘC, KHÔNG ĐƯỢC TỰ CHẾ
+
+Skill này có pipeline cố định. Bạn PHẢI thực thi đúng các STEP dưới, dùng đúng các
+file `@prompts/*.md` và `scripts/*.py`. TUYỆT ĐỐI KHÔNG:
+
+1. ❌ KHÔNG tự viết script orchestration riêng (split.py, v.v.) để chia/gộp việc.
+2. ❌ KHÔNG tự soạn "subagent_instructions" hay brief rút gọn của riêng bạn thay
+   cho `@prompts/scene-planner.md` / `@prompts/prompt-expander-image.md` /
+   `@prompts/prompt-expander-video.md`. Nếu cần subagent, xem "PARALLEL EXPANSION"
+   ở STEP 6 — đó là cách DUY NHẤT được phép, và nó vẫn bắt buộc đọc scene-plan +
+   chương từng cảnh.
+3. ❌ KHÔNG khoá cứng nhân vật chính vào mọi prompt. Mỗi cảnh chỉ dùng đúng
+   `scene_row.characters` của cảnh đó. ≥30% cảnh KHÔNG có nhân vật chính.
+4. ❌ KHÔNG tự tay viết file `<stem>_image_prompts.txt` / `<stem>_video_prompts.txt`.
+   File output cuối CHỈ được sinh bởi `scripts/assemble_outputs.py` từ `.work/scene-*.md`.
+5. ❌ KHÔNG tự chế script Python sinh prompt deterministic (vd hardcode character
+   anchors / camera map / template scene vào code) để "né" rate-limit hay tăng tốc.
+   Prompt cảnh PHẢI do LLM expand theo `@prompts/prompt-expander-*.md` — generator
+   hardcode cho ra output template-hoá, phá thiết kế "deep prompt". Khi đụng
+   429 / RESOURCE_EXHAUSTED, theo đúng "RATE-LIMIT / 429" ở STEP 6, KHÔNG improvise.
+
+Subagent completion message KHÔNG phải bằng chứng hoàn tất. Mỗi bước batch chỉ được
+coi là done khi parent process kiểm tra artifact thật trên filesystem: đúng file,
+đúng số lượng, size > 0, và parse được frontmatter/header bắt buộc.
+
+**Bắt buộc tồn tại để run hợp lệ:** `.work/scene-plan.md` (Pass 1) và
+`.work/scene-NNN.md` (Pass 2, mỗi cảnh 1 file). Thiếu hai thứ này = run SAI, phải
+làm lại đúng pipeline. Cuối run có SELF-AUDIT (sau STEP 7) kiểm tra điều này.
+
+**Lý do:** scene-planner phân bổ cảnh ĐA DẠNG (map rộng, đông nhân vật, combat, đấu
+pháp, xoay nhân vật khác — không chỉ nhân vật chính). Bỏ qua nó = ảnh đơn điệu, dồn
+spotlight nhân vật chính → sai yêu cầu sản phẩm.
 
 Chất lượng bắt buộc: mọi image/video/music prompt phải sâu, giàu chi tiết, có
 story DNA, character/prop locks, foreground-midground-background, map scale,
@@ -27,12 +60,13 @@ Args là 1 string. Parse như sau (regex Python):
 6. `--style ([a-z0-9-]+)`                → style_override (kebab-case id, optional)
 7. `--force-redo`                        → force_redo = true (flag)
 8. `--epic`                              → epic = true (flag)
-9. Sau khi strip flags → còn lại là input_path (positional, required).
+9. `--faithful`                          → faithful = true (flag)
+10. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Validate:
 - input_path tồn tại (Path.exists()).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo, --epic`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo, --epic, --faithful`
 
 Echo lại cho user:
 ```
@@ -46,11 +80,14 @@ Echo lại cho user:
   style      = <id | (recommend sau genre detect)>
   force_redo = <true | false>
   epic       = <true | false>
+  faithful   = <true | false>
 ```
 
-(`--epic` bơm scale: bump `recommended_mix` band một nấc + ưu tiên spectacle rộng
-ở planner/expander, NHƯNG vẫn giữ no-fabrication — chỉ amplify cảnh có thật, không
-bịa combat/đại quân.)
+(Mặc định = **spectacle**: planner/expander chủ động dựng cảnh giàu kịch tính —
+map/phong cảnh rộng, đông nhân vật trong khung, combat, đấu pháp — và ĐƯỢC PHÉP
+dramatize vượt text, miễn giữ nhất quán genre + identity bible + continuity.
+`--epic` bơm scale mạnh hơn nữa. `--faithful` chuyển sang chế độ content-aware
+trung thành text: KHÔNG bịa combat/đại quân không có trong truyện.)
 
 ---
 
@@ -174,21 +211,22 @@ Chọn art style cho cả run. Genre và style tách rời — mọi style trong
 python3 scripts/calc_scene_count.py \\
     --input "<input_path>" \\
     --chapters-json .work/chapters_qa.json \\
-    [--images <N>] [--videos <M>] [--epic]
+    [--images <N>] [--videos <M>] [--epic] [--faithful]
 ```
 
-(Thêm `--epic` vào lệnh nếu `epic` flag set ở STEP 0.)
+(Thêm `--epic` / `--faithful` vào lệnh nếu các flag tương ứng set ở STEP 0.)
 
-Parse stdout JSON → lưu `images_n`, `videos_m`, `action_density`, `recommended_mix`.
+Parse stdout JSON → lưu `images_n`, `videos_m`, `mode`, `action_density`,
+`recommended_mix`.
 
 Default auto path tạo khoảng 120–150 image prompts và tối thiểu 20 video prompts.
 Nếu user truyền `--images` hoặc `--videos`, tôn trọng override đúng số đó.
 
-`action_density` (low/medium/high) đo bằng combat-vocab scan — quyết định
-`recommended_mix` band. Truyện ít hành động → action band thấp, KHÔNG ép quota
-combat. Band này được truyền vào scene-planner ở STEP 5.
+`mode` = `spectacle` (mặc định) cho band giàu map/group/action bất kể density;
+`faithful` cho band content-aware theo `action_density` (không bịa combat). Band +
+mode được truyền vào scene-planner ở STEP 5.
 
-Print: `Sẽ tạo: <images_n> ảnh + <videos_m> video clip. (action_density: <density>)`
+Print: `Sẽ tạo: <images_n> ảnh + <videos_m> video clip. (mode: <mode>, density: <density>)`
 
 ---
 
@@ -201,9 +239,10 @@ Nếu `.work/scene-plan.md` tồn tại VÀ KHÔNG có `--force-redo`:
   → tiếp tục.
 
 Load `@prompts/scene-planner.md` + execute → write `.work/scene-plan.md`.
-Truyền vào context của planner: `images_n`, `videos_m`, `action_density`,
-`recommended_mix` (từ STEP 4), và `epic` (true nếu flag set — planner dùng band
-đã bump + ưu tiên spectacle, nhưng KHÔNG fabricate combat).
+Truyền vào context của planner: `images_n`, `videos_m`, `mode`, `action_density`,
+`recommended_mix` (từ STEP 4), `epic`, `faithful`. Mặc định (spectacle) planner
+chủ động thêm map/đông nhân vật/combat/đấu pháp + được dramatize trong rails
+genre/identity/continuity. Nếu `faithful` → KHÔNG bịa combat ngoài text.
 
 Compute `plan_hash = sha1(file_bytes(scene-plan.md))[:12]` → ghi vào
 `.work/plan.hash`.
@@ -214,8 +253,9 @@ Print: `Scene plan: <N> scenes, <M> flagged for video.`
 
 ## STEP 5.5 — PLAN VARIATION GATE (deterministic backstop)
 
-Chạy sau khi scene-plan ghi xong. Bắt monotony (adjacent-duplicate) + synopsis
-fragment để không lọt im lặng xuống expander.
+Chạy sau khi scene-plan ghi xong. Bắt monotony (adjacent-duplicate), synopsis
+fragment, VÀ low-diversity (nhân vật chính >70% / solo >35% / 1 tag >35%) để không
+lọt im lặng xuống expander.
 
 ```bash
 python3 scripts/validate_scene_plan.py --plan .work/scene-plan.md
@@ -227,10 +267,11 @@ Parse stdout JSON `{total, violations, ok}`. Exit 0 = ok, 2 = có violations,
 **Bounded revise loop (tối đa 2 lần):**
 - Nếu `ok: true` → proceed STEP 6.
 - Nếu có violations VÀ còn lượt retry:
-  - Gom `scene_ids` bị flag. Load `@prompts/scene-planner.md` và yêu cầu CHỈ
-    sửa các row bị flag (revise-flagged contract): đổi scene_tag / nhân vật focus
-    cho `adjacent_duplicate`; viết lại synopsis thành 1 câu mạch lạc cho
-    `fragment_synopsis`. Ghi đè scene-plan.md, recompute `plan_hash`.
+  - Load `@prompts/scene-planner.md` (revise-flagged contract). Violations có
+    `scene_ids` (adjacent_duplicate / fragment_synopsis) → chỉ sửa các row đó.
+    Violations plan-wide `scene_ids: []` (protagonist_overspotlight / too_many_solo
+    / tag_monotony) → REBALANCE cả plan: thêm cảnh nhân vật khác/đám đông/môi
+    trường, giảm cảnh solo, đa dạng tag. Ghi đè scene-plan.md, recompute `plan_hash`.
   - Chạy lại validator.
 - Sau 2 lượt mà vẫn còn violations → WARN liệt kê violations còn lại, KHÔNG
   hard-block, proceed STEP 6.
@@ -240,6 +281,55 @@ Print: `Plan gate: <ok | N violations sau <r> revise>`.
 ---
 
 ## STEP 6 — EXPAND SCENES (Pass 2, resume-safe loop)
+
+**PRECONDITION (bắt buộc):** `.work/scene-plan.md` PHẢI tồn tại (từ STEP 5) và đã
+qua STEP 5.5. Nếu chưa có → quay lại STEP 5. KHÔNG bắt đầu sinh prompt mà không có
+scene-plan.
+
+**PARALLEL EXPANSION — cách DUY NHẤT được phép chạy song song:**
+Sinh 120-150 prompt tuần tự trong 1 context là chậm; nếu muốn song song, làm ĐÚNG
+cách sau (KHÔNG tự chế brief khác):
+- Mặc định parallelism = TỐI ĐA 3 subagent đồng thời (không phải 5+). Mỗi subagent
+  một dải scene_id; spawn lần lượt theo wave, không bung hết một lúc. Run lớn
+  (>90 cảnh) đụng rate-limit dễ hơn → giữ 3, ưu tiên hoàn tất chắc hơn nhanh.
+- Trước khi spawn subagent, detect work path. Nếu `<input_dir>` hoặc `.work` nằm
+  dưới `/home/*/cloud/gdrive/` hoặc `/home/*/.cache/rclone/`, KHÔNG cho subagent
+  ghi trực tiếp vào path đó. Dùng một trong hai path an toàn:
+  1. parent-agent loop tuần tự ghi `.work/scene-NNN.md`; hoặc
+  2. subagent ghi vào local staging dir `/tmp/visual-prompt-<input_hash>/scenes-XXX-YYY/`,
+     rồi parent copy từng file sang `.work/` bằng Python/open + verify.
+- Chia danh sách scene_id thành các batch, mỗi batch có expected_ids rõ ràng.
+- Mỗi subagent nhận: (a) một dải scene_id, (b) bắt buộc đọc CHÍNH các file
+  `@prompts/prompt-expander-image.md` + `@prompts/prompt-expander-video.md` +
+  `@references/visual-prompt-template.md` + `.work/active-style.md`, (c) đọc đúng
+  các row tương ứng trong `.work/scene-plan.md` và CHỈ chương mà mỗi row trỏ tới từ
+  `.work/chapters_qa.json`, (d) trả/ghi mỗi cảnh đúng format `scene-NNN.md`.
+- Subagent KHÔNG được tự đặt template "mọi ảnh = nhân vật chính"; Subject mỗi cảnh =
+  đúng `scene_row.characters`. Đa dạng cảnh do scene-plan quyết định, không phải do
+  subagent rút gọn.
+- KHÔNG tự ghi file output cuối — vẫn để STEP 7 `assemble_outputs.py` gom từ scene-*.md.
+
+**RATE-LIMIT / 429 (RESOURCE_EXHAUSTED) — bắt buộc xử lý, KHÔNG improvise:**
+Spawn nhiều subagent ở scale lớn rất dễ đụng 429. Khi gặp 429/RESOURCE_EXHAUSTED:
+- KHÔNG retry ngay (sẽ đụng lại). KHÔNG tự chế Python generator deterministic để né
+  (vi phạm EXECUTION CONTRACT #5 — output sẽ template-hoá).
+- Backoff: dừng spawn wave mới, đợi 30s → 60s → 120s (exponential) giữa các lần thử.
+- Nếu sau 2 lần backoff vẫn 429: CHUYỂN sang parent-agent loop TUẦN TỰ cho các
+  scene_id còn thiếu — parent tự expand từng cảnh theo `@prompts/prompt-expander-*.md`
+  (đúng pipeline LLM, 1 cảnh/lần, ghi `.work/scene-NNN.md` rồi verify). Chậm hơn
+  nhưng đúng thiết kế và không đụng giới hạn song song.
+- Loop tuần tự là resume-safe (xem cache_key bên dưới): cảnh đã có thì skip, chỉ
+  sinh cảnh thiếu. Có thể chạy nhiều lượt cho tới khi đủ N cảnh.
+
+**BATCH ARTIFACT GATE (bắt buộc sau mỗi batch/subagent):**
+- Parent kiểm tra exact files expected: `scene-<NNN>.md` cho từng expected_id.
+- Mỗi file phải size > 0, có frontmatter `scene_id/cache_key/has_video`, có
+  `## Image Prompt`, và nếu scene flag video thì có `## Video Prompt`.
+- Nếu subagent report completed nhưng produced_count = 0 hoặc thiếu bất kỳ expected_id:
+  FAIL-FAST batch đó. Không chờ "sync delay" mơ hồ.
+- Retry tối đa 1 lần bằng parent-agent loop cho đúng missing IDs. Nếu vẫn thiếu,
+  HALT với danh sách missing files; không kill batch khác không liên quan.
+- Ghi log batch ngắn: `Batch XXX-YYY: expected A, produced B, missing [..]`.
 
 Nếu `--force-redo`: `rm -f .work/scene-*.md` TRƯỚC khi vào loop.
 
@@ -260,8 +350,8 @@ For mỗi scene row trong scene-plan (theo thứ tự scene_id 1..N):
   b. Load relevant chapter text từ chapters_qa.json (chỉ chapter mà scene_row.chapter
      trỏ tới — KHÔNG load full JSON).
 
-  c. Load `@prompts/prompt-expander-image.md` + execute → write scene_path
-     với frontmatter:
+  c. Load `@prompts/prompt-expander-image.md` + execute (truyền `mode` từ STEP 4
+     để expander biết spectacle/faithful) → write scene_path với frontmatter:
      ```
      ---
      scene_id: <NNN>
@@ -277,6 +367,14 @@ For mỗi scene row trong scene-plan (theo thứ tự scene_id 1..N):
      `## Video Prompt` block vào scene_path.
 
   e. Log: `Scene <NNN>/<N> done (<image_wc>w image[, <video_wc>w video])`
+
+Sau STEP 6, parent chạy artifact gate toàn cục:
+```bash
+python3 scripts/validate_artifacts.py \
+  --check scenes \
+  --work-dir "<work_dir>" \
+  --scene-plan "<work_dir>/scene-plan.md"
+```
 
 ---
 
@@ -297,6 +395,11 @@ Load `@prompts/music-prompt-builder.md` để LLM phân vùng arc thành N vùng
 xúc liền kề (mỗi vùng = dải `Chương X-Y`, phủ hết 1..K, không chồng lấn), dùng
 `genre`, `.work/scene-plan.md`, `.work/chapters_qa.json`, `.work/active-style.md`,
 `qa_hash`, `plan_hash`, `style_hash`.
+
+Music file write cũng theo quy tắc parent-owned artifact: nếu dùng subagent,
+subagent chỉ trả content hoặc ghi local staging; parent ghi/copy `.work/music-NNN.md`
+và verify size > 0 + frontmatter + body. Không viết tay trực tiếp vào final
+`<stem>_music_prompts.txt`.
 
 For mỗi vùng region (loop_index 1..N):
 
@@ -321,6 +424,17 @@ For mỗi vùng region (loop_index 1..N):
 
 (Bước STEP 7 assemble sẽ tự gom `music-*.md` → `<stem>_music_prompts.txt`.)
 
+Sau STEP 6.5, parent kiểm tra exact `music-001.md` ... `music-<N>.md`. Nếu thiếu
+hoặc file rỗng, retry missing IDs bằng parent loop tối đa 1 lần; vẫn lỗi thì HALT
+với danh sách missing. Không tiếp tục assemble với music_count sai.
+
+```bash
+python3 scripts/validate_artifacts.py \
+  --check music \
+  --work-dir "<work_dir>" \
+  --expected-music <music_n>
+```
+
 ---
 
 ## STEP 7 — ASSEMBLE + DEPTH GATE (assemble → validate → bounded regen)
@@ -334,6 +448,22 @@ Mỗi violation = block nông: thiếu header / sai word-count / negative < 20 (
 hoặc thiếu header / sai beat count / >3800 chars (video). assemble VẪN ghi `.txt`
 (nên run cuối cùng luôn dùng được) — nhưng cố làm sạch violations trước.
 
+Sau mỗi lần assemble, verify output files trên filesystem:
+- `_image_prompts.txt` tồn tại, size > 0, số block `--- SCENE NNN ---` = image_count.
+- `_video_prompts.txt` tồn tại; nếu video_count > 0 thì size > 0 và block count = video_count.
+- Nếu có music regions thì `_music_prompts.txt` tồn tại, size > 0.
+Nếu any check fail → rerun `assemble_outputs.py` một lần; vẫn fail thì HALT. Không
+tự tay viết final output để "cứu" run.
+
+```bash
+python3 scripts/validate_artifacts.py \
+  --check outputs \
+  --input "<input_path>" \
+  --image-count <image_count> \
+  --video-count <video_count> \
+  --music-count <music_count>
+```
+
 **Bounded regen loop (tối đa 2 lần):**
 - Nếu `violations` rỗng → proceed POST-RUN SUMMARY.
 - Nếu có violations VÀ còn lượt retry:
@@ -345,6 +475,32 @@ hoặc thiếu header / sai beat count / >3800 chars (video). assemble VẪN ghi
   tốt nhất, proceed (KHÔNG vòng lặp vô hạn, KHÔNG crash).
 
 Print: `Depth gate: <clean | N violations sau <r> regen>`.
+
+---
+
+## STEP 8 — SELF-AUDIT (bắt buộc, trước khi báo hoàn tất)
+
+Kiểm tra run đã đi ĐÚNG pipeline (chống tự-chế):
+
+```bash
+ls .work/scene-plan.md
+python3 scripts/validate_artifacts.py --check scenes --work-dir .work --scene-plan .work/scene-plan.md
+python3 scripts/validate_scene_plan.py --plan .work/scene-plan.md
+```
+
+Xác nhận:
+1. `.work/scene-plan.md` tồn tại. Nếu KHÔNG → run SAI (đã bỏ qua scene-planner):
+   in cảnh báo `❌ AUDIT FAIL: thiếu scene-plan.md — pipeline đã bị bỏ qua` và CHẠY
+   LẠI đúng từ STEP 5. KHÔNG báo hoàn tất.
+2. Số file match strict regex `scene-\\d{3}.md` = `images_n`. Không dùng glob thô
+   `scene-*.md` vì sẽ bắt nhầm `scene-plan.md`. Nếu = 0 hoặc thiếu IDs → run SAI,
+   chạy lại STEP 6 artifact gate.
+3. validate_scene_plan: không còn `protagonist_overspotlight` / `too_many_solo` /
+   `tag_monotony` (hoặc đã WARN sau 2 revise). Nếu còn → ghi rõ trong summary.
+4. File output cuối được sinh bởi `assemble_outputs.py` (STEP 7), KHÔNG phải tự tay
+   ghi. Nếu bạn đã tự ghi file → xoá, chạy lại STEP 7.
+
+Print: `Self-audit: <PASS | FAIL: lý do>`.
 
 ---
 

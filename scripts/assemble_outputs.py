@@ -23,9 +23,9 @@ _SCRIPT_DIR = str(Path(__file__).parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-from _io_utils import atomic_write_text  # type: ignore
+from _io_utils import atomic_write_text, read_text_checked  # type: ignore
 
-_SCENE_NUM_RE = re.compile(r'scene-(\d+)\.md$')
+_SCENE_NUM_RE = re.compile(r'scene-(\d+[a-zA-Z]?)\.md$')
 _MUSIC_NUM_RE = re.compile(r'music-(\d+)\.md$')
 _IMAGE_RE = re.compile(
     r'^##\s*Image\s+Prompt\s*\n(.*?)(?=^##\s|\Z)', re.DOTALL | re.MULTILINE
@@ -48,24 +48,36 @@ NEGATIVE_MIN = 20
 _IMAGE_HEADERS = ['Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
                   'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative']
 _VIDEO_HEADERS = ['Cinematography', 'Subject', 'Action', 'Context', 'Style & Ambiance']
-_TIMESTAMP_RE = re.compile(r'\[\d{2}:\d{2}')
+_TIMESTAMP_RE = re.compile(r'(?:\[\d{2}:\d{2}|Beat\s*\d+)')
 _NEGATIVE_SECTION_RE = re.compile(r'(?ims)^Negative\s*:\s*(.*?)\Z')
+
+
+def _header_pattern(h: str) -> re.Pattern:
+    # 1. Normalize slashes in h to allow optional spacing, e.g. "Action / Energy" or "Action/Energy"
+    parts = re.split(r'\s*/\s*', h)
+    escaped_parts = [re.escape(p) for p in parts]
+    content_pattern = r'\s*/\s*'.join(escaped_parts)
+    
+    # 2. Allow optional list markers, markdown stars, square brackets, parenthesized notes, and colons in any order
+    pattern = r'(?im)^\s*(?:[-*+]\s+)?(?:\*\*|\*|)?\s*(?:\[|)?\s*' + content_pattern + r'\s*(?:\]|)?\s*(?:\s*\([^)]*\))?\s*(?:\*\*|\*|)?\s*(?::|：)?\s*(?:\*\*|\*|)?'
+    return re.compile(pattern)
 
 
 def _missing_headers(block: str, headers: list[str]) -> list[str]:
     missing = []
     for h in headers:
-        if not re.search(r'(?im)^\s*' + re.escape(h) + r'\s*:', block):
+        pattern = _header_pattern(h)
+        if not pattern.search(block):
             missing.append(h)
     return missing
 
 
 def _body_word_count(block: str, headers: list[str]) -> int:
     """Body words excluding the section labels (matches the expander self-check)."""
-    stripped = re.sub(
-        r'(?im)^\s*(' + '|'.join(re.escape(h) for h in headers) + r')\s*:',
-        '', block,
-    )
+    stripped = block
+    for h in headers:
+        pattern = _header_pattern(h)
+        stripped = pattern.sub('', stripped)
     return len(stripped.split())
 
 
@@ -79,7 +91,9 @@ def check_image(block: str) -> list[str]:
         problems.append(f"image body too short: {wc} words (<{IMAGE_WORD_MIN})")
     elif wc > IMAGE_WORD_MAX:
         problems.append(f"image body too long: {wc} words (>{IMAGE_WORD_MAX})")
-    m = _NEGATIVE_SECTION_RE.search(block)
+    # Clean up markdown formatting when checking negative list
+    block_clean = re.sub(r'\*+', '', block)
+    m = _NEGATIVE_SECTION_RE.search(block_clean)
     neg_count = len([x for x in m.group(1).split(',') if x.strip()]) if m else 0
     if neg_count < NEGATIVE_MIN:
         problems.append(f"negative list too thin: {neg_count} items (<{NEGATIVE_MIN})")
@@ -99,13 +113,26 @@ def check_video(block: str) -> list[str]:
     return problems
 
 
-def _scene_num(path: Path) -> int:
+def _scene_num(path: Path) -> str:
     m = _SCENE_NUM_RE.search(path.name)
-    return int(m.group(1)) if m else 0
+    return m.group(1) if m else '0'
+
+
+def _scene_sort_key(path: Path) -> tuple[int, str]:
+    val = _scene_num(path)
+    num_part = ''
+    letter_part = ''
+    for char in val:
+        if char.isdigit():
+            num_part += char
+        else:
+            letter_part += char
+    return (int(num_part) if num_part else 0, letter_part)
 
 
 def discover_scenes(work_dir: Path) -> list[Path]:
-    return sorted(work_dir.glob('scene-*.md'), key=_scene_num)
+    paths = [p for p in work_dir.glob('scene-*.md') if _SCENE_NUM_RE.fullmatch(p.name)]
+    return sorted(paths, key=_scene_sort_key)
 
 
 def _music_num(path: Path) -> int:
@@ -114,12 +141,13 @@ def _music_num(path: Path) -> int:
 
 
 def discover_music(work_dir: Path) -> list[Path]:
-    return sorted(work_dir.glob('music-*.md'), key=_music_num)
+    paths = [p for p in work_dir.glob('music-*.md') if _MUSIC_NUM_RE.fullmatch(p.name)]
+    return sorted(paths, key=_music_num)
 
 
 def parse_music(path: Path) -> dict:
     """The whole body after frontmatter is the Lyria prompt block (incl. label)."""
-    text = path.read_text(encoding='utf-8')
+    text = read_text_checked(path)
     body = _FRONTMATTER_RE.sub('', text, count=1)
     return {
         'loop_index': _music_num(path),
@@ -129,7 +157,7 @@ def parse_music(path: Path) -> dict:
 
 
 def parse_scene(path: Path) -> dict:
-    text = path.read_text(encoding='utf-8')
+    text = read_text_checked(path)
     body = _FRONTMATTER_RE.sub('', text, count=1)
     img_m = _IMAGE_RE.search(body)
     vid_m = _VIDEO_RE.search(body)
@@ -146,15 +174,15 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     if not scenes_paths:
         raise RuntimeError(f"No scene-*.md found in {work_dir}")
 
-    image_blocks: list[tuple[int, str]] = []
-    video_blocks: list[tuple[int, str]] = []
+    image_blocks: list[tuple[str, str]] = []
+    video_blocks: list[tuple[str, str]] = []
     warnings: list[str] = []
     violations: list[dict] = []
 
     for sp in scenes_paths:
         sc = parse_scene(sp)
         if not sc['image']:
-            warnings.append(f"scene-{sc['scene_id']:03d}.md missing '## Image Prompt' block — skipped")
+            warnings.append(f"scene-{sc['scene_id']}.md missing '## Image Prompt' block — skipped")
             continue
         image_blocks.append((sc['scene_id'], sc['image']))
         for detail in check_image(sc['image']):
@@ -164,10 +192,11 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
             for detail in check_video(sc['video']):
                 violations.append({'scene_id': sc['scene_id'], 'kind': 'video', 'detail': detail})
 
-    def _join(blocks: list[tuple[int, str]]) -> str:
+    def _join(blocks: list[tuple[str, str]]) -> str:
         parts = []
         for sid, body in blocks:
-            parts.append(f"--- SCENE {sid:03d} ---\n\n{body}")
+            sid_str = f"{int(sid):03d}" if sid.isdigit() else sid
+            parts.append(f"--- SCENE {sid_str} ---\n\n{body}")
         return '\n\n'.join(parts)
 
     output_dir = input_path.parent

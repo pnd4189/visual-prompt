@@ -23,10 +23,11 @@ Output: 4 file `_qa.txt`, `_image_prompts.txt`, `_video_prompts.txt`,
 và tối thiểu 20 video prompts; dùng `--images` / `--videos` để override khi cần
 chạy nhanh.
 
-Đa dạng cảnh theo nội dung: pipeline đo mật độ hành động của truyện rồi đặt tỉ lệ
-cảnh thực tế (truyện đối thoại không bị ép quota combat; đa dạng đến từ góc máy /
-nhóm nhân vật / chi tiết). Hai cổng tự động loại cảnh trùng lặp + block prompt
-nông rồi regen. Thêm `--epic` để bơm quy mô khi truyện hợp.
+Spectacle mặc định: dựng cảnh giàu kịch tính — phong cảnh/map rộng, đông nhân vật
+trong khung, combat, đấu pháp — và được dramatize vượt text trong giới hạn thể
+loại/nhận diện/continuity. `--epic` bơm scale mạnh hơn; `--faithful` chuyển sang
+chế độ trung thành text (không bịa combat). Hai cổng tự động loại cảnh trùng lặp +
+block prompt nông rồi regen.
 
 ## Hướng dẫn đầy đủ
 

@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.5.0
+version: 0.8.0
 description: Generate deep, copyright-safe, styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
 license: MIT
 contextFileName: SKILL.md
@@ -34,11 +34,21 @@ paste-ready files:
   layered story DNA, character/prop locks, map-scale environment, foreground/
   midground/background composition, lighting/palette, action/energy/audio, and
   negative/safety rules. Shallow prompts are invalid.
-- **Content-aware diversity.** Scene-mix targets follow the story's measured action
-  density (combat-vocab scan): talky stories get a low action band and draw variety
-  from camera/scale/group/insert/flashback — never from fabricated combat. Combat
-  vocab stays available for stories that genuinely have it. `--epic` amplifies real
-  scale on demand without inventing battles.
+- **Spectacle by default.** This pipeline feeds YouTube entertainment videos, so
+  the default register builds visually rich, varied scenes — wide map/landscape,
+  multi-character framing, combat, spell-duels (đấu pháp), daoist magic — and is
+  ALLOWED to dramatize beyond the literal chapter for cinematic richness, within
+  three rails: genre-consistent, identity-consistent (verbatim bible anchor), and
+  no contradiction of stated plot facts. `--epic` pushes scale even harder.
+  `--faithful` switches to content-aware mode (measures action density, never
+  fabricates combat absent from the text) for documentary-style accuracy.
+- **Diversity is enforced, not suggested (v0.7).** The plan gate rejects a
+  protagonist-locked plan: a single character may be present in ≤70% of scenes,
+  solo shots ≤35%, no scene_tag >35%. The TOML carries an EXECUTION CONTRACT that
+  forbids the agent from improvising its own orchestration / subagent brief or
+  hand-writing the output files — final `.txt` files come only from
+  `assemble_outputs.py` reading `.work/scene-*.md`, and a STEP 8 self-audit fails
+  the run if `scene-plan.md` / `scene-*.md` are missing.
 - **Original outputs only.** Do not copy web images, famous faces, celebrity
   likenesses, known-character faces, or exact IP/artist styles.
 - **QA-first.** A proofread gate runs before everything else and produces the
@@ -89,17 +99,19 @@ paste-ready files:
 
 ```
 /visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
-                            [--images N] [--videos M] [--music N] [--epic] [--force-redo]
+                            [--images N] [--videos M] [--music N] \
+                            [--epic] [--faithful] [--force-redo]
 ```
 
 `--style <id>` picks an art style up-front (skips the interactive recommend step);
 ids are in `references/style-catalog.md`. Omit it to get a recommendation and
 choose interactively. `--music N` sets the exact number of music loops (honored
 verbatim, no clamp); omit it for adaptive segmentation (default 4, clamped to [3,5]).
-`--epic` amplifies scale — bumps the recommended scene-mix action band one notch
-and favors wide spectacle — but still never fabricates combat/armies the story
-does not contain (it amplifies real beats only). Best for stories that genuinely
-support grand scale.
+`--epic` pushes the default spectacle band one notch higher (bigger maps, armies,
+crowds). `--faithful` switches OFF dramatization — scene mix follows measured action
+density and the planner renders only what the chapters contain (no invented combat).
+Default (neither flag) = spectacle: rich map/group/action scenes, dramatized within
+the genre/identity/continuity rails.
 
 ## Input Spec
 
