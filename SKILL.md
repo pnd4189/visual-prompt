@@ -23,13 +23,24 @@ paste-ready files:
   (Cinematography → Subject → Action `[00:00–00:02.5]` → Context →
   Style & Ambiance, audio embedded as scene layer).
 - `<input>_music_prompts.txt` — instrumental Lyria 3 music prompts, one per
-  mood region of the story arc (default 4, `--music N` override).
+  mood region of the story arc (default 4, `--music N` override), written as
+  gentle emotional background underscore for narration, each block using a
+  Chap-5-style `prompt paragraph + Tags:` structure and targeting a 2-3 minute
+  seamless background loop.
 
 ## Philosophy
 
 - **Agy model is the loop driver.** The active Antigravity/Agy model reads input,
   plans scenes, writes prompts, and runs self-checks. Python only handles I/O the
   model can't do safely.
+- **Never delegate generation to an external model (absolute).** Every generated
+  artifact (QA, bible, scene-plan, image/video/music prompts) must come from THIS
+  active model's own output (or an Agy subagent using the `@prompts/*.md`). Do NOT
+  shell out to the `gemini` CLI, any other LLM CLI, or a model API (curl/requests/
+  SDK), and do NOT subprocess to any LLM to split batches or beat rate-limits.
+  `subprocess` is for deterministic I/O only (file, git, ffmpeg, imagemagick, and
+  the pure-I/O helpers in `scripts/`). Hitting your own quota → stop and tell the
+  user; never fall back to an external model. See the TOML `RULE 0`.
 - **Deep prompt quality is mandatory.** Image/video/music prompts must include
   layered story DNA, character/prop locks, map-scale environment, foreground/
   midground/background composition, lighting/palette, action/energy/audio, and
@@ -54,45 +65,53 @@ paste-ready files:
 - **QA-first.** A proofread gate runs before everything else and produces the
   single QA'd source of truth that all downstream steps (bible, genre, scenes,
   music) consume. The skill no longer assumes pre-proofread input.
+- **Cross-file continuity first.** Before QA, the workflow checks whether the
+  first chapter in the current file follows the previous chapter from nearby
+  `_qa.txt` / `.txt` files. A likely skipped, repeated, or non-continuing chapter
+  halts the run instead of being hidden by proofreading.
 - **Reuses proven I/O scripts** from `chinese-novel-proofreader` v3.6.
 - **Character bible verbatim.** Identity Anchor is pasted byte-for-byte into
   every scene so the same character looks the same across all images.
 - **Cross-file series support** via `--series <name>` flag — bible persists in
   `~/.gemini/bibles/<series>.md`.
 
-## Workflow (9 steps)
+## Workflow (10 steps)
 
 1. **Load input** → `python3 scripts/load_input.py` → `.work/chapters.json`
-2. **QA proofread** — LLM fixes residual Chinese/English, grammar, clunky MT
+2. **Cross-file continuity audit** — `scripts/check_previous_continuity.py`
+   finds the previous chapter file and the model compares previous tail vs current
+   opening for skipped/repeated/non-continuing chapters.
+3. **QA proofread** — LLM fixes residual Chinese/English, grammar, clunky MT
    sentences, splits long sentences (moderate, no plot change). Resume-safe per
    chapter. `scripts/assemble_qa.py` writes `.work/chapters_qa.json` (downstream
    source) + `<input>_qa.txt` (TTS file). Always runs.
-3. **Bible** — extract (new series) or augment (existing series) the
+4. **Bible** — extract (new series) or augment (existing series) the
    `character-bible.md` file. Augment is APPEND-ONLY. Reads the QA'd text.
-4. **Genre detect** — sample 3 chapters (first/middle/last) → classify into
+5. **Genre detect** — sample 3 chapters (first/middle/last) → classify into
    tiên hiệp / huyền huyễn / đô thị / cổ điển / võ hiệp. Refuses đam mỹ /
    ngôn tình.
-5. **Style recommend + select** — recommend an art style for the genre (default
+6. **Style recommend + select** — recommend an art style for the genre (default
    #1 + alternatives) and ask the user to pick (Enter = #1, or type an id);
    `--style <id>` skips the prompt. Headless / no answer → fallback to #1. The
    chosen style is materialized to `.work/active-style.md` and feeds a
    `style_hash` into the scene cache key. Genre and style are decoupled — any of
    the 18 styles works for any genre.
-6. **Scene count** — `python3 scripts/calc_scene_count.py` →
+7. **Scene count** — `python3 scripts/calc_scene_count.py` →
    default `images = clamp(round(wc/120), 120, 150)`, `videos = max(20, round(images/6))`;
    CLI overrides are honored exactly.
-7. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
+8. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
    `.work/scene-NNN.md` files, using the chosen style for Style + negatives.
    Resume-safe via SHA1 cache (busts when style changes). Two deterministic gates
    guard quality: a **plan gate** (`validate_scene_plan.py`) rejects adjacent
    near-duplicate scenes + fragment synopses (bounded revise loop), and a **depth
    gate** at assembly rejects shallow blocks (missing headers, word count out of
    range, thin negatives, video over 3800 chars) and regenerates them (bounded).
-8. **Music prompts** — LLM segments the emotional arc into N mood regions
+9. **Music prompts** — LLM segments the emotional arc into N mood regions
    (default 4, clamp [3,5]; `--music N` honored verbatim) → one instrumental
-   Lyria prompt per region in `.work/music-NNN.md`. Score register follows the
-   chosen style's `music/score anchor`. Resume-safe.
-9. **Assemble** → `python3 scripts/assemble_outputs.py` writes the image, video,
+   Lyria prompt per region in `.work/music-NNN.md`. Prompts must be gentle,
+   deep, emotional background music, never fast/dramatic/trailer-like. Score
+   register follows the chosen style's `music/score anchor`. Resume-safe.
+10. **Assemble** → `python3 scripts/assemble_outputs.py` writes the image, video,
    and music `.txt` files next to the input.
 
 ## Usage
@@ -144,11 +163,13 @@ the genre/identity/continuity rails.
 - **Headless runs:** the style select step is interactive (CLI foreground). If run
   headless or no answer is given, it falls back to the recommended #1 — use
   `--style <id>` to choose explicitly.
-- **Music score register** now follows the chosen style's `music/score anchor`
-  (no longer hardcoded). Segmentation/mood logic is unchanged.
+- **Music score register** follows the chosen style's `music/score anchor`, but
+  every prompt is softened into instrumental background underscore for story
+  narration.
 - **Lyria music:** prompts are instrumental-only with vocal-exclusion negatives,
-  but the model cannot 100% guarantee no vocal-like pads. Region→timeline sync
-  is manual — place each loop by its `Chương X-Y` label.
+  but the model cannot 100% guarantee no vocal-like pads. Each block is one
+  English music prompt paragraph followed by `Tags:`; region→timeline sync is
+  manual via the `.work/music-NNN.md` frontmatter.
 - **Music resume is best-effort:** unlike scenes (fixed `scene-plan.md`), the
   mood-region segmentation is re-derived by the LLM each run and not persisted,
   so a re-run may regenerate music loops if the segmentation shifts. Use

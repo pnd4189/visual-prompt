@@ -7,7 +7,36 @@ Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa t
 ## ⛔ EXECUTION CONTRACT — ĐỌC TRƯỚC, BẮT BUỘC, KHÔNG ĐƯỢC TỰ CHẾ
 
 Skill này có pipeline cố định. Bạn PHẢI thực thi đúng các STEP dưới, dùng đúng các
-file `@prompts/*.md` và `scripts/*.py`. TUYỆT ĐỐI KHÔNG:
+file `@prompts/*.md` và `scripts/*.py`.
+
+### 🚫 RULE 0 — CẤM GỌI MODEL NGOÀI (tuyệt đối, ưu tiên cao nhất)
+
+Mọi nội dung sinh ra trong pipeline này (QA, bible, scene-plan, scene prompt,
+image/video/music prompt) PHẢI do CHÍNH active Agy model này tự xuất ra qua tool
+output của bạn (hoặc subagent Agy dùng đúng `@prompts/*.md`). Bạn LÀ model xử lý —
+KHÔNG được ủy thác việc sinh nội dung cho bất kỳ model ngoài nào:
+
+- ❌ KHÔNG gọi `gemini` CLI (vd `node .../gemini -p ...`) hay BẤT KỲ LLM CLI nào khác.
+- ❌ KHÔNG gọi model API (Gemini / OpenAI / Anthropic / ...) qua curl / requests /
+  httpx / SDK (`google.generativeai`, `genai`, `openai`, `anthropic`, ...).
+- ❌ KHÔNG subprocess/shell tới bất kỳ tiến trình LLM nào để "chia batch", "song
+  song hoá", hay tăng tốc sinh prompt.
+- ❌ KHÔNG chạy script có sẵn nếu nó gọi model ngoài. Nếu thấy script trong
+  `scripts/` shell-out sang `gemini`/LLM để sinh prompt → KHÔNG chạy, báo cho user.
+
+`subprocess` CHỈ hợp lệ cho **I/O xác định**: đọc/ghi file, git, ffmpeg, imagemagick,
+và các python helper thuần I/O trong `scripts/` (load_input, assemble_*, validate_*,
+calc_scene_count, check_previous_continuity). TUYỆT ĐỐI KHÔNG dùng subprocess để sinh
+text/prompt.
+
+Chia batch = bạn (hoặc subagent Agy) tự viết TỪNG file `.work/scene-NNN.md` bằng
+write tool — không phải nhờ model khác viết hộ. Gặp rate-limit / 429: theo đúng
+"RATE-LIMIT / 429" ở STEP 6 (backoff + parent-agent loop tuần tự). Hết quota của
+chính bạn = DỪNG và báo user, KHÔNG fallback sang model ngoài.
+
+### ⛔ EXECUTION CONTRACT — KHÔNG ĐƯỢC TỰ CHẾ
+
+TUYỆT ĐỐI KHÔNG:
 
 1. ❌ KHÔNG tự viết script orchestration riêng (split.py, v.v.) để chia/gộp việc.
 2. ❌ KHÔNG tự soạn "subagent_instructions" hay brief rút gọn của riêng bạn thay
@@ -24,6 +53,11 @@ file `@prompts/*.md` và `scripts/*.py`. TUYỆT ĐỐI KHÔNG:
    Prompt cảnh PHẢI do LLM expand theo `@prompts/prompt-expander-*.md` — generator
    hardcode cho ra output template-hoá, phá thiết kế "deep prompt". Khi đụng
    429 / RESOURCE_EXHAUSTED, theo đúng "RATE-LIMIT / 429" ở STEP 6, KHÔNG improvise.
+6. ❌ KHÔNG tạo `generate_scene_plan.py`, `generate_all_scenes.py`, hoặc script
+   tương tự để tự sinh scene-plan / scene prompt / music prompt. Nếu subagent kẹt
+   permission, rate-limit, hoặc startup chậm: xin quyền, giảm parallelism, chuyển
+   parent-agent LLM loop tuần tự, hoặc HALT. Tuyệt đối không fallback sang script
+   template hoá.
 
 Subagent completion message KHÔNG phải bằng chứng hoàn tất. Mỗi bước batch chỉ được
 coi là done khi parent process kiểm tra artifact thật trên filesystem: đúng file,
@@ -43,6 +77,11 @@ lighting/palette, action/energy/audio, và negative/safety rõ. Không sinh prom
 qua loa kiểu "wide shot, cinematic, beautiful". Không copy ảnh trên mạng, không
 copy mặt người nổi tiếng/nhân vật nổi tiếng, không yêu cầu bắt chước y hệt IP,
 phim, game, anime, studio, hoặc living artist.
+
+Nhạc nền bắt buộc: prompt music dùng cho nghe truyện phải là instrumental nhẹ
+nhàng, sâu lắng, cảm xúc, đậm chất tiên hiệp/kiếm hiệp. TUYỆT ĐỐI KHÔNG tạo nhạc
+sôi động, trailer, battle score, dồn dập, kịch tính quá mức, percussion-heavy,
+hoặc cao trào áp đảo giọng đọc.
 
 Input args: {{args}}
 
@@ -104,6 +143,46 @@ Compute `input_hash = sha1(file_bytes(input_path))[:12]` → ghi vào
 `.work/input.hash` (file plain text 1 dòng).
 
 Đếm chapters K. Print: `Loaded K chapters.`
+
+---
+
+## STEP 1.25 — CROSS-FILE CONTINUITY AUDIT (mandatory before QA)
+
+Mục tiêu: chống lỗi nhảy chương / bỏ sót chương khi xử lý nhiều file liên tiếp.
+Ví dụ file hiện tại bắt đầu Chương 11 thì phải kiểm tra Chương 11 có nối tiếp
+Chương 10 của file trước không.
+
+Chạy:
+
+```bash
+python3 scripts/check_previous_continuity.py "<input_path>" > .work/continuity-context.json
+```
+
+Parse stdout JSON.
+
+- Nếu `status = first_chapter` → không cần file trước, proceed STEP 1.5.
+- Nếu `status = previous_not_found` → HALT, in rõ:
+  `Lỗi continuity: file hiện tại bắt đầu Chương <first>, nhưng không tìm thấy Chương <first-1> trong các file .txt gần đó. Kiểm tra lại thư mục/file trước để tránh nhảy chương hoặc bỏ sót chương.`
+- Nếu `status = candidate_found`:
+  1. Kiểm tra số chương: `previous_chapter == first_chapter - 1`. Nếu sai → HALT.
+  2. Đọc `previous_tail_excerpt` và `current_first_excerpt`.
+  3. Tự đánh giá semantic continuity: Chương đầu file hiện tại có tiếp nối hợp lý
+     với đoạn cuối chương trước không? Có dấu hiệu nhảy cảnh bất thường, thiếu
+     đoạn chuyển, lặp chương, đảo thứ tự, hoặc mất chương không?
+  4. Ghi `.work/continuity-check.md`:
+     ```
+     # Cross-file Continuity Check
+     Status: PASS | WARN | FAIL
+     Current first: Chương <N> — <current_first_title>
+     Previous file: <previous_path>
+     Previous last: Chương <N-1> — <previous_title>
+     Finding: <1-3 câu tiếng Việt, nêu vì sao liền mạch hoặc vì sao nghi ngờ>
+     ```
+  5. Nếu `FAIL` → HALT, không chạy QA. Nếu `WARN` → in cảnh báo và hỏi user xác
+     nhận trước khi tiếp tục. Nếu `PASS` → proceed STEP 1.5.
+
+QUY TẮC QA: không được dùng bước hiệu đính để "vá" lỗi continuity. QA chỉ sửa chữ
+trong từng chương; nếu nguồn nhảy chương/bỏ chương thì phải dừng trước QA.
 
 ---
 
@@ -312,7 +391,8 @@ cách sau (KHÔNG tự chế brief khác):
 **RATE-LIMIT / 429 (RESOURCE_EXHAUSTED) — bắt buộc xử lý, KHÔNG improvise:**
 Spawn nhiều subagent ở scale lớn rất dễ đụng 429. Khi gặp 429/RESOURCE_EXHAUSTED:
 - KHÔNG retry ngay (sẽ đụng lại). KHÔNG tự chế Python generator deterministic để né
-  (vi phạm EXECUTION CONTRACT #5 — output sẽ template-hoá).
+  (vi phạm EXECUTION CONTRACT #5 — output sẽ template-hoá). KHÔNG gọi `gemini` CLI
+  hay model API/LLM ngoài để né rate-limit (vi phạm RULE 0 — bạn phải tự sinh prompt).
 - Backoff: dừng spawn wave mới, đợi 30s → 60s → 120s (exponential) giữa các lần thử.
 - Nếu sau 2 lần backoff vẫn 429: CHUYỂN sang parent-agent loop TUẦN TỰ cho các
   scene_id còn thiếu — parent tự expand từng cảnh theo `@prompts/prompt-expander-*.md`
@@ -381,6 +461,10 @@ python3 scripts/validate_artifacts.py \
 ## STEP 6.5 — MUSIC PROMPTS (resume-safe loop)
 
 Sinh prompt nhạc nền Lyria 3 (instrumental) theo cung bậc cảm xúc truyện.
+Tất cả loop phải là nhạc nền không lời, nhẹ nhàng, sâu lắng, cảm xúc, có màu sắc
+tiên hiệp/kiếm hiệp để nằm dưới giọng đọc. Không tạo trailer music, battle music,
+fast action cue, war drums dồn dập, stinger, crescendo quá mạnh, hoặc nhạc căng
+thẳng lấn át narration.
 
 Resolve số vùng N:
 - Nếu `--music N` với N ≥ 1 → dùng ĐÚNG N (verbatim, KHÔNG clamp).
@@ -417,8 +501,11 @@ For mỗi vùng region (loop_index 1..N):
 
   b. Execute music-prompt-builder cho vùng này → write music_path với
      frontmatter `{loop_index, total, chapter_start, chapter_end, mood, cache_key}`
-     + body = khối Lyria prompt (English) có nhãn VN, `Instrumental.`, dòng
-     Negative, dòng Loop.
+     + body = khối Lyria prompt (English) theo template:
+     một paragraph prompt 55-85 words kết thúc bằng
+     `loop-ready 2-3 minute seamless background loop, no vocals, no lyrics, instrumental only.`
+     rồi một dòng `Tags:` 12-16 tags. Không dùng `--- LOOP`, `Negative:`, hoặc
+     `Loop:` trong body final.
 
   c. Log: `Music <NNN>/<N> done (mood: <bucket>, Chương <X>-<Y>)`.
 
