@@ -26,6 +26,12 @@ MODEL="${VP_MODEL:-Gemini 3.1 Pro (High)}"
 MUSIC="${VP_MUSIC:-4}"
 DRYRUN="${VP_DRYRUN:-0}"
 
+# Skill root = repo dir holding scripts/ + prompts/. agy -p inherits the launch
+# CWD; we run it from here so the skill's relative paths (scripts/load_input.py,
+# @prompts/*.md) resolve. Otherwise the model can't find them and may launch a
+# runaway `find /home -name ...` that traverses gdrive mounts for hours.
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 die() { echo "❌ $*" >&2; exit 1; }
 
 # kebab-case a folder name into a stable, filesystem-safe series id
@@ -131,18 +137,19 @@ for f in "${INPUTS[@]}"; do
   echo "▶ $tag — đang chạy${STYLE:+ (style: $STYLE)}"
 
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 3h --dangerously-skip-permissions --add-dir \"$FOLDER\""
+    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 3h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$FOLDER\")"
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
   fi
 
   log=$(mktemp)
-  agy -p "$cmd" \
+  ( cd "$SKILL_DIR" && agy -p "$cmd" \
       --model "$MODEL" \
       --print-timeout 3h \
       --dangerously-skip-permissions \
-      --add-dir "$FOLDER" 2>&1 | tee "$log"
+      --add-dir "$SKILL_DIR" \
+      --add-dir "$FOLDER" ) 2>&1 | tee "$log"
 
   # First file just established the style — capture it and lock for the series.
   if [ -z "$STYLE" ]; then
