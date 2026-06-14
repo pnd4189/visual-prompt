@@ -152,8 +152,10 @@ for f in "${INPUTS[@]}"; do
       --add-dir "$FOLDER" ) 2>&1 | tee "$log"
 
   # First file just established the style — capture it and lock for the series.
+  # Read it from the materialized .work/active-style.md (deterministic: its first
+  # line is "### <id> — ...") rather than grepping the model's free-text stdout.
   if [ -z "$STYLE" ]; then
-    picked=$(grep -oE 'Style: [a-z0-9-]+' "$log" | head -1 | awk '{print $2}')
+    picked=$(sed -n 's/^### \([a-z0-9-][a-z0-9-]*\).*/\1/p' "$FOLDER/.work/active-style.md" 2>/dev/null | head -1)
     if [ -n "$picked" ]; then
       STYLE="$picked"
       conf_set "$CONF" style "$STYLE"
