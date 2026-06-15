@@ -170,6 +170,22 @@ for f in "${INPUTS[@]}"; do
   if [ ! -s "${stem}_image_prompts.txt" ]; then
     die "$tag — thiếu/rỗng ${stem}_image_prompts.txt. Dừng ở file này (chạy lại để resume)."
   fi
+
+  # Integrity gate: the legit pipeline never writes .py into .work, so any .py
+  # there means the model bypassed the LLM expander with its own generator —
+  # surface it. Then deterministically normalize every character anchor against
+  # the series bible so a drifted run can't ship an inconsistent protagonist.
+  if ls "$FOLDER"/.work/*.py >/dev/null 2>&1; then
+    echo "⚠ $tag — phát hiện script tự chế trong .work (model bypass expander) — kiểm/sửa anchor:"
+  fi
+  bible_file="$HOME/.gemini/bibles/$SERIES.md"
+  if [ -f "$bible_file" ]; then
+    for kind in image video; do
+      pf="${stem}_${kind}_prompts.txt"
+      [ -s "$pf" ] && python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
+        --bible "$bible_file" --output "$pf" --fix
+    done
+  fi
   echo "✅ $tag — xong"
 done
 
