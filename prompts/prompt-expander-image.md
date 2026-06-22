@@ -29,8 +29,8 @@ Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
 2. Load `@references/scene-tag-camera-mapping.md` — pick row matching
    `scene_row.scene_tag` for Camera defaults.
 3. Load `@references/negative-lists.md` — compose 5-layer negative (universal
-   anti-Western + genre + AI-defense + likeness/copyright + style negatives), cap 28 items. Layer 5 =
-   first 4 items from the `style negatives` field of `.work/active-style.md`.
+   anti-Western + genre + AI-defense + safety/compliance + style negatives), cap 28 items
+   (8+5+5+6+4). Layer 5 = first 4 items from the `style negatives` field of `.work/active-style.md`.
 4. Load `@references/genre-keywords.md` — translate VN trigger words from
    the chapter excerpt into EN visual vocabulary.
 5. Build the prompt with these EXACT sections in order:
@@ -47,9 +47,25 @@ Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
    Negative: ...
    ```
 6. Target 350–550 words total. Hard penalty if >650.
-7. The `Style` section MUST use the `Style block` of `.work/active-style.md` and
-   must NOT inject named IP, living artist, celebrity, or famous-character likeness
-   references. The chosen style decides the look through original descriptors.
+7. **SAFETY RULE (hard, applies to ALL sections — not just Style).** The prompt
+   must avoid copyright + platform-policy + religious-sensitivity violations:
+   - **No brand / logo / trademark names** in any positive section (Nike, Apple,
+     Gucci, Coca-Cola, …) — describe generic objects instead.
+   - **No real public figures / celebrity / actor names or "looks like / in the
+     style of / giống <real person>"** likeness. Use the bible's original faces.
+   - **No copyrighted IP characters** (Naruto, Pikachu, Iron Man, Elsa, …) or
+     exact branded/IP costumes; the chosen style decides the look through original
+     descriptors.
+   - **No sexual / nudity** content (no nudity, topless, lingerie, suggestive
+     exposure) — keep characters modestly clothed.
+   - **No EXCESSIVE gore** (decapitation, disembowelment, gushing blood, torture).
+     Combat / đấu pháp / stylized light blood stay ALLOWED — only graphic gore is
+     blocked.
+   - **Respect real religion.** Genre-native fictional cultivation imagery (tu
+     tiên, đạo sĩ, chùa, Daoist/Buddhist temples) is fine; do NOT depict, insult,
+     or desecrate REAL religion (real prophets/deities, sacred symbol + gore/nudity).
+   - If the chapter content itself is forbidden (e.g. explicit sexual or
+     gratuitously gory passage), **abstract it** into a non-graphic composition.
 8. **SPECTACLE BY DEFAULT — dramatize for visual richness.** This is YouTube
    entertainment. Build cinematic, layered compositions: action/combat, spell-duels
    (đấu pháp), daoist magic, multi-character framing, wide map-scale landscape,
@@ -61,6 +77,12 @@ Load ONLY the chapter referenced by `scene_row.chapter`. Do NOT load
    protagonist standing or gazing. (If `mode = faithful` is passed, do not invent
    combat/crowds absent from the chapter — render only what the text supports, but
    still richly composed.)
+9. **PLOT-FIT VARIATION.** Choose visual emphasis from the actual scene beat, not
+   from a canned hero template. A valid run should include varied landscapes,
+   factions, side characters, enemies, crowds, artifacts, chưởng lực / spell-force
+   exchanges, battle aftermath, travel scale, and emotional tableaus when the story
+   supports them. If `scene_row.characters` is a group or excludes the protagonist,
+   the image must visibly honor that focus.
 
 ## SUBJECT = THIS SCENE'S CHARACTERS ONLY (no global hero-lock)
 The Subject characters are EXACTLY `scene_row.characters` for this scene — no more,
@@ -68,6 +90,9 @@ no less. If the protagonist is NOT in `scene_row.characters`, do NOT insert them
 NEVER apply a blanket "every image features the protagonist" template — that is the
 exact monotony failure this skill forbids. When the row lists multiple characters or
 a group, frame them ALL, not just the most important one.
+If the row focuses on environment, artifact, chưởng lực, crowd, army, faction, or
+aftermath, the Subject/Composition must make that focus primary instead of turning
+it into a protagonist portrait.
 
 ## IDENTITY ANCHOR — VERBATIM, NOT PARAPHRASE
 For each character in `scene_row.characters`:
@@ -124,10 +149,15 @@ Negative: ...
 2. **Word count check** — count words in the prompt body. If >650 → trim
    Setting and Style first. If <350 → expand Story DNA, Composition, Lighting,
    and Atmosphere with concrete scene facts.
-3. **Negative count check** — 28 items max (10+5+5+4+4), comma-separated. The last
+3. **Negative count check** — 28 items max (8+5+5+6+4), comma-separated. The last
    4 are the style negatives from `.work/active-style.md`.
-4. **Safety check** — no copied web image, famous face, celebrity likeness,
-   known-character likeness, exact branded costume, or living-artist mimicry.
+4. **Safety check (categories 1–7)** — scan EVERY positive section, not just
+   Style: no brand/logo/trademark name; no real public figure / celebrity /
+   "looks like <real person>" likeness; no copyrighted IP character or exact
+   branded costume; no copied web image or living-artist mimicry; no nudity /
+   sexual exposure (keep modestly clothed); no excessive gore (combat OK, graphic
+   gore not); respect real religion (fictional cultivation imagery allowed). If any
+   appears → REWRITE the offending span to a generic/abstract equivalent.
 5. **Depth check** — prompt has foreground/midground/background, at least 3
    environment layers, concrete light direction, and scene-specific action or
    energy, AT LEAST as rich as the template `IMAGE EXAMPLE`. If the scene supports
@@ -142,6 +172,10 @@ Negative: ...
    location, layout, characters, and action.
 8. **Subject scope check** — Subject contains exactly `scene_row.characters`. If you
    added the protagonist to a scene that did not list them → REGENERATE.
+9. **Plot-fit diversity check** — If this prompt could be reused for another
+   chapter by only swapping a name, or if it ignores the scene tag's landscape /
+   combat / group / artifact focus, REGENERATE with concrete story-specific
+   staging.
 
 ## STDOUT SUMMARY
 ```

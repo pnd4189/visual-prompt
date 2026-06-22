@@ -23,17 +23,36 @@ beautiful." **Spectacle is the default** (YouTube entertainment) — actively bu
   or crowd/army motion
 - concrete costume, weapon, prop, terrain, weather, particles, and light direction
 
+Scene diversity must be plot-fit, not templated. Across a run, prompts should vary
+between landscapes, named and unnamed character groups, side characters, enemies,
+crowds, combat, chưởng lực / spell-force collisions, artifacts, aftermath, travel,
+and emotional tableaus according to the chapter's actual narrative beat. Do not
+spotlight the protagonist by default.
+
 You may DRAMATIZE beyond the literal chapter for cinematic richness, as long as it
 stays genre-consistent, identity-consistent (verbatim bible anchor for named
 characters), and does not contradict stated plot facts. (`--faithful` mode disables
 this — render only what the text supports.)
 
-Originality and likeness safety:
-- Do not copy a web image, thumbnail, poster, frame, or composition.
-- Do not request a celebrity face, famous actor likeness, or known fictional
-  character likeness.
-- Do not ask for an exact branded/IP look or living-artist imitation.
-- Use original descriptive style vocabulary from `.work/active-style.md`.
+Safety & Compliance (8 blocked categories — enforced by the content-safety gate,
+see [[blocklist-content-safety]]):
+1. **Brand / logo / trademark** — no named brands (Nike, Apple, Gucci, …).
+2. **Real public figures** — no celebrity/actor faces or "looks like <real
+   person>" likeness; use the bible's original faces.
+3. **Copyrighted IP characters** — no Naruto/Pikachu/Elsa-style known characters.
+4. **Copyrighted images/artworks** — no copying a web image, thumbnail, poster,
+   frame, composition, or living-artist imitation.
+5. **Excessive gore** — combat / đấu pháp / stylized light blood OK; no
+   decapitation, disembowelment, gushing blood, or torture.
+6. **Sexual / nudity** — keep characters modestly clothed; no suggestive exposure.
+7. **Religious disrespect** — fictional cultivation imagery (tu tiên, đạo sĩ,
+   Daoist/Buddhist temples) is fine; do NOT depict/desecrate REAL religion.
+8. **Live-action VIDEO** — video prompts must be the chosen animated/illustrated
+   style; no live-action, photoreal footage, or real-human likeness. (Painterly
+   "semi-realistic" catalog styles are still allowed — the ban targets live-action
+   realism, not painterly art.)
+
+Use original descriptive style vocabulary from `.work/active-style.md`.
 
 ---
 
@@ -113,8 +132,9 @@ leaning diagonally to reinforce the gale.
 Negative: no medieval European armor, no winged dragons, no gothic cathedral,
 no blonde hair, no blue eyes default, no jeans, no sneakers, no glasses, no neon,
 no logo, no watermark, no text overlay, no distorted hands, no extra fingers,
-no copied web image, no celebrity face, no known-character likeness, no exact
-branded costume, no photographic skin pores on close-ups.
+no copied web image, no real public figure or celebrity face, no copyrighted
+character likeness, no brand logo or trademark, no nudity or suggestive exposure,
+no graphic gore or blood splatter, no photographic skin pores on close-ups.
 ```
 
 ---

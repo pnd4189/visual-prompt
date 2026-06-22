@@ -16,8 +16,19 @@ Format: Google Veo3 official 5-part formula.
 ## TASK
 1. Load `@references/visual-prompt-template.md` (video format section) AND
    `.work/active-style.md`. The `Style & Ambiance` section uses the active style's
-   `Style block` and descriptive style vocabulary; do NOT inject named IP, living
-   artist, celebrity, or famous-character likeness references.
+   `Style block` and descriptive style vocabulary.
+   **SAFETY RULE (hard, all sections):** no brand/logo/trademark name; no real
+   public figure / celebrity / "looks like <real person>" likeness; no copyrighted
+   IP character or exact branded costume; no nudity/sexual exposure (keep modestly
+   clothed); no EXCESSIVE gore (combat/đấu pháp/stylized light blood OK, graphic
+   gore not); respect real religion (genre-native cultivation imagery allowed, no
+   depicting/desecrating REAL religion); abstract forbidden chapter content.
+   **#8 ANIMATION-ONLY (hard):** the video MUST render in the chosen animated /
+   illustrated style. ABSOLUTELY no live-action, no photoreal footage, no real
+   human face/skin, no deepfake realism (avoid AI-slop / inauthentic-content
+   policy). NOTE: the catalog's painterly styles ("semi-realistic digital
+   painting", "photo-real lighting", "realistic textures") ARE allowed — the ban
+   targets live-action realism, not painterly art.
 2. Load `@references/scene-tag-camera-mapping.md` — pick row matching
    `scene_row.scene_tag` for Cinematography defaults.
 3. Build the prompt with these EXACT sections in order:
@@ -44,6 +55,11 @@ Format: Google Veo3 official 5-part formula.
    amplify beyond the literal chapter (add supporting figures, scale, dramatic
    energy) within the genre/identity/continuity rails. NEVER produce a static solo
    portrait clip. (If `mode = faithful`, dramatize only what the text supports.)
+8. **PLOT-FIT VARIATION.** The video must animate the scene row's actual focus:
+   landscape traversal, faction movement, side-character reaction, chưởng lực
+   collision, weapon arc, ritual formation, crowd pressure, artifact reveal, or
+   aftermath. Do not convert every video into a protagonist close-up or a generic
+   sword draw.
 
 ## ACTION BEAT RULES
 - Each beat: ONE concrete physical action (step, turn, draw, strike, gaze).
@@ -95,10 +111,22 @@ Use the Write tool to overwrite the file with image block + video block
 6. **Depth check** — Action beats use concrete physical motion, Style & Ambiance
    includes lighting/color/audio/safety negatives, and Context includes map scale
    or supporting elements when available.
-7. **Safety check** — no copied web image, famous face, celebrity likeness,
-   known-character likeness, exact branded costume, or living-artist mimicry.
+7. **Safety check (categories 1–8)** — no brand/logo/trademark name; no real
+   public figure / celebrity / "looks like <real person>" likeness; no copyrighted
+   IP character or exact branded costume; no copied web image or living-artist
+   mimicry; no nudity/sexual exposure (modestly clothed); no excessive gore (combat
+   OK); respect real religion (fictional cultivation allowed). **#8:** the clip is
+   the chosen animated style — NO live-action, NO photoreal footage, NO real human
+   face/skin, NO deepfake. Embed these as inline video negatives in the Style &
+   Ambiance "avoiding …" clause: `no live-action, no photorealistic footage, no
+   real human face or skin, no deepfake realism`. (Painterly "semi-realistic"
+   styles stay allowed.) If any violation appears → REWRITE that span.
 8. **All 5 sections present** with exact headers `Cinematography:`,
    `Subject:`, `Action:`, `Context:`, `Style & Ambiance:`.
+9. **No hero-template check** — If `scene_row.characters` excludes the protagonist
+   or includes a group, the Action beats must visibly follow that focus. If the
+   beats could fit any chapter after swapping names, REWRITE with concrete motion
+   from this scene.
 
 ## STDOUT SUMMARY
 ```

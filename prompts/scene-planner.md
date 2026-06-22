@@ -40,6 +40,10 @@ video expansion.
    rotate the focus across side characters and factions — do not let the
    protagonist occupy every frame. Named characters must come from the bible; you
    may freely add UNNAMED groups. (See CINEMATIC AMPLIFICATION below.)
+7. The plan must follow the actual story beats chapter by chapter. Diversity does
+   NOT mean a fixed template rotation. Choose landscapes, character tableaus,
+   combat, spell power, artifacts, travel, aftermath, dialogue, and faction/crowd
+   shots according to what the narrative is doing at that point.
 
 ## SCENE MIX TARGETS — SPECTACLE BY DEFAULT
 
@@ -74,6 +78,11 @@ beyond what a given chapter states literally. Proactively, across the run:
   cinematic and beautiful — wherever the arc can carry them.
 - **Vary the focus character:** not every scene centers the protagonist. Feature
   side characters, antagonists, factions, and pure-environment beats.
+- **Plot-fit diversity:** if the chapter is travel-heavy, use routes, terrain,
+  weather, caravans, pursuit shadows, and destination reveals; if it is combat,
+  show chưởng lực, weapon arcs, impact, formations, wounds, and aftermath; if it is
+  political/dialogue, use group blocking, props, surveillance, architecture, and
+  emotional reaction shots. Never use one canned prompt pattern for all scenes.
 - **Camera / scale / weather variety:** alternate wide/medium/close, low/high
   angles, dawn/dusk/storm/mist — never repeat the same framing back to back.
 
@@ -85,6 +94,15 @@ beyond what a given chapter states literally. Proactively, across the run:
   do not show a character the story has killed, or reverse a stated outcome).
 Within those rails, dramatize freely. Copyright/likeness safety negatives still
 apply (no celebrity face, no copied web image — handled in the expander).
+
+**CONTENT-SAFETY PLANNING RAIL:** never plan a scene whose *purpose* is to depict
+a named brand/logo/IP, a real public figure, sexual/nudity content, excessive gore
+(decapitation, disembowelment, gushing blood, torture), or the insulting/
+desecrating of REAL religion. If the chapter beat is inherently such content,
+abstract it into a non-graphic, generic composition. This is NOT a ban on
+spectacle: combat / đấu pháp / stylized light blood and genre-native fictional
+cultivation imagery (tu tiên, đạo sĩ, Daoist/Buddhist temples) remain fully
+allowed — only the categories above are off-limits.
 
 ## HARD DIVERSITY QUOTA (validator-enforced — `validate_scene_plan.py`)
 
@@ -99,6 +117,11 @@ revise:
   elders, disciples, soldiers, crowds — named from bible or unnamed groups).
 - **No single scene_tag > 35%.** Spread across establishing, group, combat-map,
   daoist-magic, travel, reveal, ritual, dialogue, emotional, action.
+- **No protagonist spotlight template.** The `synopsis` and `characters` fields
+  must not repeatedly frame the protagonist as the sole center while the rest of
+  the chapter is reduced to background. If the story beat belongs to a location,
+  faction, enemy, group, artifact, chưởng lực exchange, or aftermath, make that the
+  actual focus.
 
 Plan the FULL run to satisfy these before writing. A protagonist-locked plan is
 invalid output.

@@ -1,7 +1,7 @@
 ---
 name: visual-prompt
-version: 0.8.0
-description: Generate deep, copyright-safe, styleable image + video prompts (18-style catalog, recommend + select per run), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
+version: 0.9.0
+description: Generate deep, policy-safe, styleable image + video prompts (18-style catalog, recommend + select per run) with a deterministic content-safety gate (no brands/real people/IP/gore/sexual/anti-religion; video animation-only), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
 license: MIT
 contextFileName: SKILL.md
 ---
@@ -45,6 +45,14 @@ paste-ready files:
   layered story DNA, character/prop locks, map-scale environment, foreground/
   midground/background composition, lighting/palette, action/energy/audio, and
   negative/safety rules. Shallow prompts are invalid.
+- **Content-safety is enforced (8 categories).** Outputs must avoid brands/logos,
+  real public figures, copyrighted IP characters, copied images/artworks, excessive
+  gore, sexual/nudity, and disrespect of real religion; VIDEO must be the chosen
+  animation style (no live-action / photoreal footage). Soft prevention lives in
+  the expanders/planner; a deterministic gate (`scripts/check_content_safety.py` +
+  `references/blocklist-content-safety.md`) strips/softens at STEP 7 and re-scans at
+  STEP 8. Combat/đấu pháp and fictional cultivation imagery stay allowed; religion
+  is WARN-and-ship.
 - **Spectacle by default.** This pipeline feeds YouTube entertainment videos, so
   the default register builds visually rich, varied scenes — wide map/landscape,
   multi-character framing, combat, spell-duels (đấu pháp), daoist magic — and is
@@ -183,8 +191,8 @@ visual-prompt/
 ├── gemini-extension.json
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
-├── references/               ← 9 static knowledge files (incl. music-mood-mapping, style-catalog, genre-style-recommendation)
-└── scripts/                  ← 7 Python I/O helpers (incl. assemble_qa, validate_scene_plan)
+├── references/               ← 10 static knowledge files (incl. style-catalog, genre-style-recommendation, blocklist-content-safety)
+└── scripts/                  ← 8 Python helpers (incl. assemble_qa, validate_scene_plan, check_content_safety)
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.

@@ -34,6 +34,16 @@ write tool — không phải nhờ model khác viết hộ. Gặp rate-limit / 4
 "RATE-LIMIT / 429" ở STEP 6 (backoff + parent-agent loop tuần tự). Hết quota của
 chính bạn = DỪNG và báo user, KHÔNG fallback sang model ngoài.
 
+### 🛡️ RULE — CONTENT-SAFETY (bắt buộc)
+
+Mọi image/video prompt PHẢI tránh 8 nhóm: (1) brand/logo/trademark, (2) người thật
+/ người nổi tiếng, (3) nhân vật IP có bản quyền, (4) ảnh/artwork có bản quyền,
+(5) gore quá mức (combat/đấu pháp/máu nhẹ stylized vẫn OK), (6) khoả thân/tình dục,
+(7) xúc phạm/bóp méo TÔN GIÁO THẬT (ảnh tu tiên/đạo sĩ/chùa hư cấu vẫn OK), (8) video
+PHẢI là phong cách hoạt hình/illustration đã chọn — KHÔNG live-action / photoreal
+footage / người thật. Gate `scripts/check_content_safety.py` enforce ở STEP 7 (`--fix`)
++ STEP 8 (re-scan). KHÔNG tự tay sửa output `.txt` để né gate; religion = WARN-and-ship.
+
 ### ⛔ EXECUTION CONTRACT — KHÔNG ĐƯỢC TỰ CHẾ
 
 TUYỆT ĐỐI KHÔNG:
@@ -563,6 +573,22 @@ python3 scripts/validate_artifacts.py \
 
 Print: `Depth gate: <clean | N violations sau <r> regen>`.
 
+**Content-safety gate (`--fix`):** sau khi assemble xong (file `.txt` đã là bản
+cuối), chạy gate để strip/soften brand/IP/likeness/gore/sexual + ép video
+animation-only. Religion = WARN-only (không tự sửa).
+
+```bash
+python3 scripts/check_content_safety.py \
+  --blocklist references/blocklist-content-safety.md \
+  --output "<stem>_image_prompts.txt" --fix
+# chỉ khi video_count > 0:
+python3 scripts/check_content_safety.py \
+  --blocklist references/blocklist-content-safety.md \
+  --output "<stem>_video_prompts.txt" --fix
+```
+
+Gate sửa trực tiếp `.txt` (giống anchor gate). KHÔNG tự tay sửa output để né gate.
+
 ---
 
 ## STEP 8 — SELF-AUDIT (bắt buộc, trước khi báo hoàn tất)
@@ -588,6 +614,19 @@ Xác nhận:
    ghi. Nếu bạn đã tự ghi file → xoá, chạy lại STEP 7.
 
 Print: `Self-audit: <PASS | FAIL: lý do>`.
+
+**Content-safety re-scan (KHÔNG `--fix`):** chạy lại gate trên file cuối để xác
+nhận sạch (hoặc chỉ còn WARN religion). Exit 0 → PASS; exit 2 → WARN (KHÔNG fail
+run — đưa residual vào danh sách Warnings của POST-RUN SUMMARY).
+
+```bash
+python3 scripts/check_content_safety.py \
+  --blocklist references/blocklist-content-safety.md \
+  --output "<stem>_image_prompts.txt"
+# và "<stem>_video_prompts.txt" nếu có video.
+```
+
+Print: `Content-safety: <PASS | WARN: <residual>>`.
 
 ---
 

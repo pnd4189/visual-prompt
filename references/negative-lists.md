@@ -7,16 +7,16 @@ Five-layer negative prompt construction. Append all five layers to the
 Style & Ambiance ("avoiding X, X, X") since Veo3 ignores standalone negative
 sections.
 
-**Max 28 items total** across all 5 layers (token budget): 10 + 5 + 5 + 4 + 4.
+**Max 28 items total** across all 5 layers (token budget): 8 + 5 + 5 + 6 + 4.
 
 ---
 
-## Layer 1 — Universal Anti-Western (always include, 10 items)
+## Layer 1 — Universal Anti-Western (always include, 8 items)
 
 ```
 no medieval European armor, no winged dragons, no gothic cathedral,
 no blonde hair as default, no blue eyes as default, no Renaissance fair costume,
-no fur cloaks, no Viking horns, no celtic knotwork, no crusader cross
+no fur cloaks, no Viking horns
 ```
 
 These items prevent the model from defaulting to Western fantasy when given
@@ -59,16 +59,21 @@ no logo, no watermark, no text overlay, no distorted hands, no extra fingers
 
 ---
 
-## Layer 4 — Likeness / Copyright Safety (always include, 4 items)
+## Layer 4 — Safety & Compliance (always include, 6 items)
 
 ```
-no copied web image, no celebrity face, no known-character likeness,
-no exact branded costume
+no copied web image, no real public figure or celebrity face,
+no copyrighted character likeness, no brand logo or trademark,
+no nudity or suggestive exposure, no graphic gore or blood splatter
 ```
 
 These items prevent the model from cloning a public figure, internet image, or
-recognizable copyrighted character design. Use original faces from the character
-bible and original costumes from the story context.
+recognizable copyrighted character/brand design, and block sexual or
+excessive-gore content. Use original faces from the character bible and original
+costumes from the story context. (Combat/đấu pháp and stylized light blood are
+still allowed — only EXCESSIVE gore is blocked.) Religious sensitivity cannot be
+encoded as a visual negative; it is handled in the expander/planner prose and the
+deterministic content-safety gate ([[blocklist-content-safety]]).
 
 ---
 
@@ -93,14 +98,15 @@ If the entry lists fewer than 4, use all of them.
 ```
 Negative: no medieval European armor, no winged dragons, no gothic cathedral,
 no blonde hair as default, no blue eyes as default, no Renaissance fair
-costume, no fur cloaks, no Viking horns, no celtic knotwork, no crusader
-cross, no jeans, no sneakers, no glasses, no neon lighting, no automatic
-firearms, no logo, no watermark, no text overlay, no distorted hands,
-no extra fingers, no copied web image, no celebrity face, no known-character
-likeness, no exact branded costume, no live-action photographic skin,
-no muted live-action desaturation, no Western 3D cartoon proportions, no claymation
+costume, no fur cloaks, no Viking horns, no jeans, no sneakers, no glasses,
+no neon lighting, no automatic firearms, no logo, no watermark, no text overlay,
+no distorted hands, no extra fingers, no copied web image, no real public figure
+or celebrity face, no copyrighted character likeness, no brand logo or trademark,
+no nudity or suggestive exposure, no graphic gore or blood splatter,
+no live-action photographic skin, no muted live-action desaturation,
+no Western 3D cartoon proportions, no claymation
 ```
 
-Exactly 28 items (10 + 5 + 5 + 4 + 4). Comma-separated. Single line in the prompt's
+Exactly 28 items (8 + 5 + 5 + 6 + 4). Comma-separated. Single line in the prompt's
 Negative section. The last 4 (Layer 5) come from `.work/active-style.md` and change
 with the chosen style. DALL-E paste: convert to "avoiding X, X, X" in the Style line.

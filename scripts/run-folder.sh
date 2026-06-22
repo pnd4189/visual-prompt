@@ -179,13 +179,17 @@ for f in "${INPUTS[@]}"; do
     echo "⚠ $tag — phát hiện script tự chế trong .work (model bypass expander) — kiểm/sửa anchor:"
   fi
   bible_file="$HOME/.gemini/bibles/$SERIES.md"
-  if [ -f "$bible_file" ]; then
-    for kind in image video; do
-      pf="${stem}_${kind}_prompts.txt"
-      [ -s "$pf" ] && python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
-        --bible "$bible_file" --output "$pf" --fix
-    done
-  fi
+  for kind in image video; do
+    pf="${stem}_${kind}_prompts.txt"
+    [ -s "$pf" ] || continue
+    [ -f "$bible_file" ] && python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
+      --bible "$bible_file" --output "$pf" --fix
+    # Content-safety gate: strip brand/IP/likeness/gore/sexual + ban live-action
+    # video; religion is WARN-only. WARN does not halt the batch.
+    python3 "$SKILL_DIR/scripts/check_content_safety.py" \
+      --blocklist "$SKILL_DIR/references/blocklist-content-safety.md" \
+      --output "$pf" --fix || true
+  done
   echo "✅ $tag — xong"
 done
 
