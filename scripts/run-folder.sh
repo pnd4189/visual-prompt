@@ -17,8 +17,10 @@
 #          VP_MUSIC   music loops per file     (default: 4)
 #          VP_DRYRUN  =1 → print the agy command instead of running it (review)
 #
-# Resume:  a file whose <stem>_image_prompts.txt already exists is skipped, so a
-#          re-run after a crash / quota reset continues where it stopped.
+# Resume:  file-level — a file whose <stem>_image_prompts.txt already exists is
+#          skipped. Scratch (.work) is reset before each file (see the loop), so a
+#          re-run after a crash restarts the UNFINISHED file from scratch while
+#          finished files stay skipped.
 
 set -uo pipefail
 
@@ -128,6 +130,17 @@ for f in "${INPUTS[@]}"; do
   if [ -f "${stem}_image_prompts.txt" ]; then
     echo "⏭  $tag — đã có output, skip"
     continue
+  fi
+
+  # Reset shared scratch before each file. .work lives at <folder>/.work and is
+  # SHARED by every file in this folder; assemble_outputs.py / assemble_qa.py glob
+  # scene-*.md, music-*.md and qa-chapter-*.md blindly, so leftovers from a prior
+  # file (or an older bypassed run) would leak into THIS file's image/video/qa
+  # output. A fresh .work guarantees each file assembles only its own scenes/QA.
+  if [ "$DRYRUN" = "1" ]; then
+    echo "   DRYRUN: rm -rf \"$FOLDER/.work\"  — reset scratch trước khi chạy file này"
+  else
+    rm -rf "$FOLDER/.work"
   fi
 
   # Build the skill invocation. Style flag only when already locked for the series.
