@@ -152,10 +152,22 @@ for f in "${INPUTS[@]}"; do
   local_in="$local_dir/$(basename "$f")"
   local_stem="${local_in%.txt}"
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: rm -rf + mkdir -p \"$local_dir/.work\"; cp input → local; chạy local; copy _*.txt về \"$FOLDER\""
+    echo "   DRYRUN: rm -rf + mkdir -p \"$local_dir/.work\"; cp input + file chương-trước → local; chạy local; copy _*.txt về \"$FOLDER\""
   else
     rm -rf "$local_dir" && mkdir -p "$local_dir/.work"
     cp "$f" "$local_in" || die "$tag — không copy được input sang local dir $local_dir"
+    # STEP 2 continuity needs the file holding the PREVIOUS chapter, which may live
+    # in a sibling done-folder (e.g. "2. ĐÃ QA/"). The in-pipeline check only sees
+    # the local dir, so locate that predecessor here using the FULL gdrive folder
+    # context (where it actually lives) and copy just that one file in.
+    prev_path=$(python3 "$SKILL_DIR/scripts/check_previous_continuity.py" "$f" 2>/dev/null \
+      | python3 -c "import json,sys; print(json.load(sys.stdin).get('previous_path','') or '')" 2>/dev/null)
+    if [ -n "$prev_path" ] && [ -f "$prev_path" ]; then
+      cp "$prev_path" "$local_dir/$(basename "$prev_path")" \
+        && echo "   continuity: đã copy file chương-trước $(basename "$prev_path") → local"
+    else
+      echo "   ⚠ continuity: không tìm thấy file chương-trước cho $(basename "$f") — chạy như đầu chuỗi"
+    fi
   fi
 
   # Build the skill invocation against the LOCAL input copy.
