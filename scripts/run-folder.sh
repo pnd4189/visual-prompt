@@ -16,11 +16,19 @@
 # Env:     VP_MODEL   pinned agy model        (default: "Gemini 3.1 Pro (High)")
 #          VP_MUSIC   music loops per file     (default: 4)
 #          VP_DRYRUN  =1 → print the agy command instead of running it (review)
+#          VP_LOCAL   local workdir base       (default: /tmp/vp-run-<series>)
 #
-# Resume:  file-level — a file whose <stem>_image_prompts.txt already exists is
-#          skipped. Scratch (.work) is reset before each file (see the loop), so a
-#          re-run after a crash restarts the UNFINISHED file from scratch while
-#          finished files stay skipped.
+# Local-run strategy: the skill creates .work and writes its outputs next to the
+# INPUT file. Running directly on a gdrive/rclone FUSE mount breaks subagent writes
+# (permission timeouts) and stalls on I/O, which pushes the model into bypassing the
+# pipeline (external CLI calls, template fallback). So each file is copied to a fresh
+# LOCAL dir, the whole pipeline runs there, and only the final _*.txt outputs are
+# copied back to the gdrive folder.
+#
+# Resume:  file-level — a file whose <stem>_image_prompts.txt already exists in the
+#          gdrive folder is skipped. Each file runs in a fresh local workdir, so a
+#          re-run after a crash restarts the UNFINISHED file cleanly while finished
+#          files stay skipped.
 
 set -uo pipefail
 
@@ -112,6 +120,9 @@ fi
 # Load a previously locked style for this series from the shared config, if any.
 STYLE=$(conf_get "$CONF" style)
 
+# Base dir for per-file local workdirs (keeps the pipeline off the gdrive FUSE mount).
+LOCAL_BASE="${VP_LOCAL:-/tmp/vp-run-$SERIES}"
+
 # Collect input chapter files in chapter order (filenames sort lexically:
 # _0001_0010, _0011_0020, ...). Output .txt files are excluded.
 mapfile -t FILES < <(find "$FOLDER" -maxdepth 1 -type f -name '*.txt' | sort)
@@ -132,25 +143,29 @@ for f in "${INPUTS[@]}"; do
     continue
   fi
 
-  # Reset shared scratch before each file. .work lives at <folder>/.work and is
-  # SHARED by every file in this folder; assemble_outputs.py / assemble_qa.py glob
-  # scene-*.md, music-*.md and qa-chapter-*.md blindly, so leftovers from a prior
-  # file (or an older bypassed run) would leak into THIS file's image/video/qa
-  # output. A fresh .work guarantees each file assembles only its own scenes/QA.
+  # Run on LOCAL disk, not gdrive. The skill creates .work + writes its outputs next
+  # to the INPUT file; copying the input into a fresh local dir keeps all that churn
+  # off the gdrive FUSE mount (which breaks subagent writes and stalls on I/O). Fresh
+  # dir per file → no cross-file scratch leakage. Pre-create .work so the pipeline's
+  # `> .work/chapters.json` (STEP 1) has its dir. Outputs get copied back after.
+  local_dir="$LOCAL_BASE/$(basename "$stem")"
+  local_in="$local_dir/$(basename "$f")"
+  local_stem="${local_in%.txt}"
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: rm -rf \"$FOLDER/.work\"  — reset scratch trước khi chạy file này"
+    echo "   DRYRUN: rm -rf + mkdir -p \"$local_dir/.work\"; cp input → local; chạy local; copy _*.txt về \"$FOLDER\""
   else
-    rm -rf "$FOLDER/.work"
+    rm -rf "$local_dir" && mkdir -p "$local_dir/.work"
+    cp "$f" "$local_in" || die "$tag — không copy được input sang local dir $local_dir"
   fi
 
-  # Build the skill invocation. Style flag only when already locked for the series.
-  cmd="/visual-prompt:visual-prompt '$f' --series '$SERIES' --music $MUSIC"
+  # Build the skill invocation against the LOCAL input copy.
+  cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC"
   [ -n "$STYLE" ] && cmd="$cmd --style $STYLE"
 
   echo "▶ $tag — đang chạy${STYLE:+ (style: $STYLE)}"
 
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 3h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$FOLDER\")"
+    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 3h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\")"
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
@@ -162,13 +177,13 @@ for f in "${INPUTS[@]}"; do
       --print-timeout 3h \
       --dangerously-skip-permissions \
       --add-dir "$SKILL_DIR" \
-      --add-dir "$FOLDER" ) 2>&1 | tee "$log"
+      --add-dir "$local_dir" ) 2>&1 | tee "$log"
 
   # First file just established the style — capture it and lock for the series.
   # Read it from the materialized .work/active-style.md (deterministic: its first
   # line is "### <id> — ...") rather than grepping the model's free-text stdout.
   if [ -z "$STYLE" ]; then
-    picked=$(sed -n 's/^### \([a-z0-9-][a-z0-9-]*\).*/\1/p' "$FOLDER/.work/active-style.md" 2>/dev/null | head -1)
+    picked=$(sed -n 's/^### \([a-z0-9-][a-z0-9-]*\).*/\1/p' "$local_dir/.work/active-style.md" 2>/dev/null | head -1)
     if [ -n "$picked" ]; then
       STYLE="$picked"
       conf_set "$CONF" style "$STYLE"
@@ -179,21 +194,21 @@ for f in "${INPUTS[@]}"; do
   fi
   rm -f "$log"
 
-  # Verify the run actually produced its core artifact before moving on.
-  if [ ! -s "${stem}_image_prompts.txt" ]; then
-    die "$tag — thiếu/rỗng ${stem}_image_prompts.txt. Dừng ở file này (chạy lại để resume)."
+  # Verify the run produced its core artifact (in the LOCAL dir) before moving on.
+  if [ ! -s "${local_stem}_image_prompts.txt" ]; then
+    die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt. Dừng ở file này (chạy lại để resume)."
   fi
 
   # Integrity gate: the legit pipeline never writes .py into .work, so any .py
   # there means the model bypassed the LLM expander with its own generator —
   # surface it. Then deterministically normalize every character anchor against
   # the series bible so a drifted run can't ship an inconsistent protagonist.
-  if ls "$FOLDER"/.work/*.py >/dev/null 2>&1; then
+  if ls "$local_dir"/.work/*.py >/dev/null 2>&1; then
     echo "⚠ $tag — phát hiện script tự chế trong .work (model bypass expander) — kiểm/sửa anchor:"
   fi
   bible_file="$HOME/.gemini/bibles/$SERIES.md"
   for kind in image video; do
-    pf="${stem}_${kind}_prompts.txt"
+    pf="${local_stem}_${kind}_prompts.txt"
     [ -s "$pf" ] || continue
     [ -f "$bible_file" ] && python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
       --bible "$bible_file" --output "$pf" --fix
@@ -203,7 +218,16 @@ for f in "${INPUTS[@]}"; do
       --blocklist "$SKILL_DIR/references/blocklist-content-safety.md" \
       --output "$pf" --fix || true
   done
-  echo "✅ $tag — xong"
+
+  # Copy the gated outputs back to the gdrive folder (only the final _*.txt; .work
+  # scratch stays local). image is required (verified above); the rest are optional.
+  cp "${local_stem}_image_prompts.txt" "${stem}_image_prompts.txt" \
+    || die "$tag — không copy được _image_prompts.txt về $FOLDER"
+  for suf in _qa.txt _video_prompts.txt _music_prompts.txt; do
+    [ -s "${local_stem}${suf}" ] && cp "${local_stem}${suf}" "${stem}${suf}"
+  done
+  rm -rf "$local_dir"   # local scratch no longer needed; gdrive has the outputs
+  echo "✅ $tag — xong (chạy local, đã copy output về gdrive)"
 done
 
 echo "✔ Hoàn tất bộ: $SERIES"
