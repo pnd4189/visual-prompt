@@ -16,7 +16,7 @@
 # Env:     VP_MODEL   pinned agy model        (default: "Gemini 3.1 Pro (High)")
 #          VP_MUSIC   music loops per file     (default: 4)
 #          VP_DRYRUN  =1 → print the agy command instead of running it (review)
-#          VP_LOCAL   local workdir base       (default: /tmp/vp-run-<series>)
+#          VP_LOCAL   local workdir base       (default: $HOME/.cache/vp-run-<series>)
 #
 # Local-run strategy: the skill creates .work and writes its outputs next to the
 # INPUT file. Running directly on a gdrive/rclone FUSE mount breaks subagent writes
@@ -120,8 +120,21 @@ fi
 # Load a previously locked style for this series from the shared config, if any.
 STYLE=$(conf_get "$CONF" style)
 
-# Base dir for per-file local workdirs (keeps the pipeline off the gdrive FUSE mount).
-LOCAL_BASE="${VP_LOCAL:-/tmp/vp-run-$SERIES}"
+# Base dir for per-file local workdirs (keeps the pipeline off the gdrive FUSE
+# mount). Default under $HOME/.cache, NOT /tmp — /tmp is cleared on reboot, and
+# an overnight reboot wiped a 6-file batch's local workdirs mid-run. A persistent
+# base survives reboot; each file still gets a fresh subdir (rm -rf per file).
+LOCAL_BASE="${VP_LOCAL:-$HOME/.cache/vp-run-$SERIES}"
+
+# Grant agy read access to the series bibles dir so scene-expansion subagents can
+# read ~/.gemini/bibles/<series>.md directly. Without this, the bible path is
+# outside --add-dir, subagents can't read it, fabricate generic appearance, and
+# the model restarts expansion mid-run to fix it — that restart makes the last
+# subagent lag and the model yields its turn before assemble (agy -p one-shot
+# exits), so no output ships. Empty if the dir is absent (per-file bible mode).
+BIBLES_DIR="$HOME/.gemini/bibles"
+BIBLES_ADD=""
+[ -d "$BIBLES_DIR" ] && BIBLES_ADD="--add-dir $BIBLES_DIR"
 
 # Collect input chapter files in chapter order (filenames sort lexically:
 # _0001_0010, _0011_0020, ...). Output .txt files are excluded.
@@ -156,11 +169,22 @@ for f in "${INPUTS[@]}"; do
   else
     rm -rf "$local_dir" && mkdir -p "$local_dir/.work"
     cp "$f" "$local_in" || die "$tag — không copy được input sang local dir $local_dir"
+    # Pre-stage the skill's prompts/ + references/ into the local workdir so any
+    # subagent whose CWD is local_dir resolves `@prompts/*.md` / `@references/*.md`
+    # via a relative path instead of falling back to `find /home/dung` — which
+    # recurses into the gdrive FUSE mount and stalls for hours (see header note).
+    cp -r "$SKILL_DIR/prompts" "$local_dir/prompts" 2>/dev/null || true
+    cp -r "$SKILL_DIR/references" "$local_dir/references" 2>/dev/null || true
     # STEP 2 continuity needs the file holding the PREVIOUS chapter, which may live
     # in a sibling done-folder (e.g. "2. ĐÃ QA/"). The in-pipeline check only sees
     # the local dir, so locate that predecessor here using the FULL gdrive folder
     # context (where it actually lives) and copy just that one file in.
-    prev_path=$(python3 "$SKILL_DIR/scripts/check_previous_continuity.py" "$f" 2>/dev/null \
+    # `timeout 60` bounds the broad-scan fallback inside the script: if the
+    # previous chapter isn't in the input folder (rare) the fallback lists
+    # sibling subdirs on the gdrive FUSE mount, which can stall in
+    # request_wait_answer for hours. A timeout here lets the batch proceed
+    # without a continuity excerpt (the skill's own STEP 1.25 still runs).
+    prev_path=$(timeout 60 python3 "$SKILL_DIR/scripts/check_previous_continuity.py" "$f" 2>/dev/null \
       | python3 -c "import json,sys; print(json.load(sys.stdin).get('previous_path','') or '')" 2>/dev/null)
     if [ -n "$prev_path" ] && [ -f "$prev_path" ]; then
       cp "$prev_path" "$local_dir/$(basename "$prev_path")" \
@@ -177,47 +201,81 @@ for f in "${INPUTS[@]}"; do
   echo "▶ $tag — đang chạy${STYLE:+ (style: $STYLE)}"
 
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 3h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\")"
+    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 4h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\" $BIBLES_ADD)"
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
   fi
 
-  log=$(mktemp)
-  ( cd "$SKILL_DIR" && agy -p "$cmd" \
-      --model "$MODEL" \
-      --print-timeout 3h \
-      --dangerously-skip-permissions \
-      --add-dir "$SKILL_DIR" \
-      --add-dir "$local_dir" ) 2>&1 | tee "$log"
-
-  # First file just established the style — capture it and lock for the series.
-  # Read it from the materialized .work/active-style.md (deterministic: its first
-  # line is "### <id> — ...") rather than grepping the model's free-text stdout.
-  if [ -z "$STYLE" ]; then
-    picked=$(sed -n 's/^### \([a-z0-9-][a-z0-9-]*\).*/\1/p' "$local_dir/.work/active-style.md" 2>/dev/null | head -1)
-    if [ -n "$picked" ]; then
-      STYLE="$picked"
-      conf_set "$CONF" style "$STYLE"
-      echo "🔒 $tag — khoá style cho bộ: $STYLE → $CONF"
-    else
-      echo "⚠ $tag — không bắt được 'Style:' từ output; file sau sẽ tự detect lại" >&2
+  # Run the skill + EXTERNAL bypass/depth gate, with a bounded --force-redo retry.
+  # run-folder.sh is a thin driver the model cannot bypass: if the model shortcuts
+  # via a self-made Python prompt generator (contract #4/#5/#6) or ships shallow /
+  # boilerplate output, the gate rejects it and re-runs the file with --force-redo.
+  # Up to 3 attempts; on persistent bypass the run is rejected (no garbage shipped).
+  redo_ok=0
+  for attempt in 1 2 3; do
+    run_cmd="$cmd"
+    if [ "$attempt" -gt 1 ]; then
+      run_cmd="$cmd --force-redo"
+      echo "   ⚠ $tag — re-run lần $attempt với --force-redo (lần trước bypass/shallow)"
     fi
-  fi
-  rm -f "$log"
+    # Clear any self-made .py generators left by a prior bypass attempt.
+    # --force-redo only removes scene-*.md / qa-* / music-*, NOT .py, so without
+    # this the gate would re-flag the previous attempt's bypass .py even on a
+    # clean LLM attempt (stale-poisoning the retry loop).
+    rm -f "$local_dir"/.work/*.py 2>/dev/null
+    # Also clean stray .py the model may have dropped in the SKILL ROOT (= its
+    # CWD during a run). check_run_legit scans .work/*.py only, so a root-level
+    # bypass generator evades the gate; this rm + the gate's --skill-dir root
+    # scan close that gap. Legit skill code lives in scripts/, so any root *.py
+    # is bypass clutter from a prior run.
+    rm -f "$SKILL_DIR"/*.py 2>/dev/null
+    # NOTE: no `| tee <tmpfile>` — a pipe here can hang run-folder.sh. When agy
+    # exits (e.g. on its internal "timed out waiting for response"), a lingering
+    # child that inherited the pipe's write-end keeps tee's stdin open, so tee
+    # never reads EOF and the pipeline never completes (run-folder.sh stalls
+    # before the gate, even though the outputs are already written). agy's
+    # stdout/stderr already flow to ~/vp-batch.log via the nohup redirect, so a
+    # temp log is unnecessary. Direct redirect here — no pipe, no hang.
+    ( cd "$SKILL_DIR" && agy -p "$run_cmd" \
+        --model "$MODEL" \
+        --print-timeout 4h \
+        --dangerously-skip-permissions \
+        --add-dir "$SKILL_DIR" \
+        --add-dir "$local_dir" \
+        $BIBLES_ADD ) 2>&1
 
-  # Verify the run produced its core artifact (in the LOCAL dir) before moving on.
-  if [ ! -s "${local_stem}_image_prompts.txt" ]; then
-    die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt. Dừng ở file này (chạy lại để resume)."
-  fi
+    # First file just established the style — capture it and lock for the series.
+    # Read from .work/active-style.md (deterministic first line "### <id> — ...").
+    if [ -z "$STYLE" ]; then
+      picked=$(sed -n 's/^### \([a-z0-9-][a-z0-9-]*\).*/\1/p' "$local_dir/.work/active-style.md" 2>/dev/null | head -1)
+      if [ -n "$picked" ]; then
+        STYLE="$picked"
+        conf_set "$CONF" style "$STYLE"
+        echo "🔒 $tag — khoá style cho bộ: $STYLE → $CONF"
+      else
+        echo "⚠ $tag — không bắt được 'Style:' từ output; file sau sẽ tự detect lại" >&2
+      fi
+    fi
 
-  # Integrity gate: the legit pipeline never writes .py into .work, so any .py
-  # there means the model bypassed the LLM expander with its own generator —
-  # surface it. Then deterministically normalize every character anchor against
-  # the series bible so a drifted run can't ship an inconsistent protagonist.
-  if ls "$local_dir"/.work/*.py >/dev/null 2>&1; then
-    echo "⚠ $tag — phát hiện script tự chế trong .work (model bypass expander) — kiểm/sửa anchor:"
-  fi
+    # Core artifact must exist before gating.
+    if [ ! -s "${local_stem}_image_prompts.txt" ]; then
+      [ "$attempt" -lt 3 ] && { echo "   ⚠ $tag — thiếu output, re-run"; continue; }
+      die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt sau $attempt lần (chạy lại để resume)."
+    fi
+
+    # External gate: rejects .work/*.py prompt generators + shallow/boilerplate
+    # outputs (the model cannot bypass this). Pass ⇒ legit deep LLM-expanded output.
+    if python3 "$SKILL_DIR/scripts/check_run_legit.py" \
+        --work "$local_dir/.work" --image "${local_stem}_image_prompts.txt" \
+        --video "${local_stem}_video_prompts.txt" --skill-dir "$SKILL_DIR"; then
+      redo_ok=1
+      break
+    fi
+    [ "$attempt" -lt 3 ] && { echo "   ⚠ $tag — gate FAIL (bypass/shallow), re-run --force-redo"; continue; }
+    die "$tag — gate vẫn FAIL sau 3 lần (model bypass expander). Output bị từ chối — chạy lại để resume."
+  done
+  [ "$redo_ok" = "1" ] || die "$tag — run không hợp lệ"
   bible_file="$HOME/.gemini/bibles/$SERIES.md"
   for kind in image video; do
     pf="${local_stem}_${kind}_prompts.txt"
