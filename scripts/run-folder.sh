@@ -189,6 +189,17 @@ for f in "${INPUTS[@]}"; do
     if [ -n "$prev_path" ] && [ -f "$prev_path" ]; then
       cp "$prev_path" "$local_dir/$(basename "$prev_path")" \
         && echo "   continuity: đã copy file chương-trước $(basename "$prev_path") → local"
+      # Also stage the prev under its RAW .txt name (strip `_qa`) so the model's
+      # STEP 2 continuity search finds the previous chapter. The skill's own
+      # check_previous_continuity.py finds the _qa.txt fine, but the model
+      # sometimes improvises a raw-`*_vi.txt`-only search and misses a `_qa.txt`
+      # sibling — this happens at a batch boundary where the previous file was
+      # already QA'd + moved to a done-folder (so only its _qa.txt is available).
+      # The raw-named copy contains the same Chương N-1 text, just under a name
+      # the improvised search looks at. No-op when prev is already a raw .txt.
+      prev_raw=$(basename "$prev_path" | sed 's/_qa\.txt$/.txt/')
+      [ "$prev_raw" != "$(basename "$prev_path")" ] \
+        && cp "$prev_path" "$local_dir/$prev_raw" 2>/dev/null || true
     else
       echo "   ⚠ continuity: không tìm thấy file chương-trước cho $(basename "$f") — chạy như đầu chuỗi"
     fi
