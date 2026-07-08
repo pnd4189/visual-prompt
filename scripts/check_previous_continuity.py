@@ -153,10 +153,49 @@ def find_previous(input_path: Path) -> dict:
             'previous_tail_excerpt': _tail(previous_chapter.get('text', '')),
         })
     else:
-        result['message'] = (
-            f'No readable .txt candidate containing chapter {expected_previous} was found '
-            f'under {_search_root(input_path)}.'
-        )
+        # Batch-numbering fallback: when the current file parses a real chapter
+        # id (>1) but every OTHER file in the SAME batch folder parses to id=1
+        # (no `Chương N:` marker — the script's default fallback), the batch
+        # filename numbering and the in-text chapter numbering don't match.
+        # Treat the run as a fresh sequence so the batch doesn't HALT on a
+        # numbering mismatch that's an artifact of the split, not a real
+        # continuity gap. Only triggers when ALL batch siblings lack markers —
+        # if any sibling has real markers, the original not-found stays.
+        # Scope is the same batch folder (input_path.parent) on purpose: a
+        # sibling "ĐÃ QA" folder can hold older files with real markers and
+        # wrongly unlock this fallback even when THIS batch's numbering is
+        # the inconsistent one.
+        if first_id > 1:
+            siblings = [p for p in input_path.parent.glob('*.txt')
+                        if not p.name.lower().endswith(
+                            ('_image_prompts.txt', '_video_prompts.txt', '_music_prompts.txt'))]
+            real_marker_count = 0
+            for p in siblings:
+                try:
+                    if p.resolve() == input_path.resolve():
+                        continue
+                except OSError:
+                    continue
+                chs = _load_chapters(p)
+                if chs and any(int(c.get('id', 0) or 0) > 1 for c in chs):
+                    real_marker_count += 1
+                    break
+            if real_marker_count == 0:
+                result.update({
+                    'status': 'first_chapter',
+                    'message': (
+                        f'Batch numbering appears inconsistent (this file id={first_id}, '
+                        f'all other files in the same batch folder parse to id=1 — no '
+                        f'`Chương N:` markers). Skipping continuity check; treating as '
+                        f'start of sequence.'
+                    ),
+                })
+                result['ok'] = True
+        if not result['ok']:
+            result['message'] = (
+                f'No readable .txt candidate containing chapter {expected_previous} was found '
+                f'under {_search_root(input_path)}.'
+            )
     return result
 
 

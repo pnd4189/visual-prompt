@@ -23,11 +23,20 @@ Output: 4 file `_qa.txt`, `_image_prompts.txt`, `_video_prompts.txt`,
 và tối thiểu 20 video prompts; dùng `--images` / `--videos` để override khi cần
 chạy nhanh.
 
+Trước QA, skill kiểm tra file hiện tại có nối tiếp file trước không: nếu file bắt
+đầu Chương N, workflow tìm Chương N-1 trong các `.txt` / `_qa.txt` lân cận và so
+đoạn cuối-trước với đoạn mở-hiện tại để tránh nhảy chương hoặc bỏ sót chương.
+
 Spectacle mặc định: dựng cảnh giàu kịch tính — phong cảnh/map rộng, đông nhân vật
 trong khung, combat, đấu pháp — và được dramatize vượt text trong giới hạn thể
 loại/nhận diện/continuity. `--epic` bơm scale mạnh hơn; `--faithful` chuyển sang
 chế độ trung thành text (không bịa combat). Hai cổng tự động loại cảnh trùng lặp +
 block prompt nông rồi regen.
+
+Music prompt luôn là nhạc nền không lời nhẹ nhàng, sâu lắng, cảm xúc, có màu sắc
+tiên hiệp/kiếm hiệp; không tạo nhạc sôi động, trailer, battle score, hoặc dồn dập
+lấn át giọng đọc. Mỗi block theo format ngắn gọn kiểu Chap 5: một paragraph
+English prompt + một dòng `Tags:`, hướng tới loop nền liền mạch dài 2-3 phút.
 
 ## Hướng dẫn đầy đủ
 

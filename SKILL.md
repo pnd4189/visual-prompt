@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.9.0
+version: 0.9.1
 description: Generate deep, policy-safe, styleable image + video prompts (18-style catalog, recommend + select per run) with a deterministic content-safety gate (no brands/real people/IP/gore/sexual/anti-religion; video animation-only), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
 license: MIT
 contextFileName: SKILL.md
@@ -127,7 +127,7 @@ paste-ready files:
 ```
 /visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
                             [--images N] [--videos M] [--music N] \
-                            [--epic] [--faithful] [--force-redo]
+                            [--epic] [--faithful] [--no-video] [--force-redo]
 ```
 
 `--style <id>` picks an art style up-front (skips the interactive recommend step);
@@ -138,7 +138,10 @@ verbatim, no clamp); omit it for adaptive segmentation (default 4, clamped to [3
 crowds). `--faithful` switches OFF dramatization — scene mix follows measured action
 density and the planner renders only what the chapters contain (no invented combat).
 Default (neither flag) = spectacle: rich map/group/action scenes, dramatized within
-the genre/identity/continuity rails.
+the genre/identity/continuity rails. `--no-video` skips the video expander and the
+`_video_prompts.txt` output entirely; useful when batch video generation is not
+needed (image + music + qa still produced) or when the model repeatedly bypasses
+the video expander.
 
 ## Input Spec
 
@@ -164,6 +167,12 @@ the genre/identity/continuity rails.
 - Supported genres: tiên hiệp, huyền huyễn, đô thị, cổ điển, võ hiệp.
 - **Refuses:** đam mỹ (BL romance), ngôn tình (modern romance) — out of scope.
 - Text-only output. Reference-image pattern deferred to v2.
+- **`--no-video` flag** (v0.9.1+): skill produces 3 files (`_qa.txt`,
+  `_image_prompts.txt`, `_music_prompts.txt`); the video expander and
+  `_video_prompts.txt` are skipped entirely. `scene-planner.md` is told not to
+  flag any scene for video. Driver `run-folder.sh` honors the env var
+  `VP_NO_VIDEO=1` to pass the flag across a batch. Use when video generation is
+  not needed or when the model repeatedly fails the video bypass gate.
 - **One style per run.** Styles in the `accent-title-card` / `video-oriented`
   categories keep character identity poorly across many scenes — best for opening
   title cards or montages, not every shot. The recommend step warns when a chosen

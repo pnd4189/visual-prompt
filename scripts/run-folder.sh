@@ -208,8 +208,19 @@ for f in "${INPUTS[@]}"; do
   # Build the skill invocation against the LOCAL input copy.
   cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC"
   [ -n "$STYLE" ] && cmd="$cmd --style $STYLE"
+  if [ "${VP_NO_VIDEO:-0}" = "1" ]; then
+    cmd="$cmd --no-video"
+    no_video_label=" (no-video)"
+  else
+    no_video_label=""
+  fi
+  if [ -n "$STYLE" ]; then
+    style_label=" (style: $STYLE)"
+  else
+    style_label=""
+  fi
 
-  echo "▶ $tag — đang chạy${STYLE:+ (style: $STYLE)}"
+  echo "▶ $tag — đang chạy${style_label}${no_video_label}"
 
   if [ "$DRYRUN" = "1" ]; then
     echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 4h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\" $BIBLES_ADD)"

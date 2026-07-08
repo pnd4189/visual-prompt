@@ -1,6 +1,6 @@
 {
   "name": "visual-prompt",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Generate deep, policy-safe, styleable image + video prompts (18-style catalog) with a deterministic content-safety gate (no brands/real people/IP/gore/sexual/anti-religion; video animation-only) and spectacle-by-default cinematic scene diversity (--faithful for text-accurate mode), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos",
   "contextFileName": "SKILL.md"
 }

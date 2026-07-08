@@ -22,6 +22,12 @@ sạch, trôi chảy, sẵn sàng đọc TTS — KHÔNG viết lại truyện, K
 4. **Câu quá dài (> ~200 ký tự)** — tách thành 2-3 câu ngắn hơn ở ranh giới mệnh
    đề tự nhiên (để TTS VieNeu chunk an toàn). Không làm mất ý.
 
+## CROSS-FILE CONTINUITY RULE
+Trước khi QA chương đầu của file, workflow đã chạy `.work/continuity-check.md`.
+Nếu check đó là `WARN` hoặc `FAIL`, KHÔNG được dùng hiệu đính để che lỗi nhảy
+chương, lặp chương, thiếu chương, hoặc đoạn mở không nối tiếp file trước. QA chỉ
+sửa câu chữ trong chương hiện có; continuity phải được xử lý ở cổng trước QA.
+
 ## FORBIDDEN (tuyệt đối không làm)
 - KHÔNG thêm / bớt tình tiết, câu thoại, đoạn văn.
 - KHÔNG đổi tên riêng (nhân vật, địa danh, môn phái, pháp bảo...).
@@ -80,6 +86,8 @@ sẽ tự render heading). Giữ các dòng trống giữa các paragraph.
 2. Tên riêng / con số có khớp bản gốc không? Nếu lệch → khôi phục.
 3. Còn câu nào > ~200 ký tự không? Nếu còn → tách.
 4. Độ dài body có gần tương đương bản gốc không (không bị cắt mất đoạn)?
+5. Nếu đây là chương đầu file, body vẫn giữ nguyên điểm bắt đầu truyện; không thêm
+   câu nối tự chế để làm nó có vẻ liền mạch với file trước.
 
 ## STDOUT SUMMARY
 ```

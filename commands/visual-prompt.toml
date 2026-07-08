@@ -110,12 +110,13 @@ Args là 1 string. Parse như sau (regex Python):
 7. `--force-redo`                        → force_redo = true (flag)
 8. `--epic`                              → epic = true (flag)
 9. `--faithful`                          → faithful = true (flag)
-10. Sau khi strip flags → còn lại là input_path (positional, required).
+10. `--no-video`                          → no_video = true (flag; skip video expander + skip writing _video_prompts.txt)
+11. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Validate:
 - input_path tồn tại (Path.exists()).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo, --epic, --faithful`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --videos M, --music N, --style ID, --force-redo, --epic, --faithful, --no-video`
 
 Echo lại cho user:
 ```
@@ -130,6 +131,7 @@ Echo lại cho user:
   force_redo = <true | false>
   epic       = <true | false>
   faithful   = <true | false>
+  no_video   = <true | false>
 ```
 
 (Mặc định = **spectacle**: planner/expander chủ động dựng cảnh giàu kịch tính —
@@ -452,9 +454,12 @@ For mỗi scene row trong scene-plan (theo thứ tự scene_id 1..N):
      ...
      ```
 
-  d. Nếu scene_row.flag_for_video = ✓:
+  d. Nếu scene_row.flag_for_video = ✓ VÀ KHÔNG có `no_video` ở STEP 0:
      Load `@prompts/prompt-expander-video.md` + execute → append
      `## Video Prompt` block vào scene_path.
+     (Nếu `no_video = true` ở STEP 0: skip hoàn toàn, KHÔNG gọi video expander,
+     frontmatter giữ `has_video: false`. scene-planner.md đã được hướng dẫn
+     không flag scene nào trong trường hợp này.)
 
   e. Log: `Scene <NNN>/<N> done (<image_wc>w image[, <video_wc>w video])`
 
@@ -539,6 +544,8 @@ python3 scripts/validate_artifacts.py \
 ```bash
 python3 scripts/assemble_outputs.py --input "<input_path>"
 ```
+(Thêm `--no-video` nếu flag `no_video = true` ở STEP 0; khi đó `_video_prompts.txt`
+không được sinh và `video_count` trong JSON trả về = 0.)
 
 Parse stdout JSON. Ngoài summary, đọc `violations: [{scene_id, kind, detail}]`.
 Mỗi violation = block nông: thiếu header / sai word-count / negative < 20 (image)
@@ -644,7 +651,7 @@ Scene plan: .work/scene-plan.md (<N> scenes, <M> video)
 Output files:
   📝 <input_stem>_qa.txt              — bản hiệu đính, đưa thẳng vào TTS_Local
   📷 <input_stem>_image_prompts.txt   — <image_count> ảnh
-  🎬 <input_stem>_video_prompts.txt   — <video_count> video (indices: <list>)
+  🎬 <input_stem>_video_prompts.txt   — <video_count> video (indices: <list>)   ← SKIP dòng này nếu `no_video = true` ở STEP 0
   🎵 <input_stem>_music_prompts.txt   — <music_count> loop nhạc nền (Lyria)
 
 Warnings:

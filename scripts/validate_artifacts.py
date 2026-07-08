@@ -113,6 +113,13 @@ def check_music(work_dir: Path, expected_music: int) -> dict:
             errors.append(f'{name} missing frontmatter field(s): {sorted(missing)}')
         if not _FRONTMATTER_RE.sub('', text, count=1).strip():
             errors.append(f'{name} has empty body')
+        body = _FRONTMATTER_RE.sub('', text, count=1).strip()
+        if '\n\nTags:' not in body:
+            errors.append(f'{name} missing Tags line')
+        if not re.search(r'\b(?:2-3|2 to 3)[ -]minute\b', body, re.IGNORECASE):
+            errors.append(f'{name} missing 2-3 minute loop cue')
+        if '--- LOOP' in body or '\nNegative:' in body or '\nLoop:' in body:
+            errors.append(f'{name} uses obsolete music block format')
 
     for path in work_dir.glob('music-*.md'):
         if path.name == 'music-plan.md':
@@ -150,7 +157,7 @@ def check_outputs(input_path: Path, image_count: int, video_count: int, music_co
         return _result('outputs', errors, **extra)
     if video_count > 0 and not _check_output_file(video_path, '--- SCENE ', video_count, errors):
         return _result('outputs', errors, **extra)
-    if music_count > 0 and not _check_output_file(music_path, '--- LOOP', music_count, errors):
+    if music_count > 0 and not _check_output_file(music_path, 'Tags:', music_count, errors):
         return _result('outputs', errors, **extra)
     return _result('outputs', errors, **extra)
 

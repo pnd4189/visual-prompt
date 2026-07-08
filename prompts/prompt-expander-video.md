@@ -1,5 +1,9 @@
 # Video Prompt Expander — Per Video-Flagged Scene
 
+> **SKIP this file** if STEP 0 of the run has the `--no-video` flag. In that case
+> the skill does NOT generate video prompts; `assemble_outputs.py` will not write
+> `_video_prompts.txt`. Image + music + QA are still produced.
+
 ## ROLE
 For scenes where `flag_for_video = ✓` in scene-plan, append a `## Video Prompt`
 block to the existing `.work/scene-<NNN>.md` (created by `prompt-expander-image.md`).

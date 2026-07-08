@@ -16,6 +16,19 @@ spoken word. Wordless ambient pads are allowed; sung/lyric content is not.
 **Mood buckets:** calm/intro · mystery/journey · tension/battle · sad/reflection ·
 triumph/resolution.
 
+## Global Music Register
+
+These prompts are for audiobook background music, not trailers or battle cuts.
+Always keep the result gentle, emotional, deep, spacious, and instrumental. The
+music should support narration without overpowering it.
+
+- Preferred BPM range: 55-86 for all moods.
+- `tension / battle` means restrained suspense underscore, not action music.
+- Avoid: fast ostinato, pounding percussion, war drums, aggressive brass, explosive
+  impacts, trailer crescendos, high-energy chase rhythm.
+- Use: soft guzheng/pipa/dizi/erhu, warm strings, low drones, light frame drum,
+  distant gong bloom, airy reverb, slow rise-and-release.
+
 ---
 
 ## 1. Tiên Hiệp (Xianxia — cultivation, immortal sects)
@@ -25,10 +38,10 @@ Base style (default): *traditional Chinese orchestral + ambient*; override the r
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
 | calm / intro | guzheng, dizi flute, soft erhu, ambient pads | 60-72 | D major pentatonic | serene, meditative, misty mountain dawn, floating |
-| mystery / journey | pipa, bamboo flute, low drone, light percussion | 80-96 | A minor pentatonic | mysterious, wandering, ancient, unfolding |
-| tension / battle | taiko drums, low strings, fast guzheng tremolo, erhu stabs | 120-140 | E minor (Phrygian color) | urgent, fierce, surging qi, climactic |
+| mystery / journey | pipa, bamboo flute, low drone, light percussion | 70-84 | A minor pentatonic | mysterious, wandering, ancient, unfolding |
+| tension / battle | soft low strings, sparse guzheng, breathy dizi, distant frame drum | 66-82 | E minor pentatonic | restrained, solemn, quietly tense, emotional pressure |
 | sad / reflection | solo erhu, sparse guzheng, sustained strings | 56-66 | B minor | melancholic, wistful, longing, loss |
-| triumph / resolution | full Chinese orchestra, swelling strings, dizi soaring, gentle gong | 90-110 | G major | uplifting, transcendent, ascension, vast |
+| triumph / resolution | warm Chinese strings, dizi, gentle gong, soft guzheng | 72-86 | G major | uplifting, transcendent, tender resolution, vast |
 
 ---
 
@@ -39,10 +52,10 @@ Base style (default): *epic hybrid orchestral + ethnic Chinese, grand mythic reg
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
 | calm / intro | hulusi, soft strings, harp, airy pads | 64-76 | C major | dreamlike, mythic calm, otherworldly |
-| mystery / journey | pipa, ambient synth pad, low taiko pulse, dizi | 84-100 | D minor | enigmatic, primordial, epic quest |
-| tension / battle | massive taiko, brass swells, low strings ostinato, percussion | 128-150 | F minor | thunderous, godlike conflict, cataclysmic |
+| mystery / journey | pipa, ambient synth pad, low soft pulse, dizi | 70-84 | D minor | enigmatic, primordial, quiet quest |
+| tension / battle | low strings, soft frame drum, airy drones, distant gong bloom | 66-82 | F minor | restrained mythic pressure, solemn, shadowed, controlled |
 | sad / reflection | erhu, cello, soft piano, sustained pad | 54-64 | A minor | sorrowful, fated, ancient grief |
-| triumph / resolution | epic orchestra, choir-as-pad (wordless), gong, soaring strings | 92-112 | E major | divine, victorious, soaring, legendary |
+| triumph / resolution | warm orchestra, wordless airy pad, gentle gong, lyrical strings | 72-86 | E major | divine, relieved, luminous, legendary but soft |
 
 ---
 
@@ -53,10 +66,10 @@ Base style (default): *modern cinematic, subtle electronic*; override with the c
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
 | calm / intro | electric piano, warm pads, soft nylon guitar, light vinyl texture | 70-84 | F major | mellow, neon-lit night, intimate, contemporary |
-| mystery / journey | muted synth bass, atmospheric pad, sparse piano, light hats | 90-104 | G minor | cool, urban intrigue, understated tension |
-| tension / battle | driving synth bass, distorted strings, electronic percussion | 124-140 | A minor | pulsing, confrontational, high-stakes |
+| mystery / journey | muted synth pad, atmospheric drone, sparse piano, light texture | 72-86 | G minor | cool, urban intrigue, understated tension |
+| tension / battle | low soft synth, cello pulses, rain ambience, sparse percussion | 66-82 | A minor | restrained, high-stakes but quiet, watchful |
 | sad / reflection | solo piano, cello, rain ambience, soft pad | 58-70 | D minor | lonely, rainy city, bittersweet |
-| triumph / resolution | uplifting synth, live drums, bright piano, string section | 100-120 | C major | empowered, modern victory, cathartic |
+| triumph / resolution | warm synth pad, bright piano, gentle strings | 72-86 | C major | empowered, cathartic, calm after struggle |
 
 ---
 
@@ -67,10 +80,10 @@ Base style (default): *period Chinese orchestral, courtly opulence*; override wi
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
 | calm / intro | guqin, xiao flute, soft strings, light chimes | 56-68 | D major pentatonic | refined, courtly, tranquil palace dawn |
-| mystery / journey | pipa, dizi, low strings, ceremonial percussion | 78-92 | E minor pentatonic | stately, political intrigue, measured |
-| tension / battle | war drums, brass-like sheng, fast strings, cymbals | 116-138 | C minor | martial, imperial conflict, dramatic |
+| mystery / journey | pipa, dizi, low strings, light ceremonial percussion | 68-82 | E minor pentatonic | stately, political intrigue, measured |
+| tension / battle | guqin low notes, soft strings, distant frame drum, muted sheng | 64-80 | C minor | restrained court danger, solemn, dramatic but quiet |
 | sad / reflection | guqin solo, erhu, sparse strings | 52-62 | A minor | mournful, dynastic sorrow, elegy |
-| triumph / resolution | full period orchestra, ceremonial gong, soaring dizi | 88-108 | G major | majestic, imperial glory, ceremonial |
+| triumph / resolution | soft period orchestra, ceremonial gong bloom, lyrical dizi | 70-84 | G major | majestic, ceremonial, warm resolution |
 
 ---
 
@@ -81,10 +94,10 @@ Base style (default): *lean ethnic Chinese + percussion, martial choreography en
 | Mood | Instrumentation | BPM | Key / Scale | English descriptors |
 |---|---|---|---|---|
 | calm / intro | dizi, guzheng, soft erhu, ambient wind | 62-74 | D major pentatonic | tranquil, bamboo grove, drifting |
-| mystery / journey | pipa, low percussion, bamboo flute, light strings | 84-98 | A minor pentatonic | wandering jianghu, watchful, road-worn |
-| tension / battle | taiko, sharp percussion, fast erhu, low strings | 124-144 | E minor | duel, swift swordplay, kinetic |
+| mystery / journey | pipa, low soft pulse, bamboo flute, light strings | 70-84 | A minor pentatonic | wandering jianghu, watchful, road-worn |
+| tension / battle | soft frame drum, low strings, restrained erhu, muted pipa | 66-82 | E minor | quiet duel memory, restrained sword tension, emotional |
 | sad / reflection | solo erhu, sparse guzheng, sustained pad | 54-64 | B minor | honor lost, lonely swordsman, rueful |
-| triumph / resolution | ensemble strings, dizi, gong, rising percussion | 90-110 | G major | heroic, chivalrous resolve, sweeping |
+| triumph / resolution | ensemble strings, dizi, gentle gong, light percussion | 72-86 | G major | heroic but gentle, chivalrous resolve, sweeping softly |
 
 ---
 
@@ -104,7 +117,7 @@ seamless loop, no fade out, ~2-3 minutes
 
 - Lyria responds best to **English**. Keep the prompt body English; only the
   navigation label is Vietnamese.
-- Wordless "choir-as-pad" texture is acceptable for huyền huyễn grandeur — it is
-  a timbre, not lyrics. Still keep the negative line to suppress sung words.
+- Wordless airy pad texture is acceptable for huyền huyễn grandeur — it is a
+  timbre, not lyrics. Still keep the negative line to suppress sung words.
 - If `--music N` requests more regions than there are distinct moods, repeat the
   arc with varied intensity/instrumentation so each loop stays distinct.

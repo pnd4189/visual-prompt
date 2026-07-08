@@ -221,6 +221,15 @@ Keep changes grounded in the chapters' world (spectacle dramatization allowed; d
 not break genre/identity/continuity). Re-run the self-checks, then rewrite
 `.work/scene-plan.md`.
 
+## `--no-video` FLAG
+If STEP 0 of the run has the `--no-video` flag, the skill skips the video
+expander entirely and does NOT write `_video_prompts.txt`. In that case:
+- Set `flag_for_video: ✗` for **every** scene row, regardless of what would
+  normally qualify a scene for video.
+- `videos_m` from STEP 4 is irrelevant — ignore it.
+- The `Total scenes: <N> (<M> flagged for video)` STDOUT line still reports
+  the count, but `<M>` will be 0.
+
 ## STDOUT SUMMARY
 ```
 Scene plan written: .work/scene-plan.md

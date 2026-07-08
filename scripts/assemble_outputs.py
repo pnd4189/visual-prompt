@@ -169,7 +169,7 @@ def parse_scene(path: Path) -> dict:
     }
 
 
-def assemble(input_path: Path, work_dir: Path) -> dict:
+def assemble(input_path: Path, work_dir: Path, no_video: bool = False) -> dict:
     scenes_paths = discover_scenes(work_dir)
     if not scenes_paths:
         raise RuntimeError(f"No scene-*.md found in {work_dir}")
@@ -187,7 +187,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
         image_blocks.append((sc['scene_id'], sc['image']))
         for detail in check_image(sc['image']):
             violations.append({'scene_id': sc['scene_id'], 'kind': 'image', 'detail': detail})
-        if sc['video']:
+        if sc['video'] and not no_video:
             video_blocks.append((sc['scene_id'], sc['video']))
             for detail in check_video(sc['video']):
                 violations.append({'scene_id': sc['scene_id'], 'kind': 'video', 'detail': detail})
@@ -205,7 +205,8 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     vid_path = output_dir / f"{stem}_video_prompts.txt"
 
     atomic_write_text(img_path, _join(image_blocks))
-    atomic_write_text(vid_path, _join(video_blocks))
+    if not no_video:
+        atomic_write_text(vid_path, _join(video_blocks))
 
     # Music is an independent code path: assemble only if regions exist.
     music_blocks: list[str] = []
@@ -226,9 +227,10 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
         'video_count': len(video_blocks),
         'video_indices': [sid for sid, _ in video_blocks],
         'image_path': str(img_path),
-        'video_path': str(vid_path),
+        'video_path': str(vid_path) if not no_video else None,
         'music_count': len(music_blocks),
         'music_path': str(music_path) if music_path else None,
+        'no_video': no_video,
         'warnings': warnings,
         'violations': violations,
     }
@@ -240,13 +242,15 @@ def main() -> int:
                    help='Original novel file path (used to derive output stem + dir)')
     p.add_argument('--work-dir', default=None,
                    help='Dir containing scene-*.md (default: <input-dir>/.work)')
+    p.add_argument('--no-video', action='store_true',
+                   help='Skip video blocks; do not write _video_prompts.txt')
     args = p.parse_args()
 
     input_path = Path(args.input)
     work_dir = Path(args.work_dir) if args.work_dir else input_path.parent / '.work'
 
     try:
-        summary = assemble(input_path, work_dir)
+        summary = assemble(input_path, work_dir, no_video=args.no_video)
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

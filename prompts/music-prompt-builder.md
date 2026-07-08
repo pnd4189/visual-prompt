@@ -18,6 +18,19 @@ prompt Lyria 3 (instrumental). Tái dùng genre + scene-plan
 
 ## TASK
 
+## HARD STYLE RULE — BACKGROUND STORY MUSIC ONLY
+The output is for long-form audiobook/story narration. Every loop must sit under
+spoken Vietnamese narration: gentle, emotional, deep, atmospheric, xianxia/wuxia
+flavored, and instrumental. Do NOT create energetic action music, trailer music,
+hard battle score, rapid percussion, aggressive stingers, pounding war drums,
+high-tension chase cues, or dramatic crescendos that overpower the voice.
+
+Even if the mood bucket is `tension/battle`, reinterpret it as restrained
+under-score: low suspense, sorrowful pressure, soft martial color, slow pulse,
+and spacious ambience. Keep BPM calm-to-moderate (about 55-86) unless the mapping
+already gives a lower value. Replace "urgent/fierce/thunderous/kinetic" energy
+with "restrained, solemn, reflective, quietly tense".
+
 ### 1. Quyết định số vùng (N)
 - **Nếu `music_override` được truyền → dùng ĐÚNG N, KHÔNG clamp.** `--music 8`
   → 8 vùng; `--music 1` → 1 vùng. User là người quyết định.
@@ -38,7 +51,7 @@ instrumentation khác nhau để mỗi loop vẫn KHÁC BIỆT.
 Load `@references/music-mood-mapping.md`. Tra hàng `genre × mood` → lấy
 instrument palette, BPM, key/scale, descriptors. Dựng theo template DeepMind:
 
-`[Genre & style] + [Mood] + [Instrumentation layers] + [Tempo/BPM + key] + [dynamics/mix/loop intent] + "Instrumental."`
+`[descriptive title] — [instrument layers] + [emotional story cue] + [tempo/BPM + key] + [loop-ready underscore intent] + "no vocals, no lyrics, instrumental only."`
 
 **Base style theo style đã chọn:** đọc `.work/active-style.md` field
 `music/score anchor`. Nếu có → dùng anchor đó làm "[Genre & style]" register (thay
@@ -46,14 +59,32 @@ cho base style mặc định trong music-mood-mapping). Instrumentation/BPM/key/
 vẫn lấy từ bảng `genre × mood` như cũ — chỉ register tổng thể đổi theo style.
 Nếu active-style không có field này → dùng base style mặc định của genre.
 
-Mỗi prompt phải sâu và dùng được ngay: mô tả tầng nhạc cụ chính/phụ, nhịp trống,
-texture nền, động lực tăng/giảm, không gian mix, điểm nhấn theo arc truyện, và
-cách loop liền mạch. Không viết prompt nhạc chung chung kiểu "epic sad music".
+Nếu style anchor hoặc mood mapping gợi ý "epic", "battle", "fast", "massive",
+"driving", hoặc percussion-heavy, phải làm mềm lại thành background underscore:
+soft guzheng/pipa/dizi/erhu, warm strings, low drones, light frame drum only,
+wide reverb, slow dynamics, no hard hits.
 
-**HARD RULE — INSTRUMENTAL ONLY:** mỗi prompt PHẢI:
-- kết thúc cụm `Instrumental.`
-- có dòng negative: `no vocals, no lyrics, no singing, no spoken word, no rap, no choir words`
-- có cue loop: `seamless loop, no fade out, ~2-3 minutes`
+Mỗi prompt phải sâu và dùng được ngay, nhưng theo cấu trúc ngắn gọn giống file
+reference `Binh_Thien_Sach_0041_0050_vi_music_prompts.txt`:
+
+```
+<One strong English music prompt paragraph, 55-85 words, ending with
+"loop-ready 2-3 minute seamless background loop, no vocals, no lyrics, instrumental only.">
+
+Tags: <12-16 comma-separated English tags>
+```
+
+Không dùng `--- LOOP ... ---`, `Negative:`, hoặc `Loop:` trong body final. Metadata
+chương/mood chỉ nằm trong frontmatter `.work/music-NNN.md`; body sau frontmatter là
+đúng block sẽ paste vào Lyria.
+
+**HARD RULE — INSTRUMENTAL + GENTLE ONLY:** mỗi prompt PHẢI:
+- là một đoạn prompt tiếng Anh + một dòng `Tags:` duy nhất.
+- kết thúc prompt paragraph bằng `loop-ready 2-3 minute seamless background loop, no vocals, no lyrics, instrumental only.`
+- có wording rõ là gentle / restrained / emotional / ambient / background underscore.
+- không chứa các từ/cụm: `trailer`, `bombastic`, `pounding`, `driving beat`,
+  `war drums`, `aggressive`, `explosive`, `high energy`, `cymbal crashes`,
+  `accelerating`, `battle score`, `dồn dập`.
 
 **Ngôn ngữ:** thân prompt bằng **tiếng Anh** (Lyria chạy tốt nhất với English).
 Nhãn điều hướng bằng **tiếng Việt**.
@@ -74,16 +105,14 @@ chapter_end: <Y>
 mood: <bucket>
 cache_key: <16 hex>
 ---
---- LOOP <i> / <N> — Chương <X>-<Y> — mood: <mô tả mood tiếng Việt> ---
+<English Lyria prompt paragraph>
 
-<English Lyria prompt body, theo template>
-
-Negative: no vocals, no lyrics, no singing, no spoken word, no rap, no choir words
-Loop: seamless loop, no fade out, ~2-3 minutes
+Tags: <12-16 comma-separated English tags>
 ```
 
-Toàn bộ body sau frontmatter = đúng khối sẽ ghi vào file output (assemble_outputs
-lấy nguyên văn). KHÔNG thêm giải thích ngoài khối.
+Toàn bộ body sau frontmatter = đúng khối sẽ ghi vào file output
+`_music_prompts.txt` (assemble_outputs lấy nguyên văn). KHÔNG thêm giải thích
+ngoài khối.
 
 ## VÍ DỤ (tiên hiệp, vùng tension/battle, loop 3/4, chương 7-9)
 
@@ -96,27 +125,28 @@ chapter_end: 9
 mood: tension/battle
 cache_key: 9f3a2b1c4d5e6f70
 ---
---- LOOP 3 / 4 — Chương 7-9 — mood: căng thẳng / giao chiến ---
+Restrained cultivation tension — soft low strings under sparse guzheng harmonics,
+breathy dizi phrases drifting through mountain-wind ambience, a distant frame-drum
+heartbeat mixed low beneath narration, E minor pentatonic at 72 BPM, the feeling
+of danger held back rather than released, spacious reverb and soft transients,
+slow phrase development with gentle variation across sections, loop-ready 2-3
+minute seamless background loop, no vocals, no lyrics, instrumental only.
 
-Original traditional Chinese orchestral battle score with restrained cinematic
-weight. Urgent, fierce, surging energy as cultivators clash in rain and dust.
-Layer 1: low strings ostinato and deep frame drums driving a 132 BPM pulse.
-Layer 2: fast guzheng tremolo, sharp erhu stabs, and short dizi alarm phrases.
-Layer 3: bronze gong accents and distant thunder-like taiko hits for spell impact.
-E minor with Phrygian color, rising in four-bar waves, then easing slightly at
-loop end so the restart feels seamless. Wide hall reverb, no lead vocal texture.
-Instrumental.
-
-Negative: no vocals, no lyrics, no singing, no spoken word, no rap, no choir words
-Loop: seamless loop, no fade out, ~2-3 minutes
+Tags: guzheng, dizi, erhu, cultivation, restrained, tension, mountain wind,
+Chinese traditional, ambient, emotional, pentatonic, soft percussion, underscore,
+no vocals
 ```
 
 ## SELF-CHECK TRƯỚC KHI GHI (mỗi vùng)
-1. Body có `Instrumental.` không? Có dòng `Negative:` đầy đủ không? Có `Loop:` không?
-2. Body có vô tình mô tả giọng hát / lời / hợp xướng có lời không? Nếu có → xóa.
-3. Nhãn `--- LOOP i / N — Chương X-Y — mood: ... ---` đúng định dạng chưa?
+1. Body có đúng 1 paragraph prompt + 1 dòng `Tags:` không?
+2. Prompt paragraph có kết thúc bằng `loop-ready 2-3 minute seamless background loop, no vocals, no lyrics, instrumental only.` không?
+3. Body có vô tình mô tả giọng hát / lời / hợp xướng có lời không? Nếu có → xóa.
 4. Các vùng có phủ liên tục 1..K, không chồng lấn, không hở chương không?
 5. Nếu nhiều vùng cùng mood → instrumentation/BPM/cường độ/dynamics/mix space có khác nhau không?
+6. Body có vô tình thành nhạc sôi động / battle trailer / percussion-heavy không?
+   Nếu có → rewrite thành gentle emotional background underscore.
+7. Tags có 12-16 mục, mô tả nhạc cụ/mood/genre, không chứa tag kích động như
+   `battle`, `trailer`, `war drums`, `aggressive`, `crescendo` không?
 
 ## STDOUT SUMMARY (sau khi ghi hết N vùng)
 ```
