@@ -22,3 +22,5 @@ pipeline_execution.log
 # agent scratch assets dumped into repo root
 blank_*.png
 selected_*_prompts.txt
+# quarantined bypass artifacts (manual review) + auto-quarantine from run-folder pre-clean
+.quarantine-*/

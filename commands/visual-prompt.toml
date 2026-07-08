@@ -1,6 +1,6 @@
 description = "Generate deep, styleable image + video prompts (18-style catalog) from Vietnamese xianxia/wuxia novel files for YouTube audio videos"
 prompt = """
-Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.8.
+Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.9.2.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 
@@ -68,6 +68,14 @@ TUYỆT ĐỐI KHÔNG:
    permission, rate-limit, hoặc startup chậm: xin quyền, giảm parallelism, chuyển
    parent-agent LLM loop tuần tự, hoặc HALT. Tuyệt đối không fallback sang script
    template hoá.
+7. ❌ SKILL DIR LÀ READ-ONLY. KHÔNG tạo/sửa bất kỳ file nào trong `scripts/`,
+   `prompts/`, `references/`, `commands/`, hoặc root của skill dir. Scratch/staging
+   CHỈ được ghi vào `.work/` (cạnh input) hoặc `/tmp/visual-prompt-<input_hash>/`.
+   Bộ script hợp lệ là allowlist cố định `CANONICAL_SCRIPTS` trong
+   `scripts/check_run_legit.py`: file lạ trong `scripts/` (kể cả tên nghe giống
+   helper như `generate_plan.py`, `expand_scenes.py`, `fix_*.py`) hoặc code file
+   lạ ở root = gate FAIL, run bị TỪ CHỐI và file bị quarantine tự động. KHÔNG
+   sửa allowlist/gate để hợp thức hoá.
 
 Subagent completion message KHÔNG phải bằng chứng hoàn tất. Mỗi bước batch chỉ được
 coi là done khi parent process kiểm tra artifact thật trên filesystem: đúng file,
@@ -606,6 +614,10 @@ Kiểm tra run đã đi ĐÚNG pipeline (chống tự-chế):
 ls .work/scene-plan.md
 python3 scripts/validate_artifacts.py --check scenes --work-dir .work --scene-plan .work/scene-plan.md
 python3 scripts/validate_scene_plan.py --plan .work/scene-plan.md
+python3 scripts/check_run_legit.py --work .work \
+  --image "<stem>_image_prompts.txt" --video "<stem>_video_prompts.txt" \
+  --skill-dir "<skill_root>"
+# (bỏ --video nếu no_video = true)
 ```
 
 Xác nhận:
@@ -619,6 +631,11 @@ Xác nhận:
    `tag_monotony` (hoặc đã WARN sau 2 revise). Nếu còn → ghi rõ trong summary.
 4. File output cuối được sinh bởi `assemble_outputs.py` (STEP 7), KHÔNG phải tự tay
    ghi. Nếu bạn đã tự ghi file → xoá, chạy lại STEP 7.
+5. `check_run_legit.py` exit 0. Exit 2 = dấu vân tay bypass (script tự chế trong
+   `scripts/`/root/.work, scene count lệch plan, boilerplate loop, video block
+   trùng lặp) → sửa đúng nguyên nhân được liệt kê: xoá file tự chế, chạy lại
+   STEP tương ứng bằng LLM expander. TUYỆT ĐỐI KHÔNG sửa gate/allowlist, KHÔNG
+   sửa tay output để né. Chưa exit 0 → KHÔNG báo hoàn tất.
 
 Print: `Self-audit: <PASS | FAIL: lý do>`.
 

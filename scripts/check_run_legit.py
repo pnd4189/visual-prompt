@@ -13,10 +13,20 @@ Checks:
      Story DNA: / Subject: / Atmosphere:) — that signature means the model wrote a
      generator instead of using the LLM expander. Legit I/O helpers (apply_qa.py,
      extract.py) never contain these strings, so no false positive.
+  1b. scripts/ holds exactly CANONICAL_SCRIPTS and the skill root holds no code
+     files. The model has hidden bypass generators INSIDE scripts/ before
+     (generate_*.py, fix_*.py, pad_*.py named to look like real helpers) — a
+     root-only scan misses them, and a future run may mistake them for canonical
+     pipeline scripts and re-run the bypass.
   2. .work/scene-plan.md exists and scene-NNN.md count matches the plan ids — the
      LLM expander ran for every scene, not skipped.
   3. Each image-prompt scene block is >= IMAGE_WORD_MIN words and has no 8-word run
      repeated >3x (boilerplate loop, the shallow-template fingerprint).
+
+Purge mode: `check_run_legit.py --purge-skill-dir <skill_root>` moves every rogue
+entry (non-canonical scripts/ file, root-level code file) into
+<skill_root>/.quarantine-auto/ — recoverable, never deletes. run-folder.sh calls
+this before each attempt so a prior bypass can't stale-poison the retry.
 """
 import re
 import sys
@@ -39,6 +49,53 @@ NGRAM_MAX_REPEAT = 5  # >5 occurrences of the same 8-word run = boilerplate loop
 # not a legit run with a few short environment shots.
 SHORT_MAJORITY_FRAC = 0.5
 
+# The complete, versioned contents of scripts/. Anything else in scripts/ is a
+# model-made bypass helper (contract #1/#5/#6). Update this set whenever the
+# skill adds a real helper — same release discipline as the SKILL.md version bump.
+CANONICAL_SCRIPTS = {
+    '__init__.py', '_io_utils.py', 'append_bible_row.py', 'assemble_outputs.py',
+    'assemble_qa.py', 'calc_scene_count.py', 'check_anchor_consistency.py',
+    'check_content_safety.py', 'check_previous_continuity.py', 'check_run_legit.py',
+    'load_input.py', 'resize_16_9.py', 'run-all.sh', 'run-folder.sh',
+    'validate_artifacts.py', 'validate_scene_plan.py',
+}
+# Code files allowed at the skill ROOT. Everything else matching ROOT_CODE_GLOBS
+# is bypass clutter the model wrote to its CWD instead of .work.
+CANONICAL_ROOT_FILES = {'setup.sh'}
+ROOT_CODE_GLOBS = ('*.py', '*.js', '*.mjs', '*.cjs', '*.sh')
+
+
+def rogue_entries(skill_dir):
+    """Non-canonical entries inside scripts/ + stray code files at the skill root."""
+    rogue = []
+    scripts = skill_dir / 'scripts'
+    if scripts.is_dir():
+        for p in sorted(scripts.iterdir()):
+            if p.name in CANONICAL_SCRIPTS or p.name == '__pycache__':
+                continue
+            rogue.append(p)
+    for pat in ROOT_CODE_GLOBS:
+        rogue.extend(p for p in sorted(skill_dir.glob(pat))
+                     if p.name not in CANONICAL_ROOT_FILES)
+    return rogue
+
+
+def purge_skill_dir(skill_dir):
+    """Quarantine rogue entries into .quarantine-auto/ (recoverable, never deletes)."""
+    qdir = skill_dir / '.quarantine-auto'
+    moved = 0
+    for p in rogue_entries(skill_dir):
+        qdir.mkdir(exist_ok=True)
+        dest = qdir / p.name
+        n = 1
+        while dest.exists():
+            dest = qdir / f"{p.name}.{n}"
+            n += 1
+        p.rename(dest)
+        print(f"purged: {p.relative_to(skill_dir)} -> {dest.relative_to(skill_dir)}")
+        moved += 1
+    print(f"purge OK: {moved} rogue file(s) quarantined")
+
 
 def _fail(errors):
     print("FAIL (bypass/shallow):")
@@ -49,6 +106,9 @@ def _fail(errors):
 
 def main():
     args = sys.argv[1:]
+    if len(args) >= 2 and args[0] == '--purge-skill-dir':
+        purge_skill_dir(Path(args[1]))
+        sys.exit(0)
     work = None
     image_path = None
     video_path = None
@@ -68,7 +128,8 @@ def main():
             i += 1
     if work is None:
         print("usage: check_run_legit.py --work <work_dir> --image <img.txt> "
-              "[--video <vid.txt>] [--skill-dir <skill_root>]",
+              "[--video <vid.txt>] [--skill-dir <skill_root>]\n"
+              "       check_run_legit.py --purge-skill-dir <skill_root>",
               file=sys.stderr)
         sys.exit(1)
     errors = []
@@ -84,16 +145,16 @@ def main():
                 f".work/{p.name} chứa prompt-section content (model bypass expander, contract #5/#6)"
             )
 
-    # 1b. Stray *.py at the SKILL ROOT (not scripts/) = bypass clutter the model
-    # wrote to its CWD (= skill dir) instead of .work. Check 1 scans .work only,
-    # so a root-level generator evades it. Legit skill code lives in scripts/, so
-    # any *.py at the skill root is a bypass artifact. run-folder.sh pre-cleans
-    # these before each attempt; a file here means the model created it DURING
-    # this run.
+    # 1b. Rogue code files: non-canonical entries in scripts/ + any code file at
+    # the skill root. The model has hidden bypass generators in BOTH places —
+    # root *.py evading the .work scan, and scripts/*.py named to look canonical
+    # (generate_plan.py, expand_scenes.py) which a later run may re-run as if
+    # legit. run-folder.sh purges these before each attempt, so anything found
+    # here was created DURING this run.
     if skill_dir is not None and skill_dir.is_dir():
-        for p in sorted(skill_dir.glob('*.py')):
+        for p in rogue_entries(skill_dir):
             errors.append(
-                f"{p.name} ở gốc skill (bypass clutter: model viết generator ra CWD thay vì .work, lách .work scan)"
+                f"{p.relative_to(skill_dir)} không thuộc bộ script canonical (model tự chế helper/generator, contract #1/#5/#6)"
             )
 
     # 2. scene-plan.md + scene-NNN.md count matches plan — ONLY when .work still

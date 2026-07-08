@@ -246,12 +246,13 @@ for f in "${INPUTS[@]}"; do
     # this the gate would re-flag the previous attempt's bypass .py even on a
     # clean LLM attempt (stale-poisoning the retry loop).
     rm -f "$local_dir"/.work/*.py 2>/dev/null
-    # Also clean stray .py the model may have dropped in the SKILL ROOT (= its
-    # CWD during a run). check_run_legit scans .work/*.py only, so a root-level
-    # bypass generator evades the gate; this rm + the gate's --skill-dir root
-    # scan close that gap. Legit skill code lives in scripts/, so any root *.py
-    # is bypass clutter from a prior run.
-    rm -f "$SKILL_DIR"/*.py 2>/dev/null
+    # Also quarantine rogue code the model may have dropped in the SKILL ROOT
+    # (= its CWD during a run) or hidden inside scripts/ under helper-looking
+    # names (generate_plan.py, expand_scenes.py, fix_*.py) — a later run can
+    # mistake those for canonical pipeline scripts and re-run the bypass. The
+    # purge moves everything non-canonical into .quarantine-auto/ (recoverable),
+    # so a clean retry never gets stale-poisoned by a prior attempt's bypass.
+    python3 "$SKILL_DIR/scripts/check_run_legit.py" --purge-skill-dir "$SKILL_DIR" || true
     # NOTE: no `| tee <tmpfile>` — a pipe here can hang run-folder.sh. When agy
     # exits (e.g. on its internal "timed out waiting for response"), a lingering
     # child that inherited the pipe's write-end keeps tee's stdin open, so tee

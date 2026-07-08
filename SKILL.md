@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.9.1
+version: 0.9.2
 description: Generate deep, policy-safe, styleable image + video prompts (18-style catalog, recommend + select per run) with a deterministic content-safety gate (no brands/real people/IP/gore/sexual/anti-religion; video animation-only), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
 license: MIT
 contextFileName: SKILL.md
@@ -68,6 +68,14 @@ paste-ready files:
   hand-writing the output files — final `.txt` files come only from
   `assemble_outputs.py` reading `.work/scene-*.md`, and a STEP 8 self-audit fails
   the run if `scene-plan.md` / `scene-*.md` are missing.
+- **The skill dir is read-only for the agent (v0.9.2).** `scripts/` holds exactly
+  the `CANONICAL_SCRIPTS` allowlist versioned inside `check_run_legit.py`; the
+  agent must never create or edit files under the skill dir (scratch goes to
+  `.work/` or `/tmp/visual-prompt-<hash>/`). Any non-canonical file in `scripts/`
+  or stray code file at the skill root — the fingerprint of a self-made bypass
+  generator hiding under a helper-looking name — fails the external gate, and
+  `run-folder.sh` auto-quarantines it into `.quarantine-auto/` before each
+  attempt. STEP 8's self-audit runs the same gate (`check_run_legit.py`).
 - **Original outputs only.** Do not copy web images, famous faces, celebrity
   likenesses, known-character faces, or exact IP/artist styles.
 - **QA-first.** A proofread gate runs before everything else and produces the
@@ -201,7 +209,7 @@ visual-prompt/
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
 ├── references/               ← 10 static knowledge files (incl. style-catalog, genre-style-recommendation, blocklist-content-safety)
-└── scripts/                  ← 8 Python helpers (incl. assemble_qa, validate_scene_plan, check_content_safety)
+└── scripts/                  ← 14 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.
