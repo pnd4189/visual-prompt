@@ -1,7 +1,7 @@
 # Hướng Dẫn Sử Dụng — visual-prompt
 
-> Skill Antigravity tạo prompt ảnh + video từ file truyện tiên hiệp / võ hiệp
-> tiếng Việt (chọn được 1 trong 18 art style), dùng cho video audio YouTube.
+> Skill tạo prompt ảnh grounded từ file truyện tiên hiệp / võ hiệp tiếng Việt
+> (chọn được 1 trong 18 art style) trên Agy, Codex CLI, và Claude Code.
 
 ---
 
@@ -9,14 +9,15 @@
 
 Bạn có 1 file truyện tiên hiệp / huyền huyễn / võ hiệp tiếng Việt (2k–18k từ,
 phù hợp video 1–2 giờ audio). Không cần proofread trước — skill tự hiệu đính.
-Bạn muốn làm video YouTube với khoảng 120-150 ảnh + tối thiểu 20 video clip +
-nhạc nền cho 1 giờ audio.
+Bạn muốn làm video YouTube với khoảng 120-150 ảnh cho 1 giờ audio; video clip và
+nhạc nền là các phần bật thêm khi cần.
 
-`/visual-prompt <file.txt>` đọc truyện → tạo 4 file:
+`/visual-prompt <file.txt>` đọc truyện → mặc định tạo 2 file:
 - `<file>_qa.txt` — bản truyện đã hiệu đính, đưa THẲNG vào TTS_Local đọc giọng
 - `<file>_image_prompts.txt` — paste vào công cụ tạo ảnh để gen ảnh
-- `<file>_video_prompts.txt` — paste vào Veo3 / Seedance để gen video clip
-- `<file>_music_prompts.txt` — paste vào Lyria 3 (Lyria app) để gen nhạc nền
+
+Thêm `--video`/`--videos N` hoặc mô tả “tạo video prompt” để có video; thêm
+`--music`/`--music N` hoặc “tạo music prompt” để có music.
 
 Toàn bộ workflow do active Antigravity/Agy model điều khiển. Python chỉ làm I/O file.
 
@@ -40,8 +41,9 @@ cd /path/to/visual-prompt
 bash setup.sh
 ```
 
-Script tạo 3 symlink vào `~/.gemini/`. Mở Antigravity → gõ `/` → thấy
-`visual-prompt` autocomplete.
+Script tạo symlink cho Agy (`~/.gemini`), Codex (`~/.agents/skills` và
+`~/.codex/prompts`), và Claude Code (`~/.claude/skills`). Mở CLI tương ứng rồi
+gọi lệnh như mục dưới.
 
 ### Windows (Admin / Developer Mode)
 
@@ -59,30 +61,45 @@ phải chạy lại `setup.bat` để re-sync (xem [antigravity/INSTALL.md](anti
 
 ---
 
+### Gọi trên từng CLI
+
+- Agy: `/visual-prompt truyen.txt`
+- Codex native skill: `$visual-prompt truyen.txt`
+- Codex slash shim: `/prompts:visual-prompt truyen.txt`
+- Claude Code: `/visual-prompt truyen.txt`
+
+Codex dùng skill native để giữ context tốt nhất; slash shim chỉ chuyển nguyên
+`$ARGUMENTS` vào skill. Claude dùng `disable-model-invocation: true`, nên skill
+chỉ chạy khi người dùng gọi slash command rõ ràng. Các adapter đều trỏ về cùng
+`commands/`, `prompts/`, `references/`, `scripts/`; không có ba workflow khác nhau.
+
+---
+
 ## 4. Sử dụng cơ bản
 
 ```
 /visual-prompt /path/to/truyen.txt
 ```
 
-Skill chạy 9 bước (mất lâu hơn bản cũ vì mặc định tạo 120-150 ảnh và 20+ video):
+Skill chạy pipeline grounding (mặc định image-only):
 1. Load chapters
 2. **QA hiệu đính** (luôn chạy) — sửa chữ Trung/Anh sót, chính tả, câu dịch máy
    lủng củng, tách câu dài → `chapters_qa.json` + `<file>_qa.txt`
-3. Trích xuất character bible (lưu cạnh file truyện)
+3. Trích xuất character bible (lưu cạnh file truyện); field ngoại hình thiếu
+   bằng chứng được ghi `not stated`, không tự ước lượng tuổi/tóc/mặt/đạo cụ
 4. Detect thể loại
 5. **Chọn style** — gợi ý style theo thể loại + HỎI bạn chọn (Enter = #1, hoặc gõ
    id khác). Có `--style <id>` → bỏ qua hỏi. Xem mục §5 "Chọn style".
-6. Tính số scene (mặc định: 120-150 ảnh, tối thiểu 20 video; override bằng flag)
+6. Tính số scene (mặc định: 120-150 ảnh; video chỉ khi có opt-in)
 7. Plan + expand scenes (theo style đã chọn)
-8. **Music prompts** — chia arc cảm xúc thành N vùng (mặc định 4) → prompt Lyria
-9. Assemble các file output
+8. Video/music (chỉ khi đã bật bằng flag hoặc mô tả rõ)
+9. Assemble các file output đã bật
 
 **Kết quả** nằm cạnh file input:
 - `truyen_qa.txt` (đưa vào TTS_Local — xem §6)
 - `truyen_image_prompts.txt`
-- `truyen_video_prompts.txt`
-- `truyen_music_prompts.txt`
+- `truyen_video_prompts.txt` (chỉ khi bật video)
+- `truyen_music_prompts.txt` (chỉ khi bật music)
 - `character-bible.md` (giữ lại cho lần sau)
 - `.work/` (cache resume — không xoá nếu muốn re-run nhanh)
 
@@ -156,22 +173,23 @@ Nếu auto-detect sai (vd: chương đầu là flashback hiện đại của tru
 
 Giá trị hỗ trợ: `tien-hiep`, `huyen-huyen`, `do-thi`, `co-dien`, `vo-hiep`.
 
-### `--images N --videos M` — Override số lượng
+### `--images N --video/--videos M` — Override số lượng
 
-Mặc định: `N = clamp(round(wc/120), 120, 150)`, `M = max(20, round(N/6))`.
-Muốn ép số khác:
+Mặc định chỉ có image: `N = clamp(round(wc/120), 120, 150)`, `M = 0`.
+Muốn bật video tự động hoặc ép số khác:
 
 ```
+/visual-prompt truyen.txt --images 30 --video
 /visual-prompt truyen.txt --images 30 --videos 4
 ```
 
-Có thể chỉ override 1 cái; cái còn lại vẫn dùng auto default từ wordcount/công thức
-mặc định, không tự suy ra từ override kia.
+`--videos M` tự bật video và tôn trọng đúng M. Không truyền flag video thì video
+không được tạo.
 
-### `--music N` — Số loop nhạc nền
+### `--music [N]` — Bật số loop nhạc nền
 
-Mặc định skill tự chia arc thành 4 vùng cảm xúc (tự co giãn trong khoảng 3–5).
-Muốn ép số loop cụ thể:
+Music không chạy mặc định. Dùng `--music` để skill tự chia 3–5 vùng; dùng
+`--music N` để ép số loop cụ thể:
 
 ```
 /visual-prompt truyen.txt --music 6
@@ -191,30 +209,25 @@ Resume cache bỏ qua bước đã có file. Muốn re-gen toàn bộ:
 Xoá `.work/qa-chapter-*.md`, `.work/scene-*.md`, `.work/music-*.md` trước khi
 vào các loop. Bible không bị xoá.
 
-### Spectacle mặc định + `--epic` / `--faithful`
+### Grounded mặc định + `--epic` / `--faithful`
 
-> **Mặc định = spectacle (v0.6).** Đây là pipeline cho video YouTube giải trí, nên
-> mặc định dựng cảnh giàu kịch tính: phong cảnh/map rộng, đông nhân vật trong
-> khung, combat, đấu pháp, daoist magic — và ĐƯỢC PHÉP dramatize vượt nội dung
-> chương để hình đẹp mắt, miễn giữ 3 rào: đúng thể loại (xianxia vẫn xianxia),
-> đúng nhận diện nhân vật (anchor bible nguyên văn), không mâu thuẫn tình tiết đã
-> nêu. Không còn xoay quanh mỗi nhân vật chính.
+> **Mặc định = grounded.** Mỗi row có `source_anchor` nguyên văn 6–24 từ từ đúng
+> chapter. Active parent model được sáng tạo góc quay, bố cục, ánh sáng, bảng màu,
+> texture và atmosphere riêng từng scene, nhưng không được thêm nhân vật, combat,
+> địa điểm, đạo cụ, thời tiết hay kết quả không có trong nguồn.
 
 ```
-/visual-prompt truyen.txt            # spectacle (mặc định)
-/visual-prompt truyen.txt --epic     # bơm scale mạnh hơn (map/đại quân/đám đông lớn)
-/visual-prompt truyen.txt --faithful # trung thành text, KHÔNG bịa combat
+/visual-prompt truyen.txt            # grounded + image-only
+/visual-prompt truyen.txt --epic     # chỉ tăng treatment của chi tiết đã có
+/visual-prompt truyen.txt --faithful # alias tương thích, vẫn grounded
 ```
 
-- `--epic`: đẩy band spectacle lên một nấc — map cực rộng, quân đội/đám đông lớn,
-  spectacle tối đa.
-- `--faithful`: TẮT dramatize — đo mật độ hành động thật của truyện rồi đặt tỉ lệ
-  cảnh đúng nội dung; truyện thiên thoại → ít combat, lấy đa dạng từ góc máy/nhóm
-  nhân vật có thật/chi tiết vật phẩm/thời tiết. Dùng khi muốn hình khớp 100% lời kể.
+- `--epic`: tăng chất lượng framing/lighting/scale cho chi tiết source-supported;
+  không tạo quân đội/đám đông mới.
+- `--faithful`: giữ tương thích với lệnh cũ; từ v0.11 mọi mode đều grounded.
 
-> Hai cổng tự động (plan gate + depth gate) loại cảnh trùng lặp liền kề, synopsis
-> vụn, và block prompt nông (thiếu header / sai độ dài / video >3800 ký tự) rồi tự
-> regen có giới hạn — chạy ở cả hai chế độ.
+> Plan/depth/similarity gates fail-closed: sau tối đa hai lượt sửa vẫn còn lỗi thì
+> dừng và nêu scene ID, không “warn-and-ship”.
 
 ---
 
@@ -279,26 +292,30 @@ instrumental cho 1 vùng cảm xúc của truyện.
 
 1. Mở Lyria app → chọn Lyria 3 (music generation)
 2. Mở `truyen_music_prompts.txt`
-3. Copy 1 khối giữa 2 dòng `--- LOOP i / N — Chương X-Y — mood: ... ---`
-   (chỉ copy phần prompt tiếng Anh + dòng Negative + dòng Loop, KHÔNG copy dòng
-   nhãn `--- LOOP ... ---`)
+3. Copy lần lượt từng khối gồm một paragraph tiếng Anh và section `Tags:` ngay
+   sau nó; các khối cách nhau bằng dòng trống.
 4. Paste → Lyria tạo đoạn nhạc ~2-3 phút, loop được
 
-**Bao nhiêu loop?** Mặc định 4 (tự co giãn 3–5). Truyện dài / nhiều cao trào →
-dùng `--music 5` hoặc hơn. Truyện ngắn / cảm xúc phẳng → `--music 3`.
+**Bao nhiêu loop?** Music mặc định tắt. Khi đã bật bằng `--music` mà không ghi
+số, skill dùng 4 loop (tự co giãn 3–5). Truyện dài / nhiều cao trào → dùng
+`--music 5` hoặc hơn. Truyện ngắn / cảm xúc phẳng → `--music 3`.
 
-**Đặt nhạc vào timeline:** mỗi loop có nhãn `Chương X-Y` → đặt đoạn nhạc đó vào
-khoảng video tương ứng với các chương đó. **Sync thủ công** — skill không tự
-canh timeline.
+**Đặt nhạc vào timeline:** thứ tự block khớp thứ tự region trong
+`.work/music-plan.md`; dùng `chapter_start/chapter_end` ở đó để đặt nhạc.
+**Sync thủ công** — skill không tự canh timeline.
+Khi chạy batch bằng `run-folder.sh`, mapping và cache được giữ cạnh input trong
+thư mục `<stem>_music-cache/music-plan.md` thay vì local `.work` đã dọn.
+Batch chỉ skip khi `<stem>_visual-prompt-complete.json` còn khớp input, output,
+cache, version, model, style và flags; bất kỳ thay đổi nào sẽ tự chạy lại file.
 
-**Lưu ý giới hạn Lyria:** prompt đã ép instrumental + dòng negative
-(`no vocals, no lyrics, ...`), nhưng Lyria VẪN có thể thỉnh thoảng tạo pad nghe
+**Lưu ý giới hạn Lyria:** cuối prompt đã ép
+`no vocals, no lyrics, instrumental only`, nhưng Lyria VẪN có thể tạo pad nghe
 giống giọng người. Đây là giới hạn của model, không loại bỏ 100% được. Nếu đoạn
 nào lẫn tiếng hát → re-generate hoặc chỉnh lại mood trong prompt.
 
-**Lưu ý resume nhạc:** khác với scene (có `scene-plan.md` cố định), việc chia
-vùng cảm xúc do LLM suy lại mỗi lần chạy, không lưu cố định. Chạy lại có thể
-regen loop nhạc nếu ranh giới vùng đổi. Muốn gen sạch → dùng `--force-redo`.
+**Resume nhạc:** vùng cảm xúc được lưu trong `.work/music-plan.md`. Chạy lại với
+cùng input/genre/scene-plan/music count sẽ tái dùng đúng segmentation và chỉ
+regen loop thiếu hoặc stale; `--force-redo` tạo lại cả music plan.
 
 ---
 
@@ -322,7 +339,15 @@ Phàm trong file tập 5 khi gen ảnh.
 
 Cơ chế: **Identity Anchor verbatim** (xem
 [references/identity-anchor-rules.md](references/identity-anchor-rules.md)).
-Bible lưu mô tả chi tiết, **paste nguyên văn** vào mỗi prompt Subject section.
+Bible lưu đúng mô tả có trong nguồn, **paste nguyên văn** vào mỗi prompt Subject
+section. Field chưa được truyện xác lập giữ `not stated`; skill không tự tạo nét
+mặt, tuổi, trang phục hay signature prop để làm nhân vật “đẹp” hoặc “độc đáo”.
+
+Với `--series`, pipeline còn duy trì
+`~/.gemini/bibles/<series>-visual-history.md`. Similarity gate bắt copy-paste
+giữa scene/loop trong run; history lưu camera, setting, action motif và music
+intro/tag đã dùng để các file sau tránh lặp nguyên văn. Địa điểm vẫn được tái
+xuất khi plot cần, nhưng phải mô tả bằng góc máy và chi tiết mới.
 
 Quy trình:
 ```
@@ -396,8 +421,8 @@ A: Sửa `references/genre-keywords.md` thêm 1 section, sửa
 `prompts/genre-detector.md` thêm vào allowlist.
 
 **Q: Veo3 truncate video clip của tôi.**
-A: Check prompt body ≤900 từ + ≤3 beats + tổng ≤8.0s. Hard cap của skill là 900,
-nhưng nếu tool cụ thể vẫn truncate thì trim `Context` trước.
+A: Check prompt body ≤3800 ký tự + 2–3 beats + tổng ≤8.0s. Nếu tool cụ thể vẫn
+truncate thì trim `Context` trước.
 
 **Q: Có thiếu FAQ — báo ở đâu?**
 A: Open issue tại GitHub repo (link trong README.md).

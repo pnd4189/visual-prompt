@@ -1,6 +1,7 @@
 # Antigravity Install Guide — visual-prompt
 
-Skill này nạp vào Antigravity (Gemini CLI) qua 3 symlink.
+Skill này nạp vào Antigravity (Gemini CLI), Codex CLI, và Claude Code qua các
+symlink adapter.
 
 ## Linux / macOS
 
@@ -15,6 +16,15 @@ bash setup.sh
 - `~/.gemini/antigravity-cli/plugins/visual-prompt` → repo
 
 Verify: mở Antigravity → gõ `/visual-prompt` → autocomplete xuất hiện.
+
+Đồng thời setup tạo:
+
+- `~/.agents/skills/visual-prompt` → adapter Codex native (`$visual-prompt`)
+- `~/.codex/prompts/visual-prompt.md` → slash shim (`/prompts:visual-prompt`)
+- `~/.claude/skills/visual-prompt` → adapter Claude (`/visual-prompt`)
+
+Codex native là đường chạy khuyến nghị; slash shim chỉ chuyển nguyên arguments.
+Claude adapter tắt model auto-invocation để tránh chạy ngoài ý muốn.
 
 ## Windows (Admin / Developer Mode)
 
@@ -41,6 +51,11 @@ Nếu setup scripts không chạy được:
 3. Symlink (hoặc copy) `<repo>/commands/visual-prompt.toml` vào
    `~/.gemini/commands/visual-prompt.toml`
 4. Symlink (hoặc copy) `<repo>` vào `~/.gemini/antigravity-cli/plugins/visual-prompt`
+5. Codex: symlink `<repo>/adapters/codex/visual-prompt` vào
+   `~/.agents/skills/visual-prompt` và `<repo>/adapters/codex/visual-prompt.md`
+   vào `~/.codex/prompts/visual-prompt.md`
+6. Claude Code: symlink `<repo>/adapters/claude-code/visual-prompt` vào
+   `~/.claude/skills/visual-prompt`
 
 ## Uninstall
 
@@ -48,6 +63,8 @@ Nếu setup scripts không chạy được:
 rm -f ~/.gemini/extensions/visual-prompt
 rm -f ~/.gemini/commands/visual-prompt.toml
 rm -f ~/.gemini/antigravity-cli/plugins/visual-prompt
+rm -f ~/.agents/skills/visual-prompt ~/.codex/prompts/visual-prompt.md
+rm -f ~/.claude/skills/visual-prompt
 ```
 
 Bibles ở `~/.gemini/bibles/` được giữ lại (chứa data của user).
