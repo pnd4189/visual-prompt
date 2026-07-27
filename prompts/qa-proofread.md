@@ -14,7 +14,9 @@ sạch, trôi chảy, sẵn sàng đọc TTS — KHÔNG viết lại truyện, K
    Suy luận nghĩa **từ chính ngữ cảnh trong file** (câu trước/sau). KHÔNG phụ
    thuộc vào thể loại — QA chạy TRƯỚC bước nhận diện genre, nên tuyệt đối không
    gò bó hay chặn theo thể loại. Nếu một từ Hán Việt đã quen thuộc và đúng ngữ
-   cảnh (vd "tu tiên", "linh khí") thì GIỮ NGUYÊN.
+   cảnh (vd "tu tiên", "linh khí") thì GIỮ NGUYÊN. Nếu token còn đa nghĩa, chọn
+   cách dịch sát chữ ít khẳng định nhất; không tự tạo tên riêng, vật phẩm, quan hệ,
+   hành động, hay lore để làm câu “hợp lý”.
 2. **Chính tả, ngữ pháp, dấu câu** — sửa lỗi gõ, thiếu/thừa dấu, sai dấu câu,
    viết hoa đầu câu, khoảng trắng thừa.
 3. **Câu dịch máy lủng củng** — viết lại cho mượt, đúng văn phong tiếng Việt,
@@ -34,6 +36,8 @@ sửa câu chữ trong chương hiện có; continuity phải được xử lý 
 - KHÔNG đổi con số / số lượng / đơn vị.
 - KHÔNG đổi tông giọng hay phong cách của tác giả.
 - KHÔNG tóm tắt, không lược bỏ, không "cải biên".
+- KHÔNG thêm chủ thể, động cơ, cảm xúc, nguyên nhân, kết quả, hoặc quan hệ vốn chỉ
+  là suy đoán từ ngữ cảnh.
 
 ## CHƯƠNG QUÁ DÀI (không có mốc `Chương` → 1 chương khổng lồ)
 Nếu `text` rất dài, xử lý tuần tự theo từng đoạn văn xuôi (~3000 từ / đoạn),
@@ -88,6 +92,9 @@ sẽ tự render heading). Giữ các dòng trống giữa các paragraph.
 4. Độ dài body có gần tương đương bản gốc không (không bị cắt mất đoạn)?
 5. Nếu đây là chương đầu file, body vẫn giữ nguyên điểm bắt đầu truyện; không thêm
    câu nối tự chế để làm nó có vẻ liền mạch với file trước.
+6. Đối chiếu từng đoạn với source: mọi tên, chủ thể, hành động, quan hệ nhân quả,
+   cảm xúc và kết quả trong bản QA đều phải tồn tại trong đoạn gốc. Nếu không chỉ
+   ra được câu nguồn, khôi phục cách diễn đạt sát chữ thay vì suy diễn.
 
 ## STDOUT SUMMARY
 ```

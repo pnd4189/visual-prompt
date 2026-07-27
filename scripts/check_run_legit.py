@@ -2,17 +2,16 @@
 """External bypass/depth gate for run-folder.sh — the model cannot bypass this.
 
 A finished /visual-prompt run is legit only if the model expanded scenes via the
-LLM expander (contract #4/#5/#6): no self-made Python prompt generator in .work,
-scene-plan + scene-NNN.md produced by the LLM, and deep non-boilerplate output.
+LLM expander (contract #4/#5/#6): no self-made runtime prompt generator in
+.work, scene-plan + scene-NNN.md produced by the LLM, and deep non-boilerplate
+output.
 
 run-folder.sh calls this after the skill run, before copying outputs to gdrive.
 Exit 0 = legit (ship it); exit 2 = bypass/shallow (re-run the file --force-redo).
 
 Checks:
-  1. No .work/*.py contains prompt-section strings (## Image Prompt / Camera: /
-     Story DNA: / Subject: / Atmosphere:) — that signature means the model wrote a
-     generator instead of using the LLM expander. Legit I/O helpers (apply_qa.py,
-     extract.py) never contain these strings, so no false positive.
+  1. No executable/code file is created anywhere below .work. A creative run must
+     write markdown artifacts directly; nested generators are still bypasses.
   1b. scripts/ holds exactly CANONICAL_SCRIPTS and the skill root holds no code
      files. The model has hidden bypass generators INSIDE scripts/ before
      (generate_*.py, fix_*.py, pad_*.py named to look like real helpers) — a
@@ -33,14 +32,9 @@ import sys
 from pathlib import Path
 
 IMAGE_WORD_MIN = 350
-SCENE_FILE_RE = re.compile(r'^scene-(\d{3})\.md$')
-SCENE_ID_RE = re.compile(r'^\s*-?\s*scene_id:\s*(\d+)', re.M)
-BLOCK_RE = re.compile(r'^--- SCENE (\d+) ---\s*$', re.M)
-# prompt-section strings only a bypass generator hardcodes.
-PY_BYPASS_RE = re.compile(
-    r'##\s*Image Prompt|^\s*Camera\s*:|^\s*Story DNA\s*:|^\s*Subject\s*:|^\s*Atmosphere\s*:',
-    re.M,
-)
+SCENE_FILE_RE = re.compile(r'^scene-(\d{3}[a-zA-Z]?)\.md$')
+SCENE_ID_RE = re.compile(r'^\s*\|\s*(\d+[a-zA-Z]?)\s*\|', re.M)
+BLOCK_RE = re.compile(r'^--- SCENE (\d+[a-zA-Z]?) ---\s*$', re.M)
 NGRAM_N = 8
 NGRAM_MAX_REPEAT = 5  # >5 occurrences of the same 8-word run = boilerplate loop
 # Per-scene < IMAGE_WORD_MIN is a skill violation, but the skill's own depth gate
@@ -55,14 +49,32 @@ SHORT_MAJORITY_FRAC = 0.5
 CANONICAL_SCRIPTS = {
     '__init__.py', '_io_utils.py', 'append_bible_row.py', 'assemble_outputs.py',
     'assemble_qa.py', 'calc_scene_count.py', 'check_anchor_consistency.py',
-    'check_content_safety.py', 'check_previous_continuity.py', 'check_run_legit.py',
-    'load_input.py', 'resize_16_9.py', 'run-all.sh', 'run-folder.sh',
+    'check_content_safety.py', 'check_previous_continuity.py',
+    'check_prompt_similarity.py', 'check_run_legit.py', 'load_input.py',
+    'resize_16_9.py', 'run-all.sh', 'run-folder.sh',
     'validate_artifacts.py', 'validate_scene_plan.py',
 }
 # Code files allowed at the skill ROOT. Everything else matching ROOT_CODE_GLOBS
 # is bypass clutter the model wrote to its CWD instead of .work.
-CANONICAL_ROOT_FILES = {'setup.sh'}
-ROOT_CODE_GLOBS = ('*.py', '*.js', '*.mjs', '*.cjs', '*.sh')
+CANONICAL_ROOT_FILES = {'setup.sh', 'setup.bat'}
+ROOT_CODE_GLOBS = (
+    '*.py', '*.pyw', '*.js', '*.mjs', '*.cjs', '*.ts', '*.tsx',
+    '*.sh', '*.bash', '*.zsh', '*.fish', '*.ps1', '*.bat', '*.cmd',
+    '*.rb', '*.pl', '*.php', '*.lua', '*.r', '*.ipynb',
+    '*.go', '*.rs', '*.java', '*.cs', '*.c', '*.cc', '*.cpp',
+)
+RUNTIME_CODE_SUFFIXES = {pattern[1:] for pattern in ROOT_CODE_GLOBS}
+RUNTIME_CODE_SUFFIXES.update({'.exe', '.com'})
+
+
+def _looks_like_runtime_code(path):
+    if path.suffix.casefold() in RUNTIME_CODE_SUFFIXES:
+        return True
+    try:
+        with path.open('rb') as stream:
+            return stream.read(2) == b'#!'
+    except OSError:
+        return True
 
 
 def rogue_entries(skill_dir):
@@ -74,9 +86,12 @@ def rogue_entries(skill_dir):
             if p.name in CANONICAL_SCRIPTS or p.name == '__pycache__':
                 continue
             rogue.append(p)
-    for pat in ROOT_CODE_GLOBS:
-        rogue.extend(p for p in sorted(skill_dir.glob(pat))
-                     if p.name not in CANONICAL_ROOT_FILES)
+    rogue.extend(
+        p for p in sorted(skill_dir.iterdir())
+        if p.is_file()
+        and p.name not in CANONICAL_ROOT_FILES
+        and _looks_like_runtime_code(p)
+    )
     return rogue
 
 
@@ -134,16 +149,17 @@ def main():
         sys.exit(1)
     errors = []
 
-    # 1. .work/*.py with prompt-section content = bypass generator.
-    for p in sorted(work.glob('*.py')):
-        try:
-            txt = p.read_text(errors='ignore')
-        except Exception:
-            continue
-        if PY_BYPASS_RE.search(txt):
-            errors.append(
-                f".work/{p.name} chứa prompt-section content (model bypass expander, contract #5/#6)"
-            )
+    # 1. Any runtime code file under .work is a bypass. The active model writes
+    # markdown artifacts directly; recursive scanning catches hidden generators.
+    for p in sorted(
+        candidate for candidate in work.rglob('*')
+        if candidate.is_file() and _looks_like_runtime_code(candidate)
+    ):
+        relative = p.relative_to(work)
+        errors.append(
+            f".work/{relative} là runtime code (model tự chế generator/orchestration, "
+            "strict-generation-contract)"
+        )
 
     # 1b. Rogue code files: non-canonical entries in scripts/ + any code file at
     # the skill root. The model has hidden bypass generators in BOTH places —
@@ -165,14 +181,26 @@ def main():
     # was cleaned (no scene-plan.md), skip these checks rather than false-fail.
     plan = work / 'scene-plan.md'
     if plan.exists():
-        plan_ids = set(int(m) for m in SCENE_ID_RE.findall(plan.read_text(errors='ignore')))
+        parsed_plan_ids = [m.casefold() for m in SCENE_ID_RE.findall(plan.read_text(errors='ignore'))]
+        plan_ids = set(parsed_plan_ids)
         scene_files = {f.name for f in work.iterdir() if SCENE_FILE_RE.match(f.name)}
+        expected_scene_files = set()
+        for scene_id in plan_ids:
+            match = re.fullmatch(r'(\d+)([a-z]?)', scene_id)
+            if match:
+                expected_scene_files.add(
+                    f'scene-{int(match.group(1)):03d}{match.group(2)}.md'
+                )
+        if len(parsed_plan_ids) != len(plan_ids):
+            errors.append('scene-plan.md chứa scene id trùng nhau')
         if not scene_files:
             errors.append("có scene-plan.md nhưng không có .work/scene-NNN.md (LLM expander bị bỏ qua)")
         elif plan_ids and len(scene_files) != len(plan_ids):
             errors.append(
                 f"scene-*.md count ({len(scene_files)}) != scene-plan ids ({len(plan_ids)})"
             )
+        elif scene_files != expected_scene_files:
+            errors.append('scene-*.md ids không khớp scene-plan.md')
 
     # 3. output depth: per-scene word count + boilerplate-loop detection.
     if image_path is None or not image_path.exists() or image_path.stat().st_size == 0:

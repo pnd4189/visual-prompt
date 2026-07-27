@@ -8,13 +8,9 @@ Subject section. Do NOT paraphrase.
 
 ## Why Verbatim (not rewrite)?
 
-Empirical test (research R2, 2026):
-- Verbatim Identity Anchor across 10 scenes → **8.5/10** face/clothing consistency
-- LLM-rewritten variant per scene → **5–6/10** drift (hair length changes, eye
-  color flips, robe color shifts).
-
-The image model latches onto the exact word string. Even synonyms ("dark hair"
-vs "jet-black hair") produce different faces. Treat the anchor as a hash.
+Repeated exact identity wording reduces face, hair, and clothing drift. Treat the
+anchor as a hash, but never improve consistency by inventing the hash's contents.
+Source truth has priority over visual completeness.
 
 ## Bible Row Schema
 
@@ -23,12 +19,12 @@ vs "jet-black hair") produce different faces. Treat the anchor as a hash.
 | Field | Required? | Format | Example |
 |---|---|---|---|
 | name | yes | as-written in novel | `Trương Tiểu Phàm` |
-| age | yes | integer | `22` |
-| build | yes | 2-3 word phrase | `tall, lean` |
-| hair | yes | length + color + tie | `shoulder-length jet-black hair, tied with white silk ribbon` |
-| face | yes | 2 distinctive features | `angular jaw, narrow sharp obsidian eyes` |
-| signature mark | yes | one unique prop or scar | `jade pendant carved with lotus motif at throat` |
-| attire base | yes | wardrobe baseline | `ash-grey hemp robe with indigo trim` |
+| age | yes | exact source wording or `not stated` | `22` |
+| build | yes | source wording or `not stated` | `tall, lean` |
+| hair | yes | source wording or `not stated` | `shoulder-length black hair` |
+| face | yes | source wording or `not stated` | `narrow eyes` |
+| signature mark | yes | source-stated recurring prop/scar or `not stated` | `jade pendant` |
+| attire base | yes | source-stated wardrobe or `not stated` | `ash-grey hemp robe` |
 | role | yes | 1 word | `protagonist`, `mentor`, `antagonist`, `support` |
 
 ## Identity Anchor Block (the verbatim string)
@@ -36,10 +32,20 @@ vs "jet-black hair") produce different faces. Treat the anchor as a hash.
 Concatenate fields into ONE prose block. This is what gets pasted into every
 Subject section.
 
-**Format:**
+**Format when every field is stated:**
 ```
 <name> — <age> years old, <build> build, <hair>, <face>, <signature mark>,
 <attire base>.
+```
+
+For every `not stated` field, use the literal clause `age not stated`, `build not
+stated`, `hair not stated`, `face not stated`, `signature mark not stated`, or
+`attire not stated`. If age is vague source wording rather than a number, use
+`age described as <source wording>`. Do not silently fill the gap. Example:
+
+```
+Tiểu Phàm — age not stated, build not stated, black hair, face not stated,
+signature mark not stated, grey robe.
 ```
 
 **Example:**
@@ -50,9 +56,10 @@ eyes, small jade pendant carved with lotus motif at the throat, ash-grey
 hemp robe with indigo trim.
 ```
 
-This exact block goes into EVERY image/video prompt's Subject section. After
-the verbatim block, you may append scene-specific state (pose, expression,
-wardrobe condition for this shot — e.g. "robe hem mud-streaked from travel").
+This exact block goes into every image/video prompt that includes the character.
+After it, append only scene-specific state supported by the current QA chapter.
+Do not infer pose, expression, or wardrobe condition merely to make the anchor
+more visual.
 
 ## BAD Example (don't do this)
 
@@ -75,10 +82,9 @@ When processing a 2nd, 3rd, ... file in the same series with an existing bible:
 1. Read existing bible rows.
 2. Identify characters in new chapters NOT in bible.
 3. For each new character: call `python3 scripts/append_bible_row.py --bible <path> --row <new-row>` — APPEND ONLY.
-4. **NEVER edit existing rows**, even if the new chapter describes the
-   character slightly differently. The first description wins for series
-   consistency. Log discrepancies to `.work/bible-conflicts.md` for user
-   review.
+4. **NEVER edit existing rows** automatically, even if the new chapter describes
+   the character differently. Log discrepancies to `.work/bible-conflicts.md`
+   for user review; do not resolve them by guessing.
 
 Why: changing an existing row → all previous file's prompts now point at an
 outdated anchor; image consistency breaks for the whole series.

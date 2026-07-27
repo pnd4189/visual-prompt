@@ -19,16 +19,15 @@
 #          VP_LOCAL   local workdir base       (default: $HOME/.cache/vp-run-<series>)
 #
 # Local-run strategy: the skill creates .work and writes its outputs next to the
-# INPUT file. Running directly on a gdrive/rclone FUSE mount breaks subagent writes
+# INPUT file. Running directly on a gdrive/rclone FUSE mount breaks parent-model writes
 # (permission timeouts) and stalls on I/O, which pushes the model into bypassing the
 # pipeline (external CLI calls, template fallback). So each file is copied to a fresh
 # LOCAL dir, the whole pipeline runs there, and only the final _*.txt outputs are
 # copied back to the gdrive folder.
 #
-# Resume:  file-level — a file whose <stem>_image_prompts.txt already exists in the
-#          gdrive folder is skipped. Each file runs in a fresh local workdir, so a
-#          re-run after a crash restarts the UNFINISHED file cleanly while finished
-#          files stay skipped.
+# Resume:  file-level — only a file with a verified completion manifest is skipped.
+#          Each file runs in a fresh local workdir, so a re-run after a crash
+#          restarts the unfinished file while validated files stay skipped.
 
 set -uo pipefail
 
@@ -43,6 +42,76 @@ DRYRUN="${VP_DRYRUN:-0}"
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 die() { echo "❌ $*" >&2; exit 1; }
+
+completion_manifest() {
+  python3 - "$@" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+mode, manifest_name, input_name, image_name, music_name, qa_name, video_name, \
+    plan_name, skill_dir_name, series, style, model, music_n, no_video = sys.argv[1:]
+
+
+def digest(filename):
+    path = Path(filename)
+    data = path.read_bytes()
+    if not data:
+        raise ValueError(f'empty completion artifact: {path}')
+    return hashlib.sha256(data).hexdigest()
+
+
+try:
+    skill_dir = Path(skill_dir_name)
+    skill_version = json.loads(
+        (skill_dir / 'gemini-extension.json').read_text(encoding='utf-8')
+    )['version']
+    count = int(music_n)
+    no_video_enabled = no_video == '1'
+    plan_path = Path(plan_name)
+    artifacts = {
+        'input': digest(input_name),
+        'image': digest(image_name),
+        'music': digest(music_name),
+        'qa': digest(qa_name),
+        'music_plan': digest(plan_path),
+        'music_regions': [
+            digest(plan_path.parent / f'music-{index:03d}.md')
+            for index in range(1, count + 1)
+        ],
+    }
+    if not no_video_enabled:
+        artifacts['video'] = digest(video_name)
+    expected = {
+        'schema': 1,
+        'skill_version': skill_version,
+        'series': series,
+        'style': style,
+        'model': model,
+        'music_n': count,
+        'no_video': no_video_enabled,
+        'artifacts': artifacts,
+    }
+    manifest = Path(manifest_name)
+    if mode == 'verify':
+        actual = json.loads(manifest.read_text(encoding='utf-8'))
+        raise SystemExit(0 if actual == expected else 1)
+    if mode != 'write':
+        raise ValueError(f'unknown completion-manifest mode: {mode}')
+    payload = json.dumps(expected, indent=2) + '\n'
+    # Destination is commonly a gdrive FUSE mount where rename is unsupported.
+    # A torn direct write fails exact JSON verification and therefore fails closed.
+    manifest.write_text(payload, encoding='utf-8')
+    if manifest.read_text(encoding='utf-8') != payload:
+        raise OSError(f'completion manifest verification failed: {manifest}')
+except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+}
+
+[[ "$MUSIC" =~ ^[1-9][0-9]*$ ]] || die "VP_MUSIC phải là số nguyên >= 1: $MUSIC"
+case "${VP_NO_VIDEO:-0}" in 0|1) ;; *) die "VP_NO_VIDEO phải là 0 hoặc 1" ;; esac
 
 # kebab-case a folder name into a stable, filesystem-safe series id
 slugify() {
@@ -104,6 +173,11 @@ if [ -z "$SERIES" ]; then
   echo "  Đặt VP_SERIES='<tên-bộ>' hoặc tạo $CONF với dòng 'series=<tên-bộ>' để các subfolder dùng chung 1 bible." >&2
 fi
 [ -n "$SERIES" ] || die "Không suy ra được series name từ: $FOLDER"
+SAFE_SERIES=$(slugify "$SERIES")
+[ -n "$SAFE_SERIES" ] || die "Series name không tạo được filesystem-safe slug: $SERIES"
+[ "$SAFE_SERIES" = "$SERIES" ] \
+  || echo "⚠ Chuẩn hoá series '$SERIES' → '$SAFE_SERIES' để bảo vệ đường dẫn." >&2
+SERIES="$SAFE_SERIES"
 conf_set "$CONF" series "$SERIES"
 
 # Pre-flight: refuse to run if the pinned model name no longer exists in agy.
@@ -126,11 +200,11 @@ STYLE=$(conf_get "$CONF" style)
 # base survives reboot; each file still gets a fresh subdir (rm -rf per file).
 LOCAL_BASE="${VP_LOCAL:-$HOME/.cache/vp-run-$SERIES}"
 
-# Grant agy read access to the series bibles dir so scene-expansion subagents can
+# Grant agy read access to the series bibles dir so the active parent model can
 # read ~/.gemini/bibles/<series>.md directly. Without this, the bible path is
-# outside --add-dir, subagents can't read it, fabricate generic appearance, and
-# the model restarts expansion mid-run to fix it — that restart makes the last
-# subagent lag and the model yields its turn before assemble (agy -p one-shot
+# outside --add-dir, the model may fabricate generic appearance, and
+# restart expansion mid-run to fix it — that restart can make the model yield
+# before assemble (agy -p one-shot
 # exits), so no output ships. Empty if the dir is absent (per-file bible mode).
 BIBLES_DIR="$HOME/.gemini/bibles"
 BIBLES_ADD=""
@@ -150,27 +224,47 @@ for f in "${INPUTS[@]}"; do
   idx=$((idx + 1))
   stem="${f%.txt}"
   tag="[$SERIES] $idx/$total $(basename "$f")"
+  music_cache="${stem}_music-cache"
+  complete_manifest="${stem}_visual-prompt-complete.json"
+  video_output="${stem}_video_prompts.txt"
 
-  if [ -f "${stem}_image_prompts.txt" ]; then
+  if completion_manifest verify "$complete_manifest" "$f" \
+      "${stem}_image_prompts.txt" "${stem}_music_prompts.txt" "${stem}_qa.txt" \
+      "$video_output" "$music_cache/music-plan.md" "$SKILL_DIR" "$SERIES" \
+      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}"; then
     echo "⏭  $tag — đã có output, skip"
     continue
   fi
 
   # Run on LOCAL disk, not gdrive. The skill creates .work + writes its outputs next
   # to the INPUT file; copying the input into a fresh local dir keeps all that churn
-  # off the gdrive FUSE mount (which breaks subagent writes and stalls on I/O). Fresh
+  # off the gdrive FUSE mount (which breaks parent-model writes and stalls on I/O). Fresh
   # dir per file → no cross-file scratch leakage. Pre-create .work so the pipeline's
   # `> .work/chapters.json` (STEP 1) has its dir. Outputs get copied back after.
   local_dir="$LOCAL_BASE/$(basename "$stem")"
   local_in="$local_dir/$(basename "$f")"
   local_stem="${local_in%.txt}"
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: rm -rf + mkdir -p \"$local_dir/.work\"; cp input + file chương-trước → local; chạy local; copy _*.txt về \"$FOLDER\""
+    echo "   DRYRUN: reset \"$local_dir/.work\"; restore music cache nếu có; chạy local; copy outputs + music cache về \"$FOLDER\""
   else
     rm -rf "$local_dir" && mkdir -p "$local_dir/.work"
     cp "$f" "$local_in" || die "$tag — không copy được input sang local dir $local_dir"
-    # Pre-stage the skill's prompts/ + references/ into the local workdir so any
-    # subagent whose CWD is local_dir resolves `@prompts/*.md` / `@references/*.md`
+    if [ -s "$music_cache/music-plan.md" ]; then
+      cp "$music_cache/music-plan.md" "$local_dir/.work/music-plan.md" \
+        || die "$tag — không restore được music-plan cache"
+      cached_music_n=$(sed -n 's/^music_n:[[:space:]]*//p' "$music_cache/music-plan.md" | head -1)
+      if [[ "$cached_music_n" =~ ^[0-9]+$ ]]; then
+        cache_index=1
+        while [ "$cache_index" -le "$cached_music_n" ]; do
+          printf -v cache_name 'music-%03d.md' "$cache_index"
+          [ -s "$music_cache/$cache_name" ] \
+            && cp "$music_cache/$cache_name" "$local_dir/.work/$cache_name"
+          cache_index=$((cache_index + 1))
+        done
+      fi
+    fi
+    # Pre-stage the skill's prompts/ + references/ into the local workdir so the
+    # active model resolves `@prompts/*.md` / `@references/*.md`
     # via a relative path instead of falling back to `find /home/dung` — which
     # recurses into the gdrive FUSE mount and stalls for hours (see header note).
     cp -r "$SKILL_DIR/prompts" "$local_dir/prompts" 2>/dev/null || true
@@ -205,13 +299,15 @@ for f in "${INPUTS[@]}"; do
     fi
   fi
 
-  # Build the skill invocation against the LOCAL input copy.
+  # Batch mode explicitly opts into music and video; direct /visual-prompt runs
+  # remain image-only by default.
   cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC"
   [ -n "$STYLE" ] && cmd="$cmd --style $STYLE"
   if [ "${VP_NO_VIDEO:-0}" = "1" ]; then
     cmd="$cmd --no-video"
     no_video_label=" (no-video)"
   else
+    cmd="$cmd --video"
     no_video_label=""
   fi
   if [ -n "$STYLE" ]; then
@@ -224,6 +320,7 @@ for f in "${INPUTS[@]}"; do
 
   if [ "$DRYRUN" = "1" ]; then
     echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 4h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\" $BIBLES_ADD)"
+    echo "   DRYRUN: gate order legit → artifacts → similarity → anchor/safety --fix → final artifacts/similarity → copy/cache → history/manifest"
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
@@ -231,15 +328,18 @@ for f in "${INPUTS[@]}"; do
 
   # Run the skill + EXTERNAL bypass/depth gate, with a bounded --force-redo retry.
   # run-folder.sh is a thin driver the model cannot bypass: if the model shortcuts
-  # via a self-made Python prompt generator (contract #4/#5/#6) or ships shallow /
+  # via a self-made runtime prompt generator (contract #4/#5/#6) or ships shallow /
   # boilerplate output, the gate rejects it and re-runs the file with --force-redo.
   # Up to 3 attempts; on persistent bypass the run is rejected (no garbage shipped).
   redo_ok=0
+  force_redo_next=0
   for attempt in 1 2 3; do
     run_cmd="$cmd"
-    if [ "$attempt" -gt 1 ]; then
+    if [ "$force_redo_next" = "1" ]; then
       run_cmd="$cmd --force-redo"
-      echo "   ⚠ $tag — re-run lần $attempt với --force-redo (lần trước bypass/shallow)"
+      echo "   ⚠ $tag — re-run lần $attempt với --force-redo (lần trước thiếu output/bypass/shallow)"
+    elif [ "$attempt" -gt 1 ]; then
+      echo "   ⚠ $tag — re-run lần $attempt không force-redo (similarity-only; resume + targeted rewrite)"
     fi
     # Clear any self-made .py generators left by a prior bypass attempt.
     # --force-redo only removes scene-*.md / qa-* / music-*, NOT .py, so without
@@ -283,42 +383,179 @@ for f in "${INPUTS[@]}"; do
 
     # Core artifact must exist before gating.
     if [ ! -s "${local_stem}_image_prompts.txt" ]; then
-      [ "$attempt" -lt 3 ] && { echo "   ⚠ $tag — thiếu output, re-run"; continue; }
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu output, re-run"; continue; }
       die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt sau $attempt lần (chạy lại để resume)."
     fi
+    if [ ! -s "${local_stem}_music_prompts.txt" ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu music output, re-run"; continue; }
+      die "$tag — thiếu/rỗng ${local_stem}_music_prompts.txt sau $attempt lần (chạy lại để resume)."
+    fi
+    if [ ! -s "${local_stem}_qa.txt" ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu QA output, re-run"; continue; }
+      die "$tag — thiếu/rỗng ${local_stem}_qa.txt sau $attempt lần (chạy lại để resume)."
+    fi
+    if [ "${VP_NO_VIDEO:-0}" != "1" ] && [ ! -s "${local_stem}_video_prompts.txt" ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu video output, re-run"; continue; }
+      die "$tag — thiếu/rỗng ${local_stem}_video_prompts.txt sau $attempt lần (chạy lại để resume)."
+    fi
 
-    # External gate: rejects .work/*.py prompt generators + shallow/boilerplate
+    # External gate: rejects runtime prompt generators + shallow/boilerplate
     # outputs (the model cannot bypass this). Pass ⇒ legit deep LLM-expanded output.
-    if python3 "$SKILL_DIR/scripts/check_run_legit.py" \
+    if ! python3 "$SKILL_DIR/scripts/check_run_legit.py" \
         --work "$local_dir/.work" --image "${local_stem}_image_prompts.txt" \
         --video "${local_stem}_video_prompts.txt" --skill-dir "$SKILL_DIR"; then
-      redo_ok=1
-      break
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — gate FAIL (bypass/shallow), re-run --force-redo"; continue; }
+      die "$tag — gate vẫn FAIL sau 3 lần (model bypass expander). Output bị từ chối — chạy lại để resume."
     fi
-    [ "$attempt" -lt 3 ] && { echo "   ⚠ $tag — gate FAIL (bypass/shallow), re-run --force-redo"; continue; }
-    die "$tag — gate vẫn FAIL sau 3 lần (model bypass expander). Output bị từ chối — chạy lại để resume."
+
+    grounding_json=$(python3 "$SKILL_DIR/scripts/validate_scene_plan.py" \
+      --plan "$local_dir/.work/scene-plan.md" \
+      --chapters-json "$local_dir/.work/chapters_qa.json")
+    grounding_status=$?
+    printf '%s\n' "$grounding_json"
+    if [ "$grounding_status" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — grounding/variation FAIL, re-run --force-redo"; continue; }
+      die "$tag — grounding/variation vẫn FAIL sau 3 lần. Output bị từ chối."
+    fi
+
+    scene_artifact_json=$(python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
+      --check scenes --work-dir "$local_dir/.work" \
+      --scene-plan "$local_dir/.work/scene-plan.md")
+    scene_artifact_status=$?
+    printf '%s\n' "$scene_artifact_json"
+    if [ "$scene_artifact_status" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — scene artifacts FAIL, re-run --force-redo"; continue; }
+      die "$tag — scene artifacts vẫn FAIL sau 3 lần. Output bị từ chối."
+    fi
+    expected_image_count=$(printf '%s\n' "$scene_artifact_json" | python3 -c \
+      'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
+    expected_video_count=$(printf '%s\n' "$scene_artifact_json" | python3 -c \
+      'import json,sys; print(json.load(sys.stdin)["results"][0]["videos_expected"])' 2>/dev/null)
+    if ! [[ "$expected_image_count" =~ ^[0-9]+$ && "$expected_video_count" =~ ^[0-9]+$ ]]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — scene artifact JSON lỗi, re-run"; continue; }
+      die "$tag — scene artifact JSON không hợp lệ."
+    fi
+
+    music_artifact_json=$(python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
+        --check music --work-dir "$local_dir/.work" --expected-music "$MUSIC" \
+        --music-plan "$local_dir/.work/music-plan.md")
+    music_artifact_status=$?
+    printf '%s\n' "$music_artifact_json"
+    if [ "$music_artifact_status" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — music artifacts FAIL, re-run --force-redo"; continue; }
+      die "$tag — music artifacts vẫn FAIL sau 3 lần. Output bị từ chối."
+    fi
+    expected_music_count=$(printf '%s\n' "$music_artifact_json" | python3 -c \
+      'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
+    if ! [[ "$expected_music_count" =~ ^[0-9]+$ ]]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — không đọc được expected music count, re-run"; continue; }
+      die "$tag — music artifact JSON không hợp lệ."
+    fi
+
+    sim_args=(--image "${local_stem}_image_prompts.txt")
+    [ -s "${local_stem}_video_prompts.txt" ] \
+      && sim_args+=(--video "${local_stem}_video_prompts.txt")
+    sim_image_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" "${sim_args[@]}")
+    sim_image=$?
+    sim_music_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+      --music "${local_stem}_music_prompts.txt")
+    sim_music=$?
+    for sim_json in "$sim_image_json" "$sim_music_json"; do
+      [ -n "$sim_json" ] || continue
+      printf '%s\n' "$sim_json" | python3 -c \
+        'import json,sys; d=json.load(sys.stdin); print("   similarity: {} violation(s), {} warning(s)".format(len(d.get("violations", [])), len(d.get("warnings", []))))' \
+        2>/dev/null || echo "   similarity: output JSON không parse được"
+    done
+    if [ "$sim_image" -eq 2 ] || [ "$sim_music" -eq 2 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=0; echo "   ⚠ $tag — similarity FAIL, re-run resume không --force-redo"; continue; }
+      die "$tag — similarity vẫn FAIL sau 3 lần. Output bị từ chối — chạy lại để resume."
+    fi
+    if [ "$sim_image" -ne 0 ] || [ "$sim_music" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — similarity gate lỗi I/O, re-run --force-redo"; continue; }
+      die "$tag — similarity gate lỗi sau 3 lần. Output bị từ chối."
+    fi
+
+    mutation_failed=0
+    bible_file="$HOME/.gemini/bibles/$SERIES.md"
+    for kind in image video; do
+      pf="${local_stem}_${kind}_prompts.txt"
+      [ -s "$pf" ] || continue
+      if [ -f "$bible_file" ]; then
+        python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
+          --bible "$bible_file" --output "$pf" --fix
+        [ "$?" -eq 0 ] || mutation_failed=1
+      fi
+      safety_output=$(python3 "$SKILL_DIR/scripts/check_content_safety.py" \
+        --blocklist "$SKILL_DIR/references/blocklist-content-safety.md" \
+        --output "$pf" --fix)
+      safety_status=$?
+      printf '%s\n' "$safety_output"
+      if [ "$safety_status" -eq 2 ]; then
+        safety_hits=$(printf '%s\n' "$safety_output" | grep -E '^  .+:' || true)
+        blocking_safety=$(printf '%s\n' "$safety_hits" | grep -v ' (WARN-only):' || true)
+        [ -n "$safety_hits" ] && [ -z "$blocking_safety" ] || mutation_failed=1
+      elif [ "$safety_status" -ne 0 ]; then
+        mutation_failed=1
+      fi
+    done
+    if [ "$mutation_failed" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — anchor/safety fix lỗi, re-run --force-redo"; continue; }
+      die "$tag — anchor/safety fix lỗi sau 3 lần. Output bị từ chối."
+    fi
+
+    if ! python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
+        --check outputs --input "$local_in" \
+        --scene-plan "$local_dir/.work/scene-plan.md" \
+        --image-count "$expected_image_count" --video-count "$expected_video_count" \
+        --music-count "$expected_music_count"; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — final artifact counts/format FAIL, re-run --force-redo"; continue; }
+      die "$tag — final artifact counts/format vẫn FAIL sau 3 lần."
+    fi
+
+    final_sim_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" "${sim_args[@]}")
+    final_sim_status=$?
+    if [ "$final_sim_status" -ne 0 ]; then
+      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — final similarity FAIL sau safety, re-run --force-redo"; continue; }
+      die "$tag — file sau safety không qua similarity gate."
+    fi
+
+    redo_ok=1
+    break
   done
   [ "$redo_ok" = "1" ] || die "$tag — run không hợp lệ"
-  bible_file="$HOME/.gemini/bibles/$SERIES.md"
-  for kind in image video; do
-    pf="${local_stem}_${kind}_prompts.txt"
-    [ -s "$pf" ] || continue
-    [ -f "$bible_file" ] && python3 "$SKILL_DIR/scripts/check_anchor_consistency.py" \
-      --bible "$bible_file" --output "$pf" --fix
-    # Content-safety gate: strip brand/IP/likeness/gore/sexual + ban live-action
-    # video; religion is WARN-only. WARN does not halt the batch.
-    python3 "$SKILL_DIR/scripts/check_content_safety.py" \
-      --blocklist "$SKILL_DIR/references/blocklist-content-safety.md" \
-      --output "$pf" --fix || true
-  done
 
   # Copy the gated outputs back to the gdrive folder (only the final _*.txt; .work
-  # scratch stays local). image is required (verified above); the rest are optional.
+  # scratch stays local). QA, image, and music are required; video depends on mode.
   cp "${local_stem}_image_prompts.txt" "${stem}_image_prompts.txt" \
     || die "$tag — không copy được _image_prompts.txt về $FOLDER"
-  for suf in _qa.txt _video_prompts.txt _music_prompts.txt; do
-    [ -s "${local_stem}${suf}" ] && cp "${local_stem}${suf}" "${stem}${suf}"
+  cp "${local_stem}_music_prompts.txt" "${stem}_music_prompts.txt" \
+    || die "$tag — không copy được _music_prompts.txt về $FOLDER"
+  cp "${local_stem}_qa.txt" "${stem}_qa.txt" \
+    || die "$tag — không copy được _qa.txt về $FOLDER"
+  if [ "${VP_NO_VIDEO:-0}" != "1" ]; then
+    cp "${local_stem}_video_prompts.txt" "${stem}_video_prompts.txt" \
+      || die "$tag — không copy được _video_prompts.txt về $FOLDER"
+  fi
+  mkdir -p "$music_cache"
+  cp "$local_dir/.work/music-plan.md" "$music_cache/music-plan.md" \
+    || die "$tag — không lưu được music-plan cache"
+  cache_index=1
+  while [ "$cache_index" -le "$expected_music_count" ]; do
+    printf -v cache_name 'music-%03d.md' "$cache_index"
+    cp "$local_dir/.work/$cache_name" "$music_cache/$cache_name" \
+      || die "$tag — không lưu được $cache_name"
+    cache_index=$((cache_index + 1))
   done
+  history_path="$HOME/.gemini/bibles/${SERIES}-visual-history.md"
+  python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" --extract-history \
+      --image "${local_stem}_image_prompts.txt" \
+      --music "${local_stem}_music_prompts.txt" --history "$history_path" \
+    || die "$tag — output đã copy nhưng không cập nhật được visual history; manifest chưa ghi."
+  completion_manifest write "$complete_manifest" "$f" \
+      "${stem}_image_prompts.txt" "${stem}_music_prompts.txt" "${stem}_qa.txt" \
+      "$video_output" "$music_cache/music-plan.md" "$SKILL_DIR" "$SERIES" \
+      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}" \
+    || die "$tag — output đã copy nhưng không ghi được completion manifest."
   rm -rf "$local_dir"   # local scratch no longer needed; gdrive has the outputs
   echo "✅ $tag — xong (chạy local, đã copy output về gdrive)"
 done

@@ -14,25 +14,21 @@ props, layered background, color DNA, camera language, lighting, action/energy,
 audio when relevant, and explicit negatives.
 
 Never output a shallow prompt such as "wide shot, ancient room, cinematic,
-beautiful." **Spectacle is the default** (YouTube entertainment) — actively build:
+beautiful." **Grounded visual specificity is the default** — actively build:
 - foreground / midground / background composition
-- multiple characters or unnamed supporting groups (do NOT default to the
-  protagonist alone)
-- wide map-scale geography or architecture, sweeping landscapes
-- visible combat, spell-duels (đấu pháp), daoist magic, ritual, travel, aftermath,
-  or crowd/army motion
+- exactly the participants and groups supported by the source
+- source-supported geography, architecture, landscape, action, ritual, or stillness
 - concrete costume, weapon, prop, terrain, weather, particles, and light direction
+  only when established by the chapter or identity bible
 
 Scene diversity must be plot-fit, not templated. Across a run, prompts should vary
-between landscapes, named and unnamed character groups, side characters, enemies,
-crowds, combat, chưởng lực / spell-force collisions, artifacts, aftermath, travel,
-and emotional tableaus according to the chapter's actual narrative beat. Do not
-spotlight the protagonist by default.
+through truthful camera placement, composition, visible action phase, focus,
+lighting, palette, texture, and atmosphere according to each chapter's actual
+narrative beat. Do not spotlight the protagonist by default.
 
-You may DRAMATIZE beyond the literal chapter for cinematic richness, as long as it
-stays genre-consistent, identity-consistent (verbatim bible anchor for named
-characters), and does not contradict stated plot facts. (`--faithful` mode disables
-this — render only what the text supports.)
+You may not dramatize beyond the QA'd chapter. Do not add characters, crowds,
+combat, locations, props, powers, weather, injuries, or outcomes. Read and obey
+`strict-generation-contract.md`.
 
 Safety & Compliance (8 blocked categories — enforced by the content-safety gate,
 see [[blocklist-content-safety]]):
@@ -63,30 +59,34 @@ Use original descriptive style vocabulary from `.work/active-style.md`.
 **Sections (must appear in this exact order, with these exact headers):**
 
 ```
-Camera: <shot type, lens mm, angle, framing>
-Story DNA: <era, conflict pressure, cultivation/martial logic, emotional beat>
-Setting: <location, map scale, time of day, weather, era markers, terrain>
-Composition: <foreground / midground / background, supporting actors, scale cues>
-Subject: <PASTE IDENTITY ANCHOR VERBATIM from character-bible.md, then pose, expression, props>
-Action / Energy: <combat, ritual, spell geometry, weapon arc, impact, debris, body mechanics>
+Camera: <fresh shot type, lens mm, angle, framing chosen for this beat>
+Story DNA: <source-supported narrative and emotional beat; omit unstated conflict or lore>
+Setting: <source-supported location/layout/time/weather; omit facts the source does not establish>
+Composition: <foreground / midground / background using supported elements or negative space>
+Subject: <listed character anchors, or the row's environment/object focus when no character is listed>
+Action / Energy: <source-supported action, gesture, environmental motion, or truthful stillness>
 Style: <Style block from .work/active-style.md using original descriptors, aspect ratio 16:9>
-Lighting / Color: <key light, fill, rim, color DNA, shadow rule, mood>
-Atmosphere: <particles, smoke, mist, embers, cloth motion, crowd/terrain reaction>
+Lighting / Color: <supported source light, or restrained neutral rendering without a time/weather claim>
+Atmosphere: <supported particles/weather/reaction, or stillness, depth, contrast, and negative space>
 Negative: <anti-Western + genre + AI-defense + likeness/copyright + style negatives — max 28 items>
 ```
 
 **Rules:**
-- Subject section MUST start with the verbatim Identity Anchor block from
-  the bible (see [[identity-anchor-rules]]). Do not paraphrase.
+- When `scene_row.characters` is non-empty, Subject MUST start with each listed
+  character's verbatim Identity Anchor block from the bible (see
+  [[identity-anchor-rules]]). Do not paraphrase. When it is empty, do not insert a
+  person; use the grounded environment/object focus.
 - Style section uses the `Style block` of the chosen style in `.work/active-style.md`.
   Do not add named IP/artist/celebrity references. The selected style
   (see [[style-catalog]]) decides the look through descriptive vocabulary.
 - Aspect ratio 16:9 (YouTube native).
 - Use English visual vocabulary; map VN genre words via [[genre-keywords]].
 
-### IMAGE EXAMPLE — ADAPT TO SCENE, DO NOT COPY VERBATIM
+### IMAGE FORMAT EXAMPLE — STRUCTURE ONLY, NEVER A CONTENT DEFAULT
 
-*(Synthetic example. Adapt structure, not content.)*
+*(Every positive fact below is synthetic. It is forbidden in an actual scene
+unless that scene's QA chapter independently supports it. Do not copy its camera,
+weather, cast size, action, palette, props, layer count, or sentence rhythm.)*
 
 ```
 Camera: medium-wide shot, 35mm lens, low three-quarter angle, 16:9 frame,
@@ -153,7 +153,7 @@ first, then Style detail; never drop a beat or shorten the Identity Anchor.
 Cinematography: <shot type, lens, camera movement, framing, aspect ratio>
 Subject: <PASTE IDENTITY ANCHOR VERBATIM, then current state/wardrobe specifics for the shot>
 Action: <2-3 timestamped beats using ms-precision tags [00:00-00:02.5]>
-Context: <location, time of day, weather, era markers, supporting elements>
+Context: <source-supported location, time, weather, era markers, and elements>
 Style & Ambiance: <Style block from .work/active-style.md, color palette, lighting, safety negatives, AND audio cue embedded as one of the ambiance layers — NOT as a tag at the end>
 ```
 
@@ -161,9 +161,11 @@ Style & Ambiance: <Style block from .work/active-style.md, color palette, lighti
 diegetic + ambient layer. Example: `Audio: steel ringing on steel, low wind
 through bamboo, distant temple bell.` NEVER append `[audio: ...]` at the end.
 
-### VIDEO EXAMPLE — ADAPT TO SCENE, DO NOT COPY VERBATIM
+### VIDEO FORMAT EXAMPLE — STRUCTURE ONLY, NEVER A CONTENT DEFAULT
 
-*(Synthetic example. Adapt structure, not content.)*
+*(Every positive fact below is synthetic and forbidden unless independently
+supported by the current QA chapter. Do not reuse its motion, weather, camera,
+palette, objects, audio, or beat progression.)*
 
 ```
 Cinematography: medium-wide tracking shot, 35mm lens, handheld follow-cam with

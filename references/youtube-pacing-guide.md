@@ -2,20 +2,22 @@
 
 > Related: [[visual-prompt-template]] · [[scene-tag-camera-mapping]]
 
-How many image prompts and video prompts to generate for a given audio
-length. Source: YouTube algorithm penalizes static frames longer than ~8s
-in audio-narration videos — viewers scroll away, retention drops, the
-algorithm de-promotes.
+How many image prompts to generate for a given audio length, plus an optional
+video count when the user explicitly requests motion prompts.
 
 ## Formula
 
 ```
 images = clamp(round(wordcount / 120), 120, 150)
-videos = max(20, round(images / 6))
+videos = 0
+
+# only after --video
+videos = min(images, max(20, round(images / 6)))
 ```
 
-Explicit `--images` / `--videos` overrides are honored exactly. The default is a
-production-heavy prompt pack; use overrides for quick tests.
+Explicit `--images` / `--videos` overrides are honored exactly. `--videos N`
+also enables video and requires `N <= images`. Without `--video` or `--videos N`,
+video remains disabled.
 
 ## Pacing Tables
 
@@ -33,18 +35,18 @@ production-heavy prompt pack; use overrides for quick tests.
 | Images | ~150 | one prompt per ~45–50s narration slot |
 | Videos | ~25 | one motion prompt every ~5 min |
 
-## Why 20+ video prompts?
+## Why automatic video mode targets 20+ prompts
 
 - The final editor can choose fewer clips, but prompt generation should provide
   enough strong motion candidates.
-- At least 20 clips gives coverage for openers, reveals, combat, ritual,
-  breakthrough, travel, crowd, and climax moments.
+- Around 20 clips gives coverage for source-supported openers, reveals, ritual,
+  travel, or action moments when those beats actually exist.
 - Image prompts carry the visual base; video prompts should be reserved for
   scenes where motion matters.
 
 ## Scene Placement Rhythm (which scenes get videos)
 
-Flag scenes for video when:
+Only after video opt-in, flag scenes when the source supports:
 - **Opening** — first scene of file (hooks viewer)
 - **Climax** — pivotal action, battle, breakthrough, revelation
 - **Action-dense** — duel, escape, transformation
@@ -64,6 +66,5 @@ Flag scenes for video when:
 - Each image displays 5–8s, then crossfade/cut to next OR a video clip plays
   in that slot (8s motion, then back to images)
 
-YouTube algorithmic sweet spot: visual cut every 6–8s during editing. A
-120-image + 20-video prompt pack gives enough source material for that edit
-without forcing the editor to use every generated asset.
+Editors may select a subset of the generated images and optional video clips to
+match their own pacing.

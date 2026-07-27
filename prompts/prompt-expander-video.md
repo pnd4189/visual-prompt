@@ -1,8 +1,7 @@
 # Video Prompt Expander — Per Video-Flagged Scene
 
-> **SKIP this file** if STEP 0 of the run has the `--no-video` flag. In that case
-> the skill does NOT generate video prompts; `assemble_outputs.py` will not write
-> `_video_prompts.txt`. Image + music + QA are still produced.
+> **SKIP this file** unless the user explicitly enabled video with `--video`,
+> `--videos N`, or a clear request for video prompts. `--no-video` always wins.
 
 ## ROLE
 For scenes where `flag_for_video = ✓` in scene-plan, append a `## Video Prompt`
@@ -16,6 +15,11 @@ Format: Google Veo3 official 5-part formula.
 - `chapter_excerpt` — relevant chapter text ONLY
 - `active_style` — `.work/active-style.md` content (one chosen style entry)
 - existing `.work/scene-<NNN>.md` — image prompt is already there
+
+Read `@references/strict-generation-contract.md`. Verify
+`scene_row.source_anchor` against the loaded chapter. The chapter, anchor, and
+bible are the only sources of story facts; this file may not add participants,
+locations, props, powers, weather, injuries, or outcomes.
 
 ## TASK
 1. Load `@references/visual-prompt-template.md` (video format section) AND
@@ -53,17 +57,13 @@ Format: Google Veo3 official 5-part formula.
    layer. Example: `Audio: steel ringing, low wind through bamboo, distant
    temple bell, no music.` NEVER append `[audio: ...]` as a tag at the end.
 6. Hard cap: 3 beats, 8.0s total duration. Veo3 will truncate beyond that.
-7. **SPECTACLE BY DEFAULT.** Build motion-rich, cinematic clips: action/combat,
-   spell-duels, daoist magic, ritual energy, crowd/army movement, terrain scale,
-   spell geometry, weapon impact, debris, cloth motion, ambient reaction. You may
-   amplify beyond the literal chapter (add supporting figures, scale, dramatic
-   energy) within the genre/identity/continuity rails. NEVER produce a static solo
-   portrait clip. (If `mode = faithful`, dramatize only what the text supports.)
-8. **PLOT-FIT VARIATION.** The video must animate the scene row's actual focus:
-   landscape traversal, faction movement, side-character reaction, chưởng lực
-   collision, weapon arc, ritual formation, crowd pressure, artifact reveal, or
-   aftermath. Do not convert every video into a protagonist close-up or a generic
-   sword draw.
+7. **GROUNDED MOTION.** Animate only the physical or environmental motion that the
+   source establishes. A quiet look, breath, drifting fog, or still tableau is
+   valid when truthful; never add combat, crowd movement, spell geometry, debris,
+   or a new outcome to make a clip exciting.
+8. **PLOT-FIT VARIATION.** Animate the row's actual focus and vary the truthful
+   camera movement, timing, depth, light, and environmental response. Do not turn
+   every video into a protagonist close-up or generic sword draw.
 
 ## ACTION BEAT RULES
 - Each beat: ONE concrete physical action (step, turn, draw, strike, gaze).
@@ -112,9 +112,9 @@ Use the Write tool to overwrite the file with image block + video block
    >3800 → trim in this order: (1) Context detail first, (2) Style & Ambiance
    detail second. NEVER drop an action beat or shorten the Identity Anchor. Re-count
    after trimming; must be ≤ 3800 before write.
-6. **Depth check** — Action beats use concrete physical motion, Style & Ambiance
-   includes lighting/color/audio/safety negatives, and Context includes map scale
-   or supporting elements when available.
+6. **Depth check** — Action beats use concrete source-supported motion, and Style &
+   Ambiance includes lighting/color/audio/safety negatives. Context uses only
+   source-supported spatial details; do not invent map scale or supporting elements.
 7. **Safety check (categories 1–8)** — no brand/logo/trademark name; no real
    public figure / celebrity / "looks like <real person>" likeness; no copyrighted
    IP character or exact branded costume; no copied web image or living-artist
@@ -131,6 +131,8 @@ Use the Write tool to overwrite the file with image block + video block
    or includes a group, the Action beats must visibly follow that focus. If the
    beats could fit any chapter after swapping names, REWRITE with concrete motion
    from this scene.
+10. **Grounding check** — every visible fact and outcome is traceable to the
+    loaded chapter, source anchor, or identity bible. Remove unsupported additions.
 
 ## STDOUT SUMMARY
 ```

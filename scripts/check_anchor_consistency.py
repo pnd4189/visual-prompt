@@ -8,8 +8,8 @@ source, drifting a character's look across scenes (e.g. protagonist shown as
 then produces an inconsistent character. The bible is the single source of truth;
 this gate flags — and with --fix, normalizes — every off-bible anchor.
 
-Anchor shape in output: "<name> — <age> years old, <build> build, ...<attire>."
-We key off the age token right after the em dash, which is cheap and reliable.
+Anchor shape in output is derived from all seven identity fields. Unknown source
+facts remain explicit `not stated` clauses instead of being visually invented.
 
 Usage:
   check_anchor_consistency.py --bible <bible.md> --output <prompts.txt> [--fix]
@@ -22,11 +22,43 @@ import re
 import sys
 from pathlib import Path
 
-AGE = r'[0-9][0-9\-–]*'  # 16-17, 20, 25-30 (hyphen or en-dash)
+AGE_RE = re.compile(r'[0-9][0-9\-–]*$')  # 16-17, 20, 25-30
+UNKNOWN = {'', 'not stated'}
+
+
+def _canonical_anchor(fields: list[str]) -> str:
+    name, age, build, hair, face, signature, attire = fields[:7]
+    if age.casefold() in UNKNOWN:
+        age_clause = 'age not stated'
+    elif AGE_RE.fullmatch(age):
+        age_clause = f'{age} years old'
+    else:
+        age_clause = f'age described as {age}'
+    build_clause = (
+        'build not stated'
+        if build.casefold() in UNKNOWN
+        else f'{build} build'
+    )
+    hair_clause = 'hair not stated' if hair.casefold() in UNKNOWN else hair
+    face_clause = 'face not stated' if face.casefold() in UNKNOWN else face
+    signature_clause = (
+        'signature mark not stated'
+        if signature.casefold() in UNKNOWN
+        else signature
+    )
+    attire_clause = 'attire not stated' if attire.casefold() in UNKNOWN else attire
+    return (
+        f'{name} — {age_clause}, {build_clause}, {hair_clause}, {face_clause}, '
+        f'{signature_clause}, {attire_clause}.'
+    )
+
+
+def _normalized(value: str) -> str:
+    return ' '.join(value.split())
 
 
 def parse_bible(text: str) -> dict[str, dict]:
-    """name -> {age, anchor} from the markdown table rows."""
+    """Return canonical, source-honest anchors from markdown table rows."""
     chars: dict[str, dict] = {}
     for line in text.splitlines():
         if not line.strip().startswith('|'):
@@ -34,44 +66,39 @@ def parse_bible(text: str) -> dict[str, dict]:
         cols = [c.strip() for c in line.strip().strip('|').split('|')]
         if len(cols) < 8 or cols[0].lower() == 'name' or cols[0].startswith('-'):
             continue
-        name, age, build, hair, face, sig, attire = cols[:7]
-        if not name or not re.match(AGE + r'$', age):
+        name = cols[0]
+        if not name:
             continue
-        anchor = (f"{name} — {age} years old, {build} build, {hair}, "
-                  f"{face}, {sig}, {attire}.")
-        chars[name] = {'age': age, 'anchor': anchor}
+        chars[name] = {'anchor': _canonical_anchor(cols)}
     return chars
 
 
 def scan(text: str, chars: dict[str, dict]) -> dict[str, dict]:
-    """name -> {good, bad:set(ages)} occurrence counts in the output."""
+    """Count canonical and off-bible identity blocks for each character."""
     report: dict[str, dict] = {}
     for name, info in chars.items():
-        pat = re.compile(re.escape(name) + r'\s*—\s*(' + AGE + r')')
+        pat = re.compile(re.escape(name) + r'\s*—\s*[^.]*\.', re.DOTALL)
         good = bad = 0
-        bad_ages: set[str] = set()
         for m in pat.finditer(text):
-            if m.group(1) == info['age']:
+            if _normalized(m.group(0)) == _normalized(info['anchor']):
                 good += 1
             else:
                 bad += 1
-                bad_ages.add(m.group(1))
         if good or bad:
-            report[name] = {'good': good, 'bad': bad, 'bad_ages': bad_ages}
+            report[name] = {'good': good, 'bad': bad}
     return report
 
 
 def fix_text(text: str, chars: dict[str, dict]) -> tuple[str, int]:
-    """Replace every off-bible anchor span '<name> — <age>...<.>' with canonical."""
+    """Replace every off-bible identity block with its canonical anchor."""
     fixed = 0
     for name, info in chars.items():
-        # match the whole anchor clause: name — <age> ... up to the first period
-        pat = re.compile(re.escape(name) + r'\s*—\s*(' + AGE + r')[^.]*\.')
+        pat = re.compile(re.escape(name) + r'\s*—\s*[^.]*\.', re.DOTALL)
 
         def repl(m: re.Match) -> str:
             nonlocal fixed
-            if m.group(1) == info['age']:
-                return m.group(0)  # already canonical
+            if _normalized(m.group(0)) == _normalized(info['anchor']):
+                return m.group(0)
             fixed += 1
             return info['anchor']
 
@@ -110,8 +137,10 @@ def main() -> int:
     if violations:
         print(f"⚠ anchor drift in {out_path.name}:")
         for name, v in violations.items():
-            print(f"  {name}: {v['bad']} off-bible (ages {sorted(v['bad_ages'])}) "
-                  f"vs {v['good']} canonical (bible age {chars[name]['age']})")
+            print(
+                f"  {name}: {v['bad']} off-bible vs "
+                f"{v['good']} canonical anchor(s)"
+            )
         return 2
     print(f"✓ anchors consistent with bible in {out_path.name}")
     return 0

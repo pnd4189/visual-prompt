@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Compute default image + video scene counts from a novel file.
+"""Compute image count and optional video count from a novel file.
 
 Default formula:
     images = round(wordcount / 120)   (clamp to 120..150)
-    videos = round(images   / 6)      (clamp >= 20)
+    videos = 0
 
-CLI flags --images / --videos override; mixed overrides allowed.
+When video is explicitly enabled:
+    videos = round(images / 6)        (target >= 20, never above images)
+
+CLI flags --images / --videos override; --video enables automatic video count.
 
 Also emits an action_density signal (low/medium/high) from a cheap combat-vocab
-scan, plus a recommended scene-mix band the planner consumes. Default register is
-SPECTACLE (rich map/group/action mix for YouTube videos); `--faithful` switches to
-content-aware bands that never fabricate combat absent from the text.
+scan. The planner may use it only as source metadata; it must not manufacture a
+scene category to satisfy a quota.
 
 Output: JSON to stdout. Exit 0 success, 1 file not found.
 """
@@ -61,33 +63,31 @@ def _classify_density(hits_per_1k: float) -> str:
     return 'high'
 
 
-# SPECTACLE is the default register: this tool feeds YouTube entertainment videos,
-# so the default leans on visually rich scenes — wide map/landscape, multi-character
-# framing, combat/spell-duel spectacle — regardless of how talky the source is. The
-# planner is allowed to dramatize beyond the literal chapter (genre + identity +
-# continuity must stay consistent; see scene-planner.md).
-_SPECTACLE_BAND = {'action': '25-35%', 'establishing': '25-35%', 'group': '20-30%', 'dialogue_emotional': 'remainder'}
-_SPECTACLE_EPIC_BAND = {'action': '35-45%', 'establishing': '25-35%', 'group': '20-30%', 'dialogue_emotional': 'remainder'}
-
-# FAITHFUL mode (--faithful) restores content-aware targets: measure action density
-# and do NOT fabricate combat absent from the text. Action band is the only
-# content-gated dimension here.
-_FAITHFUL_BANDS = {
-    'low':    {'action': '5-15%',  'establishing': '25-35%', 'group': '20-30%', 'dialogue_emotional': 'remainder'},
-    'medium': {'action': '20-30%', 'establishing': '25-35%', 'group': '15-25%', 'dialogue_emotional': 'remainder'},
-    'high':   {'action': '35-45%', 'establishing': '20-30%', 'group': '15-25%', 'dialogue_emotional': 'remainder'},
+_GROUNDED_MIX = {
+    'action': 'source-supported only',
+    'establishing': 'source-supported only',
+    'group': 'source-supported only',
+    'dialogue_emotional': 'source-supported only',
 }
-# --epic raises the faithful band one notch (only amplifies what the story supports).
-_EPIC_BUMP = {'low': 'medium', 'medium': 'high', 'high': 'high'}
 
 
 def compute(wordcount: int, override_images: int | None, override_videos: int | None,
-            combat_hits: int = 0, epic: bool = False, faithful: bool = False) -> dict:
+            combat_hits: int = 0, epic: bool = False, faithful: bool = False,
+            video_enabled: bool = False) -> dict:
+    if override_images is not None and override_images < 1:
+        raise ValueError('--images must be at least 1')
+    if override_videos is not None and override_videos < 1:
+        raise ValueError('--videos must be at least 1')
     auto_images = min(150, max(120, round(wordcount / 120)))
-    auto_videos = max(20, round(auto_images / 6))
-
     images = override_images if override_images is not None else auto_images
-    videos = override_videos if override_videos is not None else auto_videos
+    auto_videos = min(images, max(20, round(images / 6)))
+    if override_videos is not None and override_videos > images:
+        raise ValueError('--videos cannot exceed the effective image count')
+    videos = (
+        override_videos
+        if override_videos is not None
+        else auto_videos if video_enabled else 0
+    )
 
     if override_images is not None and override_videos is not None:
         source = 'override'
@@ -99,13 +99,6 @@ def compute(wordcount: int, override_images: int | None, override_videos: int | 
     hits_per_1k = (combat_hits / wordcount * 1000) if wordcount else 0.0
     density = _classify_density(hits_per_1k)
 
-    if faithful:
-        mode = 'faithful'
-        band = _FAITHFUL_BANDS[_EPIC_BUMP[density] if epic else density]
-    else:
-        mode = 'spectacle'
-        band = _SPECTACLE_EPIC_BAND if epic else _SPECTACLE_BAND
-
     return {
         'images': int(images),
         'videos': int(videos),
@@ -114,9 +107,9 @@ def compute(wordcount: int, override_images: int | None, override_videos: int | 
         'combat_hits': int(combat_hits),
         'combat_hits_per_1k': round(hits_per_1k, 2),
         'action_density': density,
-        'mode': mode,
+        'mode': 'grounded',
         'epic': bool(epic),
-        'recommended_mix': band,
+        'recommended_mix': _GROUNDED_MIX,
     }
 
 
@@ -125,12 +118,14 @@ def main() -> int:
     p.add_argument('--input', required=True, help='Path to novel file (.txt/.md/.docx)')
     p.add_argument('--images', type=int, default=None, help='Override image scene count')
     p.add_argument('--videos', type=int, default=None, help='Override video scene count')
+    p.add_argument('--video', action='store_true',
+                   help='Enable automatic video count when --videos is omitted')
     p.add_argument('--chapters-json', default=None,
                    help='Optional pre-computed chapters JSON path (default: load fresh)')
     p.add_argument('--epic', action='store_true',
                    help='Amplify scale: bump the recommended action band one notch')
     p.add_argument('--faithful', action='store_true',
-                   help='Faithful mode: content-aware band, no fabricated combat (default is spectacle)')
+                   help='Legacy compatibility flag; all runs are grounded')
     args = p.parse_args()
 
     input_path = Path(args.input)
@@ -145,8 +140,15 @@ def main() -> int:
 
     wc = _wordcount_from_chapters(chapters)
     hits = _combat_hits(chapters)
-    result = compute(wc, args.images, args.videos, combat_hits=hits,
-                     epic=args.epic, faithful=args.faithful)
+    try:
+        result = compute(
+            wc, args.images, args.videos, combat_hits=hits,
+            epic=args.epic, faithful=args.faithful,
+            video_enabled=args.video,
+        )
+    except ValueError as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
+        return 1
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

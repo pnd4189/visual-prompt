@@ -8,6 +8,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -119,3 +121,44 @@ def atomic_write_text(path: Path, text: str) -> None:
                 f"Failed to write {path} via atomic and direct fallback"
             ) from direct_error
         raise
+
+
+@contextmanager
+def exclusive_file_lock(path: Path, *, timeout_seconds: float = 10.0):
+    """Serialize a short cross-process read-modify-write operation."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+    lock_file = path.open('a+b')
+    acquired = False
+    while not acquired:
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                if path.stat().st_size == 0:
+                    lock_file.write(b'0')
+                    lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except (BlockingIOError, OSError):
+            if time.monotonic() >= deadline:
+                lock_file.close()
+                raise RuntimeError(f"Timed out waiting for lock: {path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()

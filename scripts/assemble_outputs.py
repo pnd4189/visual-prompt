@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Assemble final image + video prompt .txt files from per-scene markdown.
+"""Assemble image prompts and explicitly enabled optional media prompts.
 
 Reads `<work-dir>/scene-*.md` (each with frontmatter + `## Image Prompt` and
 optional `## Video Prompt` blocks).
 
-Writes next to the input:
+Always writes next to the input:
     <input-stem>_image_prompts.txt
+
+When explicitly enabled, also writes:
     <input-stem>_video_prompts.txt
+    <input-stem>_music_prompts.txt
 
 Separator uses ORIGINAL scene index so video file shows gaps:
     --- SCENE 007 ---
@@ -169,7 +172,8 @@ def parse_scene(path: Path) -> dict:
     }
 
 
-def assemble(input_path: Path, work_dir: Path, no_video: bool = False) -> dict:
+def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
+             no_music: bool = True) -> dict:
     scenes_paths = discover_scenes(work_dir)
     if not scenes_paths:
         raise RuntimeError(f"No scene-*.md found in {work_dir}")
@@ -208,14 +212,15 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = False) -> dict:
     if not no_video:
         atomic_write_text(vid_path, _join(video_blocks))
 
-    # Music is an independent code path: assemble only if regions exist.
+    # Music is opt-in and independent from image/video assembly.
     music_blocks: list[str] = []
-    for mp in discover_music(work_dir):
-        mc = parse_music(mp)
-        if mc['body']:
-            music_blocks.append(mc['body'])
-        else:
-            warnings.append(f"{mp.name} has empty body — skipped")
+    if not no_music:
+        for mp in discover_music(work_dir):
+            mc = parse_music(mp)
+            if mc['body']:
+                music_blocks.append(mc['body'])
+            else:
+                warnings.append(f"{mp.name} has empty body — skipped")
 
     music_path = None
     if music_blocks:
@@ -231,6 +236,7 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = False) -> dict:
         'music_count': len(music_blocks),
         'music_path': str(music_path) if music_path else None,
         'no_video': no_video,
+        'no_music': no_music,
         'warnings': warnings,
         'violations': violations,
     }
@@ -242,15 +248,26 @@ def main() -> int:
                    help='Original novel file path (used to derive output stem + dir)')
     p.add_argument('--work-dir', default=None,
                    help='Dir containing scene-*.md (default: <input-dir>/.work)')
-    p.add_argument('--no-video', action='store_true',
-                   help='Skip video blocks; do not write _video_prompts.txt')
+    p.set_defaults(no_video=True, no_music=True)
+    p.add_argument('--video', dest='no_video', action='store_false',
+                   help='Include video blocks and write _video_prompts.txt')
+    p.add_argument('--no-video', dest='no_video', action='store_true',
+                   help='Skip video blocks (default; retained for explicit override)')
+    p.add_argument('--music', dest='no_music', action='store_false',
+                   help='Include music blocks and write _music_prompts.txt')
+    p.add_argument('--no-music', dest='no_music', action='store_true',
+                   help='Skip music blocks (default; retained for explicit override)')
     args = p.parse_args()
 
     input_path = Path(args.input)
     work_dir = Path(args.work_dir) if args.work_dir else input_path.parent / '.work'
 
     try:
-        summary = assemble(input_path, work_dir, no_video=args.no_video)
+        summary = assemble(
+            input_path, work_dir,
+            no_video=args.no_video,
+            no_music=args.no_music,
+        )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

@@ -13,9 +13,12 @@ already exists. Your job: identify NEW characters in the new chapters and
 ## TASK
 1. Read the existing bible. Note all character names already present.
 2. Scan new chapters for character names.
-3. For each name NOT in existing bible AND appears in ≥2 chapters OR is
-   plot-critical → extract Identity Anchor fields per
-   `@references/identity-anchor-rules.md`.
+3. For each source-named character not in the existing bible who may appear in a
+   visual beat, extract Identity Anchor fields per
+   `@references/identity-anchor-rules.md`. Every concrete field must be supported
+   by the new QA chapters; write exactly `not stated` for unknown age, build,
+   hair, face, signature mark, or attire. Never estimate or visually complete a
+   character from genre, role, or name.
 4. For each new character, call:
    ```bash
    python3 scripts/append_bible_row.py --bible <bible_path> --row '<full markdown table row>'
@@ -43,6 +46,10 @@ swap, age leap >10 years), log it to `.work/bible-conflicts.md`:
 ```
 
 But still DO NOT modify the bible.
+
+Before appending each row, re-open the relevant QA passage. If a concrete visual
+field cannot be traced to the source, replace it with `not stated`. Do not invent
+a unique prop or alter vague wording to improve image consistency.
 
 ## OUTPUT TO STDOUT
 ```

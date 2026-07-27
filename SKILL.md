@@ -1,7 +1,7 @@
 ---
 name: visual-prompt
-version: 0.9.2
-description: Generate deep, policy-safe, styleable image + video prompts (18-style catalog, recommend + select per run) with a deterministic content-safety gate (no brands/real people/IP/gore/sexual/anti-religion; video animation-only), a QA'd TTS-ready text, and Lyria music prompts from Vietnamese xianxia/wuxia novel files for YouTube audio videos in Antigravity/Agy CLI
+version: 0.11.0
+description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files
 license: MIT
 contextFileName: SKILL.md
 ---
@@ -10,8 +10,8 @@ contextFileName: SKILL.md
 
 Antigravity/Agy CLI LLM-driven workflow that reads a Vietnamese xianxia/wuxia novel file
 (.txt / .md / .docx, 2k–18k words, suitable for a 1–2h audio video). The skill
-self-QAs the text first (no pre-proofread required), then emits four
-paste-ready files:
+self-QAs the text first (no pre-proofread required), then emits QA + image
+prompts. Video and music files are opt-in:
 
 - `<input>_qa.txt` — proofread, TTS-ready source of truth (residual Chinese/
   English removed, grammar fixed, long sentences split). Feed straight into
@@ -19,30 +19,28 @@ paste-ready files:
 - `<input>_image_prompts.txt` — deep 350–550 word sectioned image prompts
   (Camera / Story DNA / Setting / Composition / Subject / Action-Energy /
   Style / Lighting-Color / Atmosphere / Negative).
-- `<input>_video_prompts.txt` — deep Veo3 5-part formula video prompts
+- `<input>_video_prompts.txt` — optional deep Veo3 5-part formula video prompts
   (Cinematography → Subject → Action `[00:00–00:02.5]` → Context →
   Style & Ambiance, audio embedded as scene layer).
-- `<input>_music_prompts.txt` — instrumental Lyria 3 music prompts, one per
-  mood region of the story arc (default 4, `--music N` override), written as
+- `<input>_music_prompts.txt` — optional instrumental Lyria 3 music prompts, one
+  per mood region of the story arc (`--music` or `--music N`), written as
   gentle emotional background underscore for narration, each block using a
   Chap-5-style `prompt paragraph + Tags:` structure and targeting a 2-3 minute
   seamless background loop.
 
 ## Philosophy
 
-- **Agy model is the loop driver.** The active Antigravity/Agy model reads input,
-  plans scenes, writes prompts, and runs self-checks. Python only handles I/O the
-  model can't do safely.
-- **Never delegate generation to an external model (absolute).** Every generated
-  artifact (QA, bible, scene-plan, image/video/music prompts) must come from THIS
-  active model's own output (or an Agy subagent using the `@prompts/*.md`). Do NOT
-  shell out to the `gemini` CLI, any other LLM CLI, or a model API (curl/requests/
-  SDK), and do NOT subprocess to any LLM to split batches or beat rate-limits.
-  `subprocess` is for deterministic I/O only (file, git, ffmpeg, imagemagick, and
-  the pure-I/O helpers in `scripts/`). Hitting your own quota → stop and tell the
-  user; never fall back to an external model. See the TOML `RULE 0`.
-- **Deep prompt quality is mandatory.** Image/video/music prompts must include
-  layered story DNA, character/prop locks, map-scale environment, foreground/
+- **Active parent model owns generation.** The active model on Agy, Codex, or
+  Claude reads input, plans scenes, writes every prompt, and runs self-checks.
+  No subagent, team, delegation, parallel writer, external CLI, model API, or
+  second LLM may create or rewrite creative content. Python only handles
+  deterministic I/O and validation. See `references/strict-generation-contract.md`.
+- **Parent-only micro-batches.** Generate at most three scene files per creative
+  turn, verify them, then continue. If quota or context runs out, stop at a
+  resumable scene ID; never switch to a scripted generator.
+- **Deep prompt quality is mandatory.** Enabled image/video/music prompts must
+  include layered story DNA, character/prop locks, source-supported environment,
+  foreground/
   midground/background composition, lighting/palette, action/energy/audio, and
   negative/safety rules. Shallow prompts are invalid.
 - **Content-safety is enforced (8 categories).** Outputs must avoid brands/logos,
@@ -53,25 +51,32 @@ paste-ready files:
   `references/blocklist-content-safety.md`) strips/softens at STEP 7 and re-scans at
   STEP 8. Combat/đấu pháp and fictional cultivation imagery stay allowed; religion
   is WARN-and-ship.
-- **Spectacle by default.** This pipeline feeds YouTube entertainment videos, so
-  the default register builds visually rich, varied scenes — wide map/landscape,
-  multi-character framing, combat, spell-duels (đấu pháp), daoist magic — and is
-  ALLOWED to dramatize beyond the literal chapter for cinematic richness, within
-  three rails: genre-consistent, identity-consistent (verbatim bible anchor), and
-  no contradiction of stated plot facts. `--epic` pushes scale even harder.
-  `--faithful` switches to content-aware mode (measures action density, never
-  fabricates combat absent from the text) for documentary-style accuracy.
-- **Diversity is enforced, not suggested (v0.7).** The plan gate rejects a
-  protagonist-locked plan: a single character may be present in ≤70% of scenes,
-  solo shots ≤35%, no scene_tag >35%. The TOML carries an EXECUTION CONTRACT that
-  forbids the agent from improvising its own orchestration / subagent brief or
-  hand-writing the output files — final `.txt` files come only from
-  `assemble_outputs.py` reading `.work/scene-*.md`, and a STEP 8 self-audit fails
-  the run if `scene-plan.md` / `scene-*.md` are missing.
-- **The skill dir is read-only for the agent (v0.9.2).** `scripts/` holds exactly
+- **Grounded creativity by default.** QA'd chapter text and the character bible
+  lock every story fact. Each scene has an exact source anchor. Creativity is
+  required in truthful visual realization — camera, composition, setting detail,
+  action phase, lighting, palette, texture, and atmosphere — but never by adding
+  characters, crowds, combat, locations, props, weather, or outcomes.
+- **Image-only by default.** Every run produces QA + image prompts. Video requires
+  `--video`, `--videos N`, or an explicit video request. Music requires `--music`,
+  `--music N`, or an explicit music request. `--no-video` and `--no-music` win.
+- **Plot-fit staging, including truthful stillness.** When the source describes a
+  landscape, render it richly without adding scale, landmarks, weather, or people.
+  When characters are present, stage only their source-supported action or
+  interaction. A quiet, solitary, or motionless beat stays quiet; make it visually
+  distinct through camera, composition, focus, light, and palette rather than
+  inventing activity.
+- **Diversity is grounded, not quota-forced.** `validate_scene_plan.py` verifies
+  source anchors, chapter membership, synopsis uniqueness, and adjacent
+  setting/camera/action/palette variation. It never forces a new character or
+  event merely to satisfy a ratio.
+- **Repetition is outcome-gated.** Plan synopses and assembled image,
+  video, and music prompts are checked across the full run. Targeted rewrites use
+  deterministic violation ids, while per-series visual history discourages exact
+  camera, setting, action, music-intro, and tag reuse across later files.
+- **The skill dir is read-only for the agent.** `scripts/` holds exactly
   the `CANONICAL_SCRIPTS` allowlist versioned inside `check_run_legit.py`; the
-  agent must never create or edit files under the skill dir (scratch goes to
-  `.work/` or `/tmp/visual-prompt-<hash>/`). Any non-canonical file in `scripts/`
+  agent must never create or edit files under the skill dir (scratch goes only to
+  `.work/`). Any non-canonical file in `scripts/`
   or stray code file at the skill root — the fingerprint of a self-made bypass
   generator hiding under a helper-looking name — fails the external gate, and
   `run-folder.sh` auto-quarantines it into `.quarantine-auto/` before each
@@ -113,43 +118,32 @@ paste-ready files:
    `style_hash` into the scene cache key. Genre and style are decoupled — any of
    the 18 styles works for any genre.
 7. **Scene count** — `python3 scripts/calc_scene_count.py` →
-   default `images = clamp(round(wc/120), 120, 150)`, `videos = max(20, round(images/6))`;
-   CLI overrides are honored exactly.
-8. **Scene plan + expand** — LLM writes `.work/scene-plan.md` then per-scene
-   `.work/scene-NNN.md` files, using the chosen style for Style + negatives.
-   Resume-safe via SHA1 cache (busts when style changes). Two deterministic gates
-   guard quality: a **plan gate** (`validate_scene_plan.py`) rejects adjacent
-   near-duplicate scenes + fragment synopses (bounded revise loop), and a **depth
-   gate** at assembly rejects shallow blocks (missing headers, word count out of
-   range, thin negatives, video over 3800 chars) and regenerates them (bounded).
-9. **Music prompts** — LLM segments the emotional arc into N mood regions
-   (default 4, clamp [3,5]; `--music N` honored verbatim) → one instrumental
-   Lyria prompt per region in `.work/music-NNN.md`. Prompts must be gentle,
-   deep, emotional background music, never fast/dramatic/trailer-like. Score
-   register follows the chosen style's `music/score anchor`. Resume-safe.
-10. **Assemble** → `python3 scripts/assemble_outputs.py` writes the image, video,
-   and music `.txt` files next to the input.
+   default `images = clamp(round(wc/120), 120, 150)`, `videos = 0`; video count is
+   calculated only after an explicit `--video`/`--videos N`.
+8. **Scene plan + expand** — active parent model writes `.work/scene-plan.md` then
+   per-scene `.work/scene-NNN.md` files in micro-batches of ≤3. Source-anchor,
+   artifact, depth, and similarity gates fail closed.
+9. **Optional media** — only when explicitly enabled, write video/music artifacts;
+   disabled media is not loaded, generated, validated, assembled, or reported.
+10. **Assemble** → `python3 scripts/assemble_outputs.py` writes enabled outputs
+    next to the input; final gates run before completion.
 
 ## Usage
 
 ```
 /visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
-                            [--images N] [--videos M] [--music N] \
-                            [--epic] [--faithful] [--no-video] [--force-redo]
+                            [--images N] [--video] [--videos M] [--music [N]] \
+                            [--epic] [--faithful] [--no-video] [--no-music] [--force-redo]
 ```
 
 `--style <id>` picks an art style up-front (skips the interactive recommend step);
 ids are in `references/style-catalog.md`. Omit it to get a recommendation and
-choose interactively. `--music N` sets the exact number of music loops (honored
-verbatim, no clamp); omit it for adaptive segmentation (default 4, clamped to [3,5]).
-`--epic` pushes the default spectacle band one notch higher (bigger maps, armies,
-crowds). `--faithful` switches OFF dramatization — scene mix follows measured action
-density and the planner renders only what the chapters contain (no invented combat).
-Default (neither flag) = spectacle: rich map/group/action scenes, dramatized within
-the genre/identity/continuity rails. `--no-video` skips the video expander and the
-`_video_prompts.txt` output entirely; useful when batch video generation is not
-needed (image + music + qa still produced) or when the model repeatedly bypasses
-the video expander.
+choose interactively. `--video` enables adaptive video count; `--videos M` enables
+exactly M. `--music` enables adaptive music segmentation (3–5 regions);
+`--music N` enables exactly N. Natural-language requests after the command are
+equivalent explicit opt-ins. `--epic` may intensify only source-supported visual
+realization. `--faithful` is retained as a compatibility alias; all runs are
+grounded. `--no-video`/`--no-music` disable their medium.
 
 ## Input Spec
 
@@ -162,12 +156,13 @@ the video expander.
 
 ## Output Spec
 
-- 4 `.txt` files in the same directory as the input:
+- By default, 2 `.txt` files in the same directory as the input:
   - `_qa.txt` — proofread, TTS-ready (chapter headings end with a period so TTS
     pauses; feed to TTS_Local VieNeu / VietVoice).
-  - `_image_prompts.txt`, `_video_prompts.txt` — separators `--- SCENE NNN ---`
-    (NNN = original scene index; video file shows gaps so indices match images).
-  - `_music_prompts.txt` — separators `--- LOOP i / N — Chương X-Y — mood: … ---`.
+  - `_image_prompts.txt` — separators `--- SCENE NNN ---`.
+- With `--video`/`--videos N`, add `_video_prompts.txt`.
+- With `--music`/`--music N`, add `_music_prompts.txt`; each block is an English
+  paragraph followed by `Tags:`.
 
 ## Limitations
 
@@ -175,12 +170,10 @@ the video expander.
 - Supported genres: tiên hiệp, huyền huyễn, đô thị, cổ điển, võ hiệp.
 - **Refuses:** đam mỹ (BL romance), ngôn tình (modern romance) — out of scope.
 - Text-only output. Reference-image pattern deferred to v2.
-- **`--no-video` flag** (v0.9.1+): skill produces 3 files (`_qa.txt`,
-  `_image_prompts.txt`, `_music_prompts.txt`); the video expander and
-  `_video_prompts.txt` are skipped entirely. `scene-planner.md` is told not to
-  flag any scene for video. Driver `run-folder.sh` honors the env var
-  `VP_NO_VIDEO=1` to pass the flag across a batch. Use when video generation is
-  not needed or when the model repeatedly fails the video bypass gate.
+- **Optional media flags:** `--video`/`--videos N` enable video; `--music`/`--music N`
+  enable music. `--no-video` and `--no-music` explicitly disable them and are
+  honored by the planner, expanders, assemblers, and validators. The batch driver
+  opts in explicitly when its `VP_MUSIC`/`VP_NO_VIDEO` settings request it.
 - **One style per run.** Styles in the `accent-title-card` / `video-oriented`
   categories keep character identity poorly across many scenes — best for opening
   title cards or montages, not every shot. The recommend step warns when a chosen
@@ -195,10 +188,6 @@ the video expander.
   but the model cannot 100% guarantee no vocal-like pads. Each block is one
   English music prompt paragraph followed by `Tags:`; region→timeline sync is
   manual via the `.work/music-NNN.md` frontmatter.
-- **Music resume is best-effort:** unlike scenes (fixed `scene-plan.md`), the
-  mood-region segmentation is re-derived by the LLM each run and not persisted,
-  so a re-run may regenerate music loops if the segmentation shifts. Use
-  `--force-redo` for a clean regeneration when in doubt.
 
 ## File Layout
 
@@ -208,8 +197,8 @@ visual-prompt/
 ├── gemini-extension.json
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
-├── references/               ← 10 static knowledge files (incl. style-catalog, genre-style-recommendation, blocklist-content-safety)
-└── scripts/                  ← 14 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
+├── references/               ← 11 static knowledge files (incl. strict generation contract, style catalog, safety blocklist)
+└── scripts/                  ← 15 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.
