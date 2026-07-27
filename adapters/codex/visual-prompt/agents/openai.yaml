@@ -1,0 +1,6 @@
+interface:
+  display_name: "Visual Prompt"
+  short_description: "Grounded image prompts with explicit video/music opt-ins"
+  default_prompt: "Use $visual-prompt to generate grounded, source-anchored image prompts. Add --video or --music only when explicitly requested."
+policy:
+  allow_implicit_invocation: false
