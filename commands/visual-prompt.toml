@@ -497,7 +497,8 @@ Print: `Plan gate: <ok | N violations sau <r> revise>`.
 
 **PRECONDITION (bắt buộc):** `.work/scene-plan.md` PHẢI tồn tại (từ STEP 5) và đã
 qua STEP 5.5. Nếu chưa có → quay lại STEP 5. KHÔNG bắt đầu sinh prompt mà không có
-scene-plan.
+scene-plan. Ngoại lệ: worker submode (`--worker-manifest`) đọc scene-plan từ
+`snapshot_dir` read-only theo mục WORKER SUBMODE — không chạy STEP 5/5.5.
 
 **PARENT-ONLY MICRO-BATCH (bắt buộc):**
 - Không spawn, không delegate, không parallel. Active model này tự làm toàn bộ.

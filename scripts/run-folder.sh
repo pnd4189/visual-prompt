@@ -17,6 +17,8 @@
 #          VP_MUSIC   music loops per file     (default: 4)
 #          VP_DRYRUN  =1 → print the agy command instead of running it (review)
 #          VP_LOCAL   local workdir base       (default: $HOME/.cache/vp-run-<series>)
+#          VP_WORKERS opt-in bounded-parallel Pass-2 workers (default 1 = serial;
+#                     >=2 = fan out after STEP 5, capped by remaining scene rows)
 #
 # Local-run strategy: the skill creates .work and writes its outputs next to the
 # INPUT file. Running directly on a gdrive/rclone FUSE mount breaks parent-model writes
@@ -34,6 +36,10 @@ set -uo pipefail
 MODEL="${VP_MODEL:-Gemini 3.1 Pro (High)}"
 MUSIC="${VP_MUSIC:-4}"
 DRYRUN="${VP_DRYRUN:-0}"
+# Bounded-parallel Pass-2 workers (opt-in). 1/unset = serial, byte-for-byte the
+# original path. >=2 = coordinator fans out isolated worker sessions after the
+# scene plan exists (Phase 3); the count is capped by remaining scene rows.
+WORKERS="${VP_WORKERS:-1}"
 
 # Skill root = repo dir holding scripts/ + prompts/. Agy inherits the launch
 # CWD; we run it from here so the skill's relative paths (scripts/load_input.py,
@@ -111,6 +117,8 @@ PY
 }
 
 [[ "$MUSIC" =~ ^[1-9][0-9]*$ ]] || die "VP_MUSIC phải là số nguyên >= 1: $MUSIC"
+[[ "$WORKERS" =~ ^[1-9][0-9]*$ ]] || die "VP_WORKERS phải là số nguyên >= 1: $WORKERS"
+[ "$WORKERS" -le 16 ] || die "VP_WORKERS tối đa 16 (hiện là $WORKERS) — tăng worker không được nới gate."
 case "${VP_NO_VIDEO:-0}" in 0|1) ;; *) die "VP_NO_VIDEO phải là 0 hoặc 1" ;; esac
 
 # kebab-case a folder name into a stable, filesystem-safe series id

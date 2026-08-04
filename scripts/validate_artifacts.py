@@ -285,15 +285,37 @@ def _split_music_output(text: str) -> tuple[list[str], bool]:
     return blocks, not pending
 
 
-def check_scenes(work_dir: Path, plan_path: Path) -> dict:
+def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None = None) -> dict:
+    """Validate scene artifacts. With assigned_ids (bounded-parallel worker
+    submode) only that disjoint subset is expected in work_dir; every assigned
+    id must exist in the frozen scene plan (fail-closed)."""
     scene_ids, video_ids, plan_errors, totals, anchors = _scene_plan_details(plan_path)
     errors = [f'{plan_path.name}: {error}' for error in plan_errors]
+    if assigned_ids is not None:
+        if len(assigned_ids) != len(set(assigned_ids)):
+            errors.append('assigned scene ids contain duplicates')
+        plan_filenames = {_scene_filename(scene_id) for scene_id in scene_ids}
+        filtered = []
+        for scene_id in assigned_ids:
+            if _scene_filename(scene_id) in plan_filenames:
+                filtered.append(scene_id)
+            else:
+                errors.append(f'assigned scene id {scene_id} is not in {plan_path.name}')
+        scene_ids = filtered
     expected_names = [_scene_filename(scene_id) for scene_id in scene_ids]
     expected = set(expected_names)
-    extra = {
-        'expected': totals['images'] if totals else len(scene_ids),
-        'videos_expected': totals['videos'] if totals else len(video_ids),
-    }
+    if assigned_ids is None:
+        extra = {
+            'expected': totals['images'] if totals else len(scene_ids),
+            'videos_expected': totals['videos'] if totals else len(video_ids),
+        }
+    else:
+        extra = {
+            'expected': len(assigned_ids),
+            'videos_expected': len([
+                scene_id for scene_id in scene_ids if scene_id in video_ids
+            ]),
+        }
     if not scene_ids:
         errors.append(f'no scene rows parsed from {plan_path}')
     if len(scene_ids) != len(set(scene_ids)):
@@ -539,6 +561,10 @@ def main() -> int:
     parser.add_argument('--genre', default=None)
     parser.add_argument('--plan-hash', default=None)
     parser.add_argument('--style-hash', default=None)
+    parser.add_argument(
+        '--scene-ids', default=None,
+        help='Comma-separated assigned scene ids (worker submode subset check)',
+    )
     args = parser.parse_args()
 
     work_dir = Path(args.work_dir) if args.work_dir else None
@@ -547,7 +573,12 @@ def main() -> int:
         if work_dir is None:
             raise SystemExit('--work-dir is required for scene validation')
         plan = Path(args.scene_plan) if args.scene_plan else work_dir / 'scene-plan.md'
-        results.append(check_scenes(work_dir, plan))
+        assigned_ids = None
+        if args.scene_ids is not None:
+            assigned_ids = [item.strip() for item in args.scene_ids.split(',') if item.strip()]
+            if not assigned_ids:
+                raise SystemExit('--scene-ids requires at least one scene id')
+        results.append(check_scenes(work_dir, plan, assigned_ids))
     if args.check in {'music', 'all'}:
         if work_dir is None:
             raise SystemExit('--work-dir is required for music validation')

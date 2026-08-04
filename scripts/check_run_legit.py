@@ -54,7 +54,7 @@ CANONICAL_SCRIPTS = {
     'check_content_safety.py', 'check_previous_continuity.py',
     'check_prompt_similarity.py', 'check_run_legit.py', 'load_input.py',
     'resize_16_9.py', 'run-all.sh', 'run-folder.sh',
-    'validate_artifacts.py', 'validate_scene_plan.py',
+    'validate_artifacts.py', 'validate_scene_plan.py', 'worker_manifest.py',
 }
 # Code files allowed at the skill ROOT. Everything else matching ROOT_CODE_GLOBS
 # is bypass clutter the model wrote to its CWD instead of .work.
@@ -121,11 +121,14 @@ def _fail(errors):
     sys.exit(2)
 
 
-def write_report(path, boilerplate, only_boilerplate):
-    payload = json.dumps({
+def write_report(path, boilerplate, only_boilerplate, worker_run=False):
+    report = {
         'boilerplate_scene_ids': [item['scene_id'] for item in boilerplate],
         'only_boilerplate': only_boilerplate,
-    }, ensure_ascii=False, indent=2) + '\n'
+    }
+    if worker_run:
+        report['worker_run'] = True
+    payload = json.dumps(report, ensure_ascii=False, indent=2) + '\n'
     with tempfile.NamedTemporaryFile(
         mode='w', encoding='utf-8', dir=path.parent, delete=False,
     ) as temporary:
@@ -144,6 +147,7 @@ def main():
     report_path = None
     video_path = None
     skill_dir = None
+    worker_manifest_path = None
     i = 0
     while i < len(args):
         a = args[i]
@@ -157,16 +161,37 @@ def main():
             video_path = Path(args[i + 1]); i += 2
         elif a == '--skill-dir' and i + 1 < len(args):
             skill_dir = Path(args[i + 1]); i += 2
+        elif a == '--worker-manifest' and i + 1 < len(args):
+            worker_manifest_path = Path(args[i + 1]); i += 2
         else:
             i += 1
     if work is None:
         print("usage: check_run_legit.py --work <work_dir> --image <img.txt> "
-              "[--video <vid.txt>] [--skill-dir <skill_root>]\n"
+              "[--video <vid.txt>] [--skill-dir <skill_root>] "
+              "[--worker-manifest <manifest.json>]\n"
               "       check_run_legit.py --purge-skill-dir <skill_root>",
               file=sys.stderr)
         sys.exit(1)
     errors = []
     boilerplate = []
+    worker_run = False
+    worker_scene_ids = None
+
+    # Worker-run semantics (bounded-parallel Pass-2 worker submode): the workdir
+    # legitimately holds ONLY the assigned scene files — no assembled image/video
+    # output exists yet, so depth/boilerplate checks are skipped exactly like the
+    # --no-video skip rule. Runtime-code and ownership checks stay; the assembled
+    # gate re-runs coordinator-side after join.
+    if worker_manifest_path is not None:
+        worker_run = True
+        try:
+            worker_manifest = json.loads(worker_manifest_path.read_text(encoding='utf-8'))
+            raw_ids = worker_manifest['scene_ids']
+            if not isinstance(raw_ids, list) or not raw_ids:
+                raise ValueError('scene_ids phải là danh sách khác rỗng')
+            worker_scene_ids = [str(item) for item in raw_ids]
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"worker manifest không đọc được: {exc}")
 
     # 1. Any runtime code file under .work is a bypass. The active model writes
     # markdown artifacts directly; recursive scanning catches hidden generators.
@@ -192,14 +217,36 @@ def main():
                 f"{p.relative_to(skill_dir)} không thuộc bộ script canonical (model tự chế helper/generator, contract #1/#5/#6)"
             )
 
+    # 2W. Worker-run ownership check: the workdir must contain exactly the
+    # assigned scene files (plus nothing else) before the coordinator joins.
+    if worker_run and worker_scene_ids is not None:
+        expected = set()
+        for scene_id in worker_scene_ids:
+            match = re.fullmatch(r'(\d+)([a-zA-Z]?)', scene_id)
+            if not match:
+                errors.append(f"worker manifest scene_id sai dạng: {scene_id}")
+                continue
+            expected.add(f'scene-{int(match.group(1)):03d}{match.group(2)}.md')
+        actual = sorted(p.name for p in work.rglob('*') if p.is_file())
+        for name in actual:
+            if name not in expected:
+                errors.append(
+                    f"worker workdir chứa file ngoài ownership: {name} "
+                    "(chỉ scene files được giao trong manifest)"
+                )
+        for name in sorted(expected - set(actual)):
+            errors.append(f"worker workdir thiếu scene file được giao: {name}")
+
     # 2. scene-plan.md + scene-NNN.md count matches plan — ONLY when .work still
     # holds the artifacts. The skill sometimes cleans .work after assemble (its
     # log says "dọn dẹp .work"), which is legitimate; in that case the binding
     # signal is the output depth check below. So: only fail if scene-plan.md is
     # present but scene count mismatches (partial / skipped expander). If .work
     # was cleaned (no scene-plan.md), skip these checks rather than false-fail.
+    # Worker runs keep their frozen scene-plan in the read-only snapshot dir, so
+    # this block applies only to full-pipeline runs.
     plan = work / 'scene-plan.md'
-    if plan.exists():
+    if not worker_run and plan.exists():
         parsed_plan_ids = [m.casefold() for m in SCENE_ID_RE.findall(plan.read_text(errors='ignore'))]
         plan_ids = set(parsed_plan_ids)
         scene_files = {f.name for f in work.iterdir() if SCENE_FILE_RE.match(f.name)}
@@ -222,9 +269,12 @@ def main():
             errors.append('scene-*.md ids không khớp scene-plan.md')
 
     # 3. output depth: per-scene word count + boilerplate-loop detection.
-    if image_path is None or not image_path.exists() or image_path.stat().st_size == 0:
+    # Worker runs have no assembled output yet (skipped per worker semantics).
+    if not worker_run and (
+        image_path is None or not image_path.exists() or image_path.stat().st_size == 0
+    ):
         errors.append("output _image_prompts.txt thiếu/rỗng")
-    else:
+    elif not worker_run:
         text = image_path.read_text(errors='ignore')
         markers = list(BLOCK_RE.finditer(text))
         if not markers:
@@ -295,7 +345,8 @@ def main():
     # on glowing swords …") duplicated across every video scene — identical blocks
     # that don't match each scene's content. Flag when ≥4 video scenes share the
     # same normalized body (>50% identical = boilerplate, not LLM-expanded).
-    if video_path is not None and video_path.exists() and video_path.stat().st_size > 0:
+    if not worker_run and video_path is not None and video_path.exists() \
+            and video_path.stat().st_size > 0:
         vtext = video_path.read_text(errors='ignore')
         vmarkers = list(BLOCK_RE.finditer(vtext))
         vbodies = []
@@ -313,10 +364,16 @@ def main():
                 )
 
     if report_path is not None:
-        write_report(report_path, boilerplate, bool(boilerplate) and len(errors) == 1)
+        write_report(
+            report_path, boilerplate,
+            bool(boilerplate) and len(errors) == 1, worker_run=worker_run,
+        )
     if errors:
         _fail(errors)
-    print("OK: legit run — không .py bypass, scene count match, no boilerplate (image+video)")
+    if worker_run:
+        print("OK: legit worker run — không runtime code, đúng ownership scene files")
+    else:
+        print("OK: legit run — không .py bypass, scene count match, no boilerplate (image+video)")
     sys.exit(0)
 
 

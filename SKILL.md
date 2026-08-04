@@ -35,6 +35,11 @@ prompts. Video and music files are opt-in:
   No subagent, team, delegation, parallel writer, external CLI, model API, or
   second LLM may create or rewrite creative content. Python only handles
   deterministic I/O and validation. See `references/strict-generation-contract.md`.
+  Sole exception (runner-level, opt-in): `scripts/run-folder.sh` may spawn
+  isolated worker sessions of this same skill via `VP_WORKERS` +
+  `--worker-manifest` for Pass-2 scene expansion. Each worker is itself the
+  parent model for its disjoint scene range — RULE 0 binds every worker
+  session (no nested delegation), and direct invocations never use worker mode.
 - **Parent-only micro-batches.** Generate at most three scene files per creative
   turn, verify them, then continue. If quota or context runs out, stop at a
   resumable scene ID; never switch to a scripted generator.
@@ -198,7 +203,7 @@ visual-prompt/
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
 ├── references/               ← 11 static knowledge files (incl. strict generation contract, style catalog, safety blocklist)
-└── scripts/                  ← 15 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
+└── scripts/                  ← 16 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.

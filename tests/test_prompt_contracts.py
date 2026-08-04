@@ -1057,7 +1057,6 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertIn('at most three', codex)
         self.assertIn('at most three', claude)
 
-    @xfail_phase('phase-02')
     def test_worker_manifest_validation_fails_closed(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             directory = Path(temp_dir)
@@ -1086,7 +1085,6 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertEqual(2, results['bad_id'])
         self.assertEqual(2, results['bad_schema'])
 
-    @xfail_phase('phase-02')
     def test_worker_ownership_fence_fails_closed(self):
         cases = {}
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -1135,7 +1133,6 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertEqual(2, cases['runtime_code'])
         self.assertEqual(2, cases['outside_range'])
 
-    @xfail_phase('phase-02')
     def test_worker_run_legit_semantics_scenes_only_workdir(self):
         """--worker-manifest switches check_run_legit to scenes-only semantics,
         mirroring the --no-video skip-rule: assembled outputs are legitimately
@@ -1194,13 +1191,11 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn('thiếu/rỗng', result.stdout)
 
-    @xfail_phase('phase-02')
     def test_canonical_scripts_include_worker_manifest(self):
         import check_run_legit as legit  # type: ignore  # noqa: E402
 
         self.assertIn('worker_manifest.py', legit.CANONICAL_SCRIPTS)
 
-    @xfail_phase('phase-03')
     def test_split_ranges_disjoint_covering_capped(self):
         plan = (
             'Genre: tien-hiep · Images: 5 · Videos: 0 · Chapters: 1\n\n'
@@ -1285,6 +1280,59 @@ class WorkerProtocolContractTests(unittest.TestCase):
             ) if index != -1
         ]
         self.assertTrue(marker_writes)
+
+    def test_vp_workers_env_validation(self):
+        rejected = self._dryrun_output({'VP_WORKERS': 'abc'})
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn('VP_WORKERS', rejected.stderr)
+
+        over_cap = self._dryrun_output({'VP_WORKERS': '17'})
+        self.assertNotEqual(0, over_cap.returncode)
+        self.assertIn('VP_WORKERS', over_cap.stderr)
+
+        serial = self._dryrun_output({'VP_WORKERS': '1'})
+        self.assertEqual(0, serial.returncode, serial.stderr)
+
+    def test_scene_artifact_subset_check_worker_mode(self):
+        plan_text = (
+            'Genre: tien-hiep · Images: 3 · Videos: 0 · Chapters: 1\n\n'
+            '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis | setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+            '|---|---|---|---|---|---|---|---|---|---|---|\n'
+        )
+        anchors = {
+            '001': 'Lan nâng ấn ngọc trong im lặng',
+            '002': 'Gió lay động cành tùng trước sân',
+            '003': 'Ánh trăng rọi xuống mặt hồ tĩnh',
+        }
+        for scene_id, anchor in anchors.items():
+            plan_text += (
+                f'| {scene_id} | 1 | {anchor} | detail | Lan | beat {scene_id} | '
+                f'setting {scene_id} | camera {scene_id} | action {scene_id} '
+                f'| palette {scene_id} | |\n'
+            )
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            plan = directory / 'scene-plan.md'
+            plan.write_text(plan_text, encoding='utf-8')
+            (directory / 'scene-002.md').write_text(
+                '---\nscene_id: 002\ncache_key: 0000000000000000\n'
+                f'source_anchor: {anchors["002"]}\nhas_video: false\n---\n'
+                '## Image Prompt\nCamera: close frame\n',
+                encoding='utf-8',
+            )
+
+            subset_ok = artifacts.check_scenes(directory, plan, ['002'])
+            full_fails = artifacts.check_scenes(directory, plan)
+            unknown_id = artifacts.check_scenes(directory, plan, ['099'])
+
+        self.assertTrue(subset_ok['ok'], subset_ok['errors'])
+        self.assertEqual(1, subset_ok['expected'])
+        self.assertFalse(full_fails['ok'])
+        self.assertFalse(unknown_id['ok'])
+        self.assertIn(
+            'assigned scene id 099 is not in scene-plan.md',
+            '\n'.join(unknown_id['errors']),
+        )
 
 
 def distinct_image_block(scene_id: str, index: int) -> str:
