@@ -1,7 +1,7 @@
 ---
 phase: 0
 title: "Close v0.10 Anti-Repetition Plan (Prerequisite)"
-status: pending
+status: completed
 effort: "S"
 ---
 
@@ -49,13 +49,18 @@ verification surface must settle before any parallel worker code lands
 4. Run contract test suite (40 tests) + py_compile + bash -n + TOML parse clean.
 
 ## Todo List
-- [ ] Commit WIP (check_run_legit report-json, run-folder targeted repair, tests)
+- [x] Commit WIP (check_run_legit report-json, run-folder targeted repair, tests)
       + plan artifacts (`plans/260714-1044*/`, `plans/260729-1645*/`,
       `plans/reports/*`, `docs/journals/*`) — do NOT commit `.agents/`, `scratch/`.
-- [ ] Quarantine root junk per Requirements §2 inventory (protect every
+      → commits 202aa10, 69922da, 8a8cc98.
+- [x] Quarantine root junk per Requirements §2 inventory (protect every
       `.quarantine-*` dir; confirm `.agents/` before moving).
-- [ ] Record shipped-0.11.0, close v0.10 plan.md, fix memory note (phase-07).
-- [ ] Full test/syntax pass.
+      → 24 items → `.quarantine-260804/` + RESTORE.md; `.agents/` verified
+      stale (live agy session had different CWD).
+- [x] Record shipped-0.11.0, close v0.10 plan.md, fix memory note (phase-07).
+      → v0.10 plan.md + phases 01/02/07 closed with reconciliation notes;
+      memory `vp-0100-anti-repetition-plan-ready` + MEMORY.md updated.
+- [x] Full test/syntax pass.
 
 ## Success Criteria
 - `git status` clean on tracked skill files; root holds only canonical entries

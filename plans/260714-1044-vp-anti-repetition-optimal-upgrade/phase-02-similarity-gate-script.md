@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Similarity Gate Script"
-status: in-progress
+status: completed
 effort: "L"
 ---
 
@@ -75,10 +75,16 @@ stats:{per-field avg/max/exact/high}, rewrite_scene_ids:[...], banned_phrases:[.
 5. `python3 -m py_compile` clean; `--purge-skill-dir .` reports 0 rogue.
 
 ## Success Criteria
-- [ ] chap16 → FAIL with stats matching full_report.md (±: same exact counts)
+- [x] chap16 → FAIL with stats matching full_report.md (±: same exact counts)
 - [x] A clean small fixture → exit 0 with only warnings/empty
 - [x] extract-history idempotent + capped
 - [x] Script survives purge gate (in allowlist)
+
+Closure (2026-08-04): shipped; audit 260804-1910 verified. The chap16 FAIL
+criterion held at ship time; the fixture was since rewritten in place by the
+repair loop it triggered, so a 2026-08-04 re-run returns exit 0 / Camera
+exact = 0 (post-repair acceptance state #6). Gate behavior re-proven by the
+40-test contract suite + live run with correct policy/JSON output.
 
 ## Risk Assessment
 False-positive FAIL on short formulaic Camera lines → mitigated by pair_copy

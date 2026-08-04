@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Root Cleanup Quarantine"
-status: in-progress
+status: completed
 effort: "S"
 ---
 
@@ -31,9 +31,22 @@ local_*/tmp files, .agents/, PROJECT.md, local_work/). Recoverable move, no dele
 5. Commit 1: `chore: quarantine manual-session scratch from repo root`.
 
 ## Success Criteria
-- [ ] Repo root clean (untracked = plans/ + quarantine only)
-- [ ] chap16 fixture path identified + recorded for Phase 7
-- [ ] Commit 1 landed
+- [x] Repo root clean (untracked = plans/ + quarantine only)
+- [x] chap16 fixture path identified + recorded for Phase 7
+- [x] Commit 1 landed
+
+## Closure (2026-08-04, reconciled by plan 260729-1645 Phase 0)
+- The original step-1 recipe ("move every untracked except plans/") was NOT
+  re-run — it is stale; today's untracked includes legit `docs/journals/*`
+  and `plans/**`. Final root cleanup executed as the targeted inventory
+  quarantine `.quarantine-260804/` (see its `RESTORE.md`).
+- chap16 fixture = `.quarantine-260713/local_chap16.txt` (kept in place;
+  `.quarantine-260713/` untouched). Note: fixture is post-repair output —
+  original failing state (38 Camera exact dups) lives only in
+  `.quarantine-260713/full_report.md`.
+- Commit 1 never landed as a standalone commit: quarantined items were
+  untracked/gitignored, so the move needed no commit; recovery path is
+  documented instead.
 
 ## Risk Assessment
 Some .txt may be user inputs → quarantine (not delete) keeps them recoverable;

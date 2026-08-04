@@ -1,7 +1,7 @@
 ---
 title: "visual-prompt 0.10.0 — anti-repetition gates + visual-history + music-plan persistence"
 description: "Outcome-based similarity gates (plan/pipeline/driver), dynamic per-series visual-history, music segmentation persistence, cheap driver retry. Kills copy-paste/template output on agy CLI."
-status: in-progress
+status: completed
 priority: P1
 branch: "main"
 tags: [visual-prompt, anti-repetition, gates, agy]
@@ -43,13 +43,13 @@ Key locked decisions:
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Root Cleanup Quarantine](./phase-01-root-cleanup-quarantine.md) | In Progress |
-| 2 | [Similarity Gate Script](./phase-02-similarity-gate-script.md) | In Progress |
+| 1 | [Root Cleanup Quarantine](./phase-01-root-cleanup-quarantine.md) | Completed |
+| 2 | [Similarity Gate Script](./phase-02-similarity-gate-script.md) | Completed |
 | 3 | [Plan Gate Synopsis Dedup](./phase-03-plan-gate-synopsis-dedup.md) | Completed |
 | 4 | [Prompt Hardening Dynamic History](./phase-04-prompt-hardening-dynamic-history.md) | Completed |
 | 5 | [TOML Wiring Music Plan Persistence](./phase-05-toml-wiring-music-plan-persistence.md) | Completed |
 | 6 | [Batch Driver Integration](./phase-06-batch-driver-integration.md) | Completed |
-| 7 | [Verify Release 0-10-0](./phase-07-verify-release-0-10-0.md) | In Progress |
+| 7 | [Verify Release 0-10-0](./phase-07-verify-release-0-10-0.md) | Completed |
 
 Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 (2-4 could parallel but same-session
 sequential is simpler; 5 depends on 2+3+4; 6 depends on 2; 7 last).
@@ -67,3 +67,18 @@ sequential is simpler; 5 depends on 2+3+4; 6 depends on 2; 7 last).
 ## Dependencies
 
 None. Symlink install = changes live immediately on commit (no redeploy, Linux).
+
+## Closure (2026-08-04)
+
+Closed by plan `plans/260729-1645-bounded-parallel-scene-workers/` Phase 0.
+Audit `plans/reports/audit-260804-1910-vp-gates-speed-quality-report.md`
+confirmed phases 2-6 shipped; Phase 0 reconciled the remainder:
+
+- Shipped as **0.11.0** — no 0.10.0 release commit exists; SKILL.md,
+  gemini-extension.json, and TOML prompt header were already synced at 0.11.0.
+- Phase 1 root cleanup superseded: final quarantine executed as
+  `.quarantine-260804/` (see its `RESTORE.md`).
+- Re-verified 2026-08-04: 40 contract tests pass; py_compile + tomllib +
+  `bash -n` clean; `check_run_legit.py --purge-skill-dir .` → 0 rogue;
+  chap16 fixture now post-repair (exit 0, Camera exact = 0 — original failing
+  state preserved only in `.quarantine-260713/full_report.md`).

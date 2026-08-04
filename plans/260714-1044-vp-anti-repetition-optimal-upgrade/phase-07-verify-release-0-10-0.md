@@ -1,11 +1,16 @@
 ---
 phase: 7
 title: "Verify Release 0-10-0"
-status: in-progress
+status: completed
 effort: "M"
 ---
 
 # Phase 7: Verify Release 0-10-0
+
+> Release record: the work shipped as **0.11.0** (SKILL.md +
+> gemini-extension.json + TOML prompt header synced at 0.11.0; no 0.10.0
+> release commit exists). The 0.10.0 references below are historical; closure
+> note at the bottom.
 
 ## Overview
 End-to-end verification against real chap16 data + fixtures, docs/version sync,
@@ -35,11 +40,25 @@ final commit. Symlink install = live on commit (no redeploy).
    2-3 run; có siết band 0.6-0.95 không; Windows setup.bat).
 
 ## Success Criteria
-- [ ] Toàn bộ verification matrix pass, số liệu chap16 khớp full_report.md
-- [x] Version 0.10.0 đồng bộ 3 file; limitation music-resume đã xóa
-- [ ] Commit 2 landed; memory updated
-- [ ] Không còn uncommitted diff nào ngoài quarantine dirs
+- [x] Toàn bộ verification matrix pass, số liệu chap16 khớp full_report.md
+- [x] Version đồng bộ 3 file; limitation music-resume đã xóa
+- [x] Commit 2 landed; memory updated
+- [x] Không còn uncommitted diff nào ngoài quarantine dirs
 
 ## Risk Assessment
 Ngưỡng 0.95/counts chưa tune bằng run thật — có flags override, theo dõi 2-3
 run đầu (ghi trong unresolved). Windows copy-install cần re-run setup.bat.
+
+## Closure (2026-08-04, plan 260729-1645 Phase 0)
+- Verification matrix re-run 2026-08-04: 40 contract tests pass; py_compile
+  clean; tomllib parse OK; `bash -n scripts/run-folder.sh` OK;
+  `check_run_legit.py --purge-skill-dir .` → 0 rogue.
+- chap16 reconciliation: `.quarantine-260713/local_chap16.txt` is the
+  POST-REPAIR artifact — re-run gives exit 0, Camera exact = 0 (120 scenes,
+  max sim 0.76), i.e. post-release acceptance state #6. The exit-2/≈38-exact
+  state was verified at ship time and is preserved only in
+  `.quarantine-260713/full_report.md`.
+- Version: shipped as 0.11.0 (no 0.10.0 release commit). Version-sync rule
+  unchanged: SKILL.md + gemini-extension.json + TOML header.
+- Final root cleanup + WIP commit completed under plan 260729-1645 Phase 0;
+  stale memory note `vp-0100-anti-repetition-plan-ready` corrected.
