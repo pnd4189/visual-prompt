@@ -1,7 +1,7 @@
 ---
 name: visual-prompt
-version: 0.11.0
-description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files
+version: 0.12.0
+description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) without changing the default serial run
 license: MIT
 contextFileName: SKILL.md
 ---
@@ -149,6 +149,15 @@ exactly M. `--music` enables adaptive music segmentation (3–5 regions);
 equivalent explicit opt-ins. `--epic` may intensify only source-supported visual
 realization. `--faithful` is retained as a compatibility alias; all runs are
 grounded. `--no-video`/`--no-music` disable their medium.
+
+**Batch driver (runner-level).** `scripts/run-folder.sh` stays serial by default.
+Opt-in `VP_WORKERS=N` (N ≥ 2, capped by remaining scene rows) enables bounded
+parallel Pass-2 only: a `--plan-only` head session, isolated worker sessions on
+disjoint scene-ID ranges over a frozen snapshot, a fail-closed join, then the
+serial tail (music/assemble/gates). Workers never publish history, markers, or
+assembled outputs; all final gates stay coordinator-only; any failure falls back
+to the unchanged serial path. Direct `/visual-prompt` invocations never use
+worker mode. Rollback = unset `VP_WORKERS` and restart the driver.
 
 ## Input Spec
 

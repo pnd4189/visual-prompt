@@ -29,10 +29,23 @@ Trước QA, skill kiểm tra file hiện tại có nối tiếp file trước k
 
 Mặc định grounded: mỗi scene có `source_anchor` nguyên văn từ đúng chapter.
 Active parent model tự viết từng scene theo micro-batch tối đa 3; không subagent,
-không parallel generation, không script sinh hàng loạt. Validator fail-closed
-nếu anchor/nhân vật sai nguồn hoặc setting/camera/action/palette bị lặp.
-Character bible cũng không được “hoàn thiện ngoại hình” bằng suy đoán: tuổi,
-tóc, mặt, trang phục hoặc đạo cụ không có trong truyện phải giữ `not stated`.
+không script sinh hàng loạt. Validator fail-closed nếu anchor/nhân vật sai nguồn
+hoặc setting/camera/action/palette bị lặp. Character bible cũng không được “hoàn
+thiện ngoại hình” bằng suy đoán: tuổi, tóc, mặt, trang phục hoặc đạo cụ không có
+trong truyện phải giữ `not stated`.
+
+### Batch driver và parallel Pass-2 (opt-in)
+
+`scripts/run-folder.sh` / `run-all.sh` chạy batch nhiều file/series, mặc định
+**serial** — đường đi giữ nguyên byte-for-byte khi không đặt gì thêm. Từ v0.12.0,
+driver có opt-in bounded parallel cho riêng Pass-2: đặt `VP_WORKERS=3` (số nguyên
+1–16, tự cap theo số scene còn lại) để chạy head `--plan-only` → fan-out các
+worker session isolated (mỗi worker một range scene-id rời nhau trên snapshot
+đông lạnh, fence fail-closed) → join kiểm tra ownership + coverage → tail chạy
+music/assemble/gates. Mọi gate, completion marker và visual-history vẫn do
+coordinator giữ sau join; worker không publish gì. Lỗi head/fan-out/join tự fallback
+về serial full generation. Lệnh `/visual-prompt` trực tiếp không bao giờ chạy
+worker mode. Đây là ngoại lệ runner-level duy nhất của RULE 0 — xem SKILL.md.
 
 Khi bật music, prompt luôn là nhạc nền không lời nhẹ nhàng, sâu lắng, cảm xúc, có màu sắc
 tiên hiệp/kiếm hiệp; không tạo nhạc sôi động, trailer, battle score, hoặc dồn dập

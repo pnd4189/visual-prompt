@@ -1,6 +1,6 @@
 description = "Generate grounded, non-repetitive image prompts by default; optionally add video/music prompts from Vietnamese xianxia/wuxia novel files"
 prompt = """
-Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.11.0.
+Bạn là active Antigravity/Agy CLI model thực thi pipeline visual-prompt v0.12.0.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 

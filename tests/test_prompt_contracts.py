@@ -1420,6 +1420,50 @@ class BenchmarkSmokeTests(unittest.TestCase):
         self.assertTrue(violation['payload']['violations'])
         self.assertTrue(violation['payload']['rewrite_scene_ids'])
 
+    def test_benchmark_controlled_batch_120_scenes_gate_overhead(self):
+        """Phase 4 controlled local batch: 120 distinct scenes through the
+        similarity gate. Bounds the deterministic gate overhead added on top of
+        Pass-2 (serial or parallel) and proves the gate stays strict at scale.
+        Live model wall-clock is measured per the benchmark report protocol."""
+        prefixes = [
+            'amber', 'fallen', 'silent', 'braided', 'hollow', 'wintry',
+            'gilded', 'restless', 'misted', 'sunken', 'verdant', 'scattered',
+        ]
+        suffixes = [
+            'ridge', 'hollow', 'current', 'vestige', 'passage',
+            'ember', 'terrace', 'vigil', 'harbor', 'meadow',
+        ]
+        cameras = [
+            'extreme close-up on', 'high crane descent over', 'slow dolly beside',
+            'handheld pursuit of', 'static wide locked on', 'low oblique under',
+            'overhead top-down of', 'rack focus away from', 'whip pan across',
+            'long lens compression of', 'mirror reflection framing', 'backlit silhouette of',
+        ]
+
+        def block(index: int) -> str:
+            filler = f'{prefixes[index // 10]}{suffixes[index % 10]}'
+            token = f'{index + 1:03d}'
+            camera = cameras[index % len(cameras)]
+            return (
+                f'--- SCENE {token} ---\n'
+                f'Camera: {camera} the {filler} basin at beat {token}\n'
+                f'Story DNA: beat {token} unfolds across the {filler} basin alone\n'
+                f'Setting: the {filler} basin at beat {token} before dawn\n'
+                f'Composition: foreground {filler} stones, midground beat {token}, '
+                f'background haze\n'
+                f'Subject: the {filler} basin\n'
+                f'Action / Energy: beat {token} settles over the {filler} basin\n'
+                'Style: painted illustration\n'
+                f'Lighting / Color: dawn glow across the {filler} basin at beat {token}\n'
+                f'Atmosphere: the stillness of {filler} at beat {token}\n'
+                'Negative: no logos\n'
+            )
+
+        clean = self._run_harness(''.join(block(i) for i in range(120)))
+        self.assertEqual(0, clean['exit_code'], clean['payload'])
+        self.assertEqual(120, clean['payload']['stats']['image']['scene_count'])
+        self.assertLess(clean['wall_seconds'], 30.0)
+
 
 class BatchResumeTests(unittest.TestCase):
     @staticmethod

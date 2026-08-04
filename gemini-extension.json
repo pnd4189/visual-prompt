@@ -1,6 +1,6 @@
 {
   "name": "visual-prompt",
-  "version": "0.11.0",
-  "description": "Generate grounded, non-repetitive image prompts by default with strict source anchors and fail-closed gates; video/music prompts are explicit opt-ins and all creative generation stays in the active parent model",
+  "version": "0.12.0",
+  "description": "Generate grounded, non-repetitive image prompts by default with strict source anchors and fail-closed gates; video/music prompts are explicit opt-ins and all creative generation stays in the active parent model; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) without changing the default serial run",
   "contextFileName": "SKILL.md"
 }

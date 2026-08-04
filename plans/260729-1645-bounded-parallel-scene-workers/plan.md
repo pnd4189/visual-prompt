@@ -1,7 +1,7 @@
 ---
 title: "Visual Prompt Opt-In Bounded Parallel Scene Workers"
 description: "Opt-in runner-level 3-worker mode for Pass-2 scene expansion with isolated ownership, fail-closed gates, and default single-mode compatibility."
-status: in-progress
+status: completed
 priority: P1
 effort: 12h
 branch: "main"
@@ -47,7 +47,7 @@ Source: `plans/reports/brainstorm-260804-1927-vp-teamwork-preview-rejected-bound
 | 1 | [Lock Contracts and Regression Tests](./phase-01-lock-contracts-and-regression-tests.md) | Completed |
 | 2 | [Implement Isolated Scene Worker Mode](./phase-02-implement-isolated-scene-worker-mode.md) | Completed |
 | 3 | [Implement Coordinator Fan-out and Join](./phase-03-implement-coordinator-fan-out-and-join.md) | Completed |
-| 4 | [Integration Validation and Rollout](./phase-04-integration-validation-and-rollout.md) | Pending |
+| 4 | [Integration Validation and Rollout](./phase-04-integration-validation-and-rollout.md) | Completed |
 
 ## Dependencies
 Phase 0 closes `plans/260714-1044-vp-anti-repetition-optimal-upgrade/plan.md`
