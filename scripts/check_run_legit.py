@@ -27,8 +27,10 @@ entry (non-canonical scripts/ file, root-level code file) into
 <skill_root>/.quarantine-auto/ — recoverable, never deletes. run-folder.sh calls
 this before each attempt so a prior bypass can't stale-poison the retry.
 """
+import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 IMAGE_WORD_MIN = 350
@@ -119,6 +121,19 @@ def _fail(errors):
     sys.exit(2)
 
 
+def write_report(path, boilerplate, only_boilerplate):
+    payload = json.dumps({
+        'boilerplate_scene_ids': [item['scene_id'] for item in boilerplate],
+        'only_boilerplate': only_boilerplate,
+    }, ensure_ascii=False, indent=2) + '\n'
+    with tempfile.NamedTemporaryFile(
+        mode='w', encoding='utf-8', dir=path.parent, delete=False,
+    ) as temporary:
+        temporary.write(payload)
+        temporary_path = Path(temporary.name)
+    temporary_path.replace(path)
+
+
 def main():
     args = sys.argv[1:]
     if len(args) >= 2 and args[0] == '--purge-skill-dir':
@@ -126,6 +141,7 @@ def main():
         sys.exit(0)
     work = None
     image_path = None
+    report_path = None
     video_path = None
     skill_dir = None
     i = 0
@@ -135,6 +151,8 @@ def main():
             work = Path(args[i + 1]); i += 2
         elif a == '--image' and i + 1 < len(args):
             image_path = Path(args[i + 1]); i += 2
+        elif a == '--report-json' and i + 1 < len(args):
+            report_path = Path(args[i + 1]); i += 2
         elif a == '--video' and i + 1 < len(args):
             video_path = Path(args[i + 1]); i += 2
         elif a == '--skill-dir' and i + 1 < len(args):
@@ -148,6 +166,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
     errors = []
+    boilerplate = []
 
     # 1. Any runtime code file under .work is a bypass. The active model writes
     # markdown artifacts directly; recursive scanning catches hidden generators.
@@ -220,7 +239,6 @@ def main():
             # word count here would false-fail good runs and re-run forever. So this
             # gate only flags boilerplate loops (template-generated) + the .py +
             # scene-count checks above.
-            boiler = 0
             for k, m in enumerate(markers):
                 end = markers[k + 1].start() if k + 1 < len(markers) else len(text)
                 body = text[m.end():end]
@@ -230,11 +248,18 @@ def main():
                 for j in range(len(words) - NGRAM_N + 1):
                     g = ' '.join(words[j:j + NGRAM_N])
                     counts[g] = counts.get(g, 0) + 1
-                if counts and max(counts.values()) > NGRAM_MAX_REPEAT:
-                    boiler += 1
-            if boiler:
+                repeated = sorted(
+                    phrase for phrase, count in counts.items()
+                    if count > NGRAM_MAX_REPEAT
+                )
+                if repeated:
+                    boilerplate.append({
+                        'scene_id': m.group(1),
+                        'phrases': repeated,
+                    })
+            if boilerplate:
                 errors.append(
-                    f"{boiler}/{len(markers)} scene block có boilerplate repeat (template-generated, bypass expander)"
+                    f"{len(boilerplate)}/{len(markers)} scene block có boilerplate repeat (template-generated, bypass expander)"
                 )
 
             # 3b. Header-structure check: the image expander spec mandates 10
@@ -287,6 +312,8 @@ def main():
                     f"{most_common_cnt}/{len(vbodies)} video scene blocks identical (boilerplate template, video expander bypass)"
                 )
 
+    if report_path is not None:
+        write_report(report_path, boilerplate, bool(boilerplate) and len(errors) == 1)
     if errors:
         _fail(errors)
     print("OK: legit run — không .py bypass, scene count match, no boilerplate (image+video)")

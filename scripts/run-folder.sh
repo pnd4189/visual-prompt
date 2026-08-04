@@ -4,7 +4,7 @@
 # novel series folder, one chapter file at a time, each in a FRESH agy session.
 #
 # This is a THIN driver: it only orchestrates I/O and re-invokes the active Agy
-# model (agy -p). It NEVER generates prompts itself and NEVER calls an external
+# model. It NEVER generates prompts itself and NEVER calls an external
 # model — every file is expanded by the real /visual-prompt pipeline. (RULE 0)
 #
 # Per series, the art style is detected once on the first file (skill scans the
@@ -35,7 +35,7 @@ MODEL="${VP_MODEL:-Gemini 3.1 Pro (High)}"
 MUSIC="${VP_MUSIC:-4}"
 DRYRUN="${VP_DRYRUN:-0}"
 
-# Skill root = repo dir holding scripts/ + prompts/. agy -p inherits the launch
+# Skill root = repo dir holding scripts/ + prompts/. Agy inherits the launch
 # CWD; we run it from here so the skill's relative paths (scripts/load_input.py,
 # @prompts/*.md) resolve. Otherwise the model can't find them and may launch a
 # runaway `find /home -name ...` that traverses gdrive mounts for hours.
@@ -184,9 +184,12 @@ conf_set "$CONF" series "$SERIES"
 # Fails loud (instead of silently using a wrong/weaker default) when Google
 # renames or retires a model — change VP_MODEL and re-run.
 if [ "$DRYRUN" != "1" ]; then
-  agy models 2>/dev/null | grep -qF "$MODEL" || {
+  python3 -c 'import pexpect' 2>/dev/null \
+    || die "Thiếu Python package pexpect để điều khiển Agy interactive."
+  available_models=$(agy models 2>/dev/null) || die "Không đọc được danh sách model từ agy."
+  grep -qF "$MODEL" <<< "$available_models" || {
     echo "❌ Model '$MODEL' không còn trong agy. Danh sách hiện có:" >&2
-    agy models >&2
+    printf '%s\n' "$available_models" >&2
     die "Sửa VP_MODEL rồi chạy lại (vd: VP_MODEL='Gemini 4 Pro (High)' $0 '$FOLDER')."
   }
 fi
@@ -204,11 +207,9 @@ LOCAL_BASE="${VP_LOCAL:-$HOME/.cache/vp-run-$SERIES}"
 # read ~/.gemini/bibles/<series>.md directly. Without this, the bible path is
 # outside --add-dir, the model may fabricate generic appearance, and
 # restart expansion mid-run to fix it — that restart can make the model yield
-# before assemble (agy -p one-shot
-# exits), so no output ships. Empty if the dir is absent (per-file bible mode).
+# before assemble, so no output ships. The interactive controller adds this
+# directory only when it exists.
 BIBLES_DIR="$HOME/.gemini/bibles"
-BIBLES_ADD=""
-[ -d "$BIBLES_DIR" ] && BIBLES_ADD="--add-dir $BIBLES_DIR"
 
 # Collect input chapter files in chapter order (filenames sort lexically:
 # _0001_0010, _0011_0020, ...). Output .txt files are excluded.
@@ -301,7 +302,9 @@ for f in "${INPUTS[@]}"; do
 
   # Batch mode explicitly opts into music and video; direct /visual-prompt runs
   # remain image-only by default.
-  cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC"
+  # Every folder run is explicitly pre-approved and unattended. Without this flag,
+  # Agy may stop after presenting a plan and never write outputs.
+  cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC --auto-repair"
   [ -n "$STYLE" ] && cmd="$cmd --style $STYLE"
   if [ "${VP_NO_VIDEO:-0}" = "1" ]; then
     cmd="$cmd --no-video"
@@ -319,33 +322,84 @@ for f in "${INPUTS[@]}"; do
   echo "▶ $tag — đang chạy${style_label}${no_video_label}"
 
   if [ "$DRYRUN" = "1" ]; then
-    echo "   DRYRUN: (cd \"$SKILL_DIR\" && agy -p \"$cmd\" --model \"$MODEL\" --print-timeout 4h --dangerously-skip-permissions --add-dir \"$SKILL_DIR\" --add-dir \"$local_dir\" $BIBLES_ADD)"
+    echo "   DRYRUN: Agy interactive controller → plan approval → execution (model=$MODEL, mode=accept-edits, timeout=4h)"
     echo "   DRYRUN: gate order legit → artifacts → similarity → anchor/safety --fix → final artifacts/similarity → copy/cache → history/manifest"
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
   fi
 
-  # Run the skill + EXTERNAL bypass/depth gate, with a bounded --force-redo retry.
+  # Run the skill + EXTERNAL bypass/depth gate. Full generation is bounded to
+  # three attempts, while a failed similarity/boilerplate gate may request up
+  # to ten small, validated repair batches. This avoids asking one Agy turn to
+  # rewrite an entire 120-scene output while keeping every external gate.
   # run-folder.sh is a thin driver the model cannot bypass: if the model shortcuts
   # via a self-made runtime prompt generator (contract #4/#5/#6) or ships shallow /
   # boilerplate output, the gate rejects it and re-runs the file with --force-redo.
-  # Up to 3 attempts; on persistent bypass the run is rejected (no garbage shipped).
+  # A persistent bypass is rejected; nothing ships before every gate passes.
   redo_ok=0
   force_redo_next=0
-  for attempt in 1 2 3; do
+  max_full_attempts=3
+  max_targeted_repairs=10
+  repair_chunk_size="${VP_REPAIR_CHUNK_SIZE:-12}"
+  if ! [[ "$repair_chunk_size" =~ ^[1-9][0-9]*$ ]] || [ "$repair_chunk_size" -gt 24 ]; then
+    die "VP_REPAIR_CHUNK_SIZE phải là số từ 1 đến 24 (hiện là '$repair_chunk_size')."
+  fi
+  full_attempts=0
+  targeted_repairs=0
+  attempt=0
+  driver_state=$(mktemp -d "$LOCAL_BASE/.driver-state.XXXXXX") \
+    || die "$tag — không tạo được private driver state."
+  chmod 700 "$driver_state" || die "$tag — không khoá được private driver state."
+  similarity_feedback="$driver_state/similarity-feedback.md"
+  legit_report="$driver_state/legit-report.json"
+  last_repair_signature=''
+  schedule_force_redo() {
+    if [ "$full_attempts" -lt "$max_full_attempts" ]; then
+      force_redo_next=1
+      last_repair_signature=''
+      return 0
+    fi
+    return 1
+  }
+  schedule_targeted_repair() {
+    local signature="$1"
+    if [ "$signature" = "$last_repair_signature" ]; then
+      return 2
+    fi
+    if [ "$targeted_repairs" -lt "$max_targeted_repairs" ]; then
+      force_redo_next=0
+      last_repair_signature="$signature"
+      return 0
+    fi
+    return 1
+  }
+  while :; do
+    attempt=$((attempt + 1))
     run_cmd="$cmd"
     if [ "$force_redo_next" = "1" ]; then
+      full_attempts=$((full_attempts + 1))
       run_cmd="$cmd --force-redo"
-      echo "   ⚠ $tag — re-run lần $attempt với --force-redo (lần trước thiếu output/bypass/shallow)"
-    elif [ "$attempt" -gt 1 ]; then
-      echo "   ⚠ $tag — re-run lần $attempt không force-redo (similarity-only; resume + targeted rewrite)"
+      rm -f "$local_dir"/.work/music-*.md "${local_stem}_music_prompts.txt"
+      echo "   ⚠ $tag — full retry $full_attempts/$max_full_attempts (run $attempt, --force-redo)"
+    elif [ -s "$similarity_feedback" ]; then
+      targeted_repairs=$((targeted_repairs + 1))
+      run_cmd="$cmd --similarity-feedback '$similarity_feedback'"
+      echo "   ⚠ $tag — targeted repair $targeted_repairs/$max_targeted_repairs (tối đa $repair_chunk_size IDs)"
+    else
+      full_attempts=$((full_attempts + 1))
+      echo "   ℹ $tag — full generation $full_attempts/$max_full_attempts (run $attempt)"
     fi
+    batch_token=$(python3 -c 'import secrets; print(secrets.token_hex(12))') \
+      || die "$tag — không tạo được batch approval token."
+    run_cmd="$run_cmd --batch-token '$batch_token'"
     # Clear any self-made .py generators left by a prior bypass attempt.
     # --force-redo only removes scene-*.md / qa-* / music-*, NOT .py, so without
     # this the gate would re-flag the previous attempt's bypass .py even on a
     # clean LLM attempt (stale-poisoning the retry loop).
-    rm -f "$local_dir"/.work/*.py 2>/dev/null
+    rm -f "$local_dir"/.work/*.py "$local_dir/.vp-completed.json" \
+      "$local_dir/.vp-completion.json" \
+      "$local_dir/.work/completion_manifest.json" 2>/dev/null
     # Also quarantine rogue code the model may have dropped in the SKILL ROOT
     # (= its CWD during a run) or hidden inside scripts/ under helper-looking
     # names (generate_plan.py, expand_scenes.py, fix_*.py) — a later run can
@@ -353,20 +407,144 @@ for f in "${INPUTS[@]}"; do
     # purge moves everything non-canonical into .quarantine-auto/ (recoverable),
     # so a clean retry never gets stale-poisoned by a prior attempt's bypass.
     python3 "$SKILL_DIR/scripts/check_run_legit.py" --purge-skill-dir "$SKILL_DIR" || true
-    # NOTE: no `| tee <tmpfile>` — a pipe here can hang run-folder.sh. When agy
-    # exits (e.g. on its internal "timed out waiting for response"), a lingering
-    # child that inherited the pipe's write-end keeps tee's stdin open, so tee
-    # never reads EOF and the pipeline never completes (run-folder.sh stalls
-    # before the gate, even though the outputs are already written). agy's
-    # stdout/stderr already flow to ~/vp-batch.log via the nohup redirect, so a
-    # temp log is unnecessary. Direct redirect here — no pipe, no hang.
-    ( cd "$SKILL_DIR" && agy -p "$run_cmd" \
-        --model "$MODEL" \
-        --print-timeout 4h \
-        --dangerously-skip-permissions \
-        --add-dir "$SKILL_DIR" \
-        --add-dir "$local_dir" \
-        $BIBLES_ADD ) 2>&1
+    # Agy's global workflow requires plan acknowledgement for large edits. Print
+    # mode cannot receive that second turn, so use one interactive conversation:
+    # wait for the explicit approval marker, send the operator's approval, then
+    # wait for a completion/halt marker. The external gates below remain authoritative.
+    python3 - "$run_cmd" "$MODEL" "$SKILL_DIR" "$local_dir" "$BIBLES_DIR" "$batch_token" <<'PY'
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import pexpect
+
+run_cmd, model, skill_dir, local_dir, bibles_dir, batch_token = sys.argv[1:]
+args = [
+    '-i', run_cmd,
+    '--model', model,
+    '--mode', 'accept-edits',
+    '--dangerously-skip-permissions',
+    '--add-dir', skill_dir,
+    '--add-dir', local_dir,
+]
+if os.path.isdir(bibles_dir):
+    args.extend(['--add-dir', bibles_dir])
+
+attempt_started = time.time()
+child = pexpect.spawn(
+    'agy', args, cwd=skill_dir, encoding='utf-8', codec_errors='replace',
+    timeout=90,
+)
+child.delaybeforesend = 0.1
+ansi = r'(?:\x1b\[[0-?]*[ -/]*[@-~])*'
+line_start = r'(?m)(?:^|\r?\n)' + ansi + r'[ \t]*'
+line_end = r'[ \t]*' + ansi + r'(?=\r?$)'
+patterns = [
+    re.compile(line_start + r'BATCH_APPROVAL_REQUIRED:' + re.escape(batch_token) + line_end),
+    re.compile(
+        r'(?:Bạn có đồng ý với kế hoạch(?: này| trên)?|Xin(?: bạn| vui lòng)? xác nhận kế hoạch(?: này| trên)?|Xác nhận để bắt đầu tiến hành)',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        line_start + r"How's the CLI experience so far\? Help us improve:" + line_end,
+        re.IGNORECASE,
+    ),
+    re.compile(line_start + r'BATCH_RUN_COMPLETE:' + re.escape(batch_token) + line_end),
+    re.compile(line_start + r'BATCH_RUN_HALTED:' + re.escape(batch_token) + line_end),
+    pexpect.EOF,
+    pexpect.TIMEOUT,
+]
+approvals = 0
+max_auto_approvals = 6
+completion_nudges = 0
+deadline = time.monotonic() + 4 * 60 * 60
+outcome = None
+try:
+    while outcome is None:
+        matched = child.expect(patterns)
+        if matched in (0, 1):
+            approvals += 1
+            if approvals > max_auto_approvals:
+                raise RuntimeError('Agy requested approval more than 6 times')
+            print(
+                f'   agy: plan received — auto-approved '
+                f'({approvals}/{max_auto_approvals})',
+                flush=True,
+            )
+            child.sendline(
+                'Tôi xác nhận kế hoạch vừa nêu. Hãy thực thi ngay toàn bộ batch '
+                'đã được phê duyệt, không hỏi lại.'
+            )
+        elif matched == 2:
+            print('   agy: CLI feedback prompt — skipped', flush=True)
+            child.sendline('0')
+        elif matched == 3:
+            print('   agy: reported workflow complete', flush=True)
+            outcome = 0
+        elif matched == 4:
+            print('   agy: reported workflow halted', flush=True)
+            outcome = 2
+        elif matched == 5:
+            tail = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', child.before or '')[-800:]
+            print(f'   agy: exited before batch marker: {tail}', file=sys.stderr)
+            outcome = 1
+        else:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Agy interactive run exceeded 4 hours')
+            local_path = Path(local_dir)
+            local_stem = local_path / local_path.name
+            expected_outputs = [
+                Path(f'{local_stem}_qa.txt'),
+                Path(f'{local_stem}_image_prompts.txt'),
+                Path(f'{local_stem}_music_prompts.txt'),
+                local_path / '.work' / 'scene-plan.md',
+            ]
+            outputs_ready = all(
+                path.is_file() and path.stat().st_size > 0
+                and path.stat().st_mtime >= attempt_started
+                for path in expected_outputs
+            )
+            completion_hint = local_path / '.vp-completion.json'
+            if not completion_hint.is_file():
+                completion_hint = local_path / '.vp-complete.json'
+            post_gate_hint = local_path / '.work' / 'completion_manifest.json'
+            if post_gate_hint.is_file():
+                print('   agy: post-gate manifest found — continuing to external gates', flush=True)
+                outcome = 0
+                continue
+            if (completion_hint.is_file() or outputs_ready) and completion_nudges == 0:
+                completion_nudges = 1
+                print(
+                    '   agy: assembled outputs found — requesting final marker',
+                    flush=True,
+                )
+                child.sendline(
+                    'Nếu workflow đã hoàn tất, hãy trả marker kết thúc nonce-scoped '
+                    'đã được yêu cầu trong instruction. Nếu chưa, hoàn tất gate trước.'
+                )
+finally:
+    if child.isalive():
+        child.sendcontrol('d')
+        try:
+            child.expect(pexpect.EOF, timeout=10)
+        except (pexpect.TIMEOUT, pexpect.EOF):
+            child.close(force=True)
+
+raise SystemExit(outcome)
+PY
+    agy_status=$?
+    if [ "$agy_status" -eq 2 ]; then
+      die "$tag — Agy báo HALT; giữ local artifacts tại $local_dir, không auto-retry/force-redo."
+    fi
+    if [ "$agy_status" -ne 0 ]; then
+      if schedule_force_redo; then
+        echo "   ⚠ $tag — Agy controller exit $agy_status, re-run --force-redo"
+        continue
+      fi
+      die "$tag — Agy controller thất bại sau 3 lần (exit $agy_status); không nghiệm thu artifact."
+    fi
 
     # First file just established the style — capture it and lock for the series.
     # Read from .work/active-style.md (deterministic first line "### <id> — ...").
@@ -383,29 +561,75 @@ for f in "${INPUTS[@]}"; do
 
     # Core artifact must exist before gating.
     if [ ! -s "${local_stem}_image_prompts.txt" ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu output, re-run"; continue; }
-      die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt sau $attempt lần (chạy lại để resume)."
+      if schedule_force_redo; then echo "   ⚠ $tag — thiếu output, re-run"; continue; fi
+      die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
     if [ ! -s "${local_stem}_music_prompts.txt" ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu music output, re-run"; continue; }
-      die "$tag — thiếu/rỗng ${local_stem}_music_prompts.txt sau $attempt lần (chạy lại để resume)."
+      if schedule_force_redo; then echo "   ⚠ $tag — thiếu music output, re-run"; continue; fi
+      die "$tag — thiếu/rỗng ${local_stem}_music_prompts.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
     if [ ! -s "${local_stem}_qa.txt" ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu QA output, re-run"; continue; }
-      die "$tag — thiếu/rỗng ${local_stem}_qa.txt sau $attempt lần (chạy lại để resume)."
+      if schedule_force_redo; then echo "   ⚠ $tag — thiếu QA output, re-run"; continue; fi
+      die "$tag — thiếu/rỗng ${local_stem}_qa.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
     if [ "${VP_NO_VIDEO:-0}" != "1" ] && [ ! -s "${local_stem}_video_prompts.txt" ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — thiếu video output, re-run"; continue; }
-      die "$tag — thiếu/rỗng ${local_stem}_video_prompts.txt sau $attempt lần (chạy lại để resume)."
+      if schedule_force_redo; then echo "   ⚠ $tag — thiếu video output, re-run"; continue; fi
+      die "$tag — thiếu/rỗng ${local_stem}_video_prompts.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
 
     # External gate: rejects runtime prompt generators + shallow/boilerplate
     # outputs (the model cannot bypass this). Pass ⇒ legit deep LLM-expanded output.
     if ! python3 "$SKILL_DIR/scripts/check_run_legit.py" \
         --work "$local_dir/.work" --image "${local_stem}_image_prompts.txt" \
-        --video "${local_stem}_video_prompts.txt" --skill-dir "$SKILL_DIR"; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — gate FAIL (bypass/shallow), re-run --force-redo"; continue; }
-      die "$tag — gate vẫn FAIL sau 3 lần (model bypass expander). Output bị từ chối — chạy lại để resume."
+        --video "${local_stem}_video_prompts.txt" --skill-dir "$SKILL_DIR" \
+        --report-json "$legit_report"; then
+      legit_repair_signature=$(python3 - "$legit_report" "$similarity_feedback" "$repair_chunk_size" <<'PY'
+import json
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+if not report.get('only_boilerplate'):
+    raise SystemExit(1)
+chunk_size = int(sys.argv[3])
+all_scene_ids = []
+for raw_id in report.get('boilerplate_scene_ids', []):
+    scene_id = str(raw_id).strip()
+    if re.fullmatch(r'\d+[a-zA-Z]?', scene_id) and scene_id not in all_scene_ids:
+        all_scene_ids.append(scene_id)
+scene_ids = all_scene_ids[:chunk_size]
+if not scene_ids:
+    raise SystemExit(1)
+feedback_path = Path(sys.argv[2])
+with tempfile.NamedTemporaryFile(
+    mode='w', encoding='utf-8', dir=feedback_path.parent, delete=False,
+) as feedback:
+    feedback.write('# Legitimacy repair feedback\n\n')
+    feedback.write('Rewrite only the listed image scenes. Keep each source anchor exact once in Story DNA, then use distinct visual wording in every other field. Do not repeat any 8-word phrase within one scene.\n\n')
+    feedback.write('image_rewrite_scene_ids: ' + ', '.join(scene_ids) + '\n')
+temporary_path = Path(feedback.name)
+temporary_path.replace(feedback_path)
+print('legit:' + str(len(all_scene_ids)) + ':' + ','.join(scene_ids))
+PY
+      )
+      legit_feedback_status=$?
+      if [ "$legit_feedback_status" -eq 0 ]; then
+        schedule_targeted_repair "$legit_repair_signature"
+        targeted_status=$?
+        if [ "$targeted_status" -eq 0 ]; then
+          echo "   ⚠ $tag — boilerplate feedback, re-run targeted scenes"
+          continue
+        fi
+        [ "$targeted_status" -eq 2 ] \
+          && echo "   ⚠ $tag — targeted boilerplate repair không tiến triển, chuyển full retry"
+      fi
+      if schedule_force_redo; then
+        echo "   ⚠ $tag — gate FAIL (bypass/shallow), re-run --force-redo"
+        continue
+      fi
+      die "$tag — gate vẫn FAIL sau $max_full_attempts lần full generation hoặc $max_targeted_repairs repair batches (model bypass expander). Output bị từ chối — chạy lại để resume."
     fi
 
     grounding_json=$(python3 "$SKILL_DIR/scripts/validate_scene_plan.py" \
@@ -414,8 +638,8 @@ for f in "${INPUTS[@]}"; do
     grounding_status=$?
     printf '%s\n' "$grounding_json"
     if [ "$grounding_status" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — grounding/variation FAIL, re-run --force-redo"; continue; }
-      die "$tag — grounding/variation vẫn FAIL sau 3 lần. Output bị từ chối."
+      if schedule_force_redo; then echo "   ⚠ $tag — grounding/variation FAIL, re-run --force-redo"; continue; fi
+      die "$tag — grounding/variation vẫn FAIL sau $max_full_attempts lần full generation. Output bị từ chối."
     fi
 
     scene_artifact_json=$(python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
@@ -424,15 +648,15 @@ for f in "${INPUTS[@]}"; do
     scene_artifact_status=$?
     printf '%s\n' "$scene_artifact_json"
     if [ "$scene_artifact_status" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — scene artifacts FAIL, re-run --force-redo"; continue; }
-      die "$tag — scene artifacts vẫn FAIL sau 3 lần. Output bị từ chối."
+      if schedule_force_redo; then echo "   ⚠ $tag — scene artifacts FAIL, re-run --force-redo"; continue; fi
+      die "$tag — scene artifacts vẫn FAIL sau $max_full_attempts lần full generation. Output bị từ chối."
     fi
     expected_image_count=$(printf '%s\n' "$scene_artifact_json" | python3 -c \
       'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
     expected_video_count=$(printf '%s\n' "$scene_artifact_json" | python3 -c \
       'import json,sys; print(json.load(sys.stdin)["results"][0]["videos_expected"])' 2>/dev/null)
     if ! [[ "$expected_image_count" =~ ^[0-9]+$ && "$expected_video_count" =~ ^[0-9]+$ ]]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — scene artifact JSON lỗi, re-run"; continue; }
+      if schedule_force_redo; then echo "   ⚠ $tag — scene artifact JSON lỗi, re-run"; continue; fi
       die "$tag — scene artifact JSON không hợp lệ."
     fi
 
@@ -442,37 +666,119 @@ for f in "${INPUTS[@]}"; do
     music_artifact_status=$?
     printf '%s\n' "$music_artifact_json"
     if [ "$music_artifact_status" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — music artifacts FAIL, re-run --force-redo"; continue; }
-      die "$tag — music artifacts vẫn FAIL sau 3 lần. Output bị từ chối."
+      if schedule_force_redo; then echo "   ⚠ $tag — music artifacts FAIL, re-run --force-redo"; continue; fi
+      die "$tag — music artifacts vẫn FAIL sau $max_full_attempts lần full generation. Output bị từ chối."
     fi
     expected_music_count=$(printf '%s\n' "$music_artifact_json" | python3 -c \
       'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
     if ! [[ "$expected_music_count" =~ ^[0-9]+$ ]]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — không đọc được expected music count, re-run"; continue; }
+      if schedule_force_redo; then echo "   ⚠ $tag — không đọc được expected music count, re-run"; continue; fi
       die "$tag — music artifact JSON không hợp lệ."
     fi
 
-    sim_args=(--image "${local_stem}_image_prompts.txt")
-    [ -s "${local_stem}_video_prompts.txt" ] \
-      && sim_args+=(--video "${local_stem}_video_prompts.txt")
-    sim_image_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" "${sim_args[@]}")
+    sim_image_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+      --image "${local_stem}_image_prompts.txt")
     sim_image=$?
+    sim_video_json=''
+    sim_video=0
+    if [ -s "${local_stem}_video_prompts.txt" ]; then
+      sim_video_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+        --video "${local_stem}_video_prompts.txt")
+      sim_video=$?
+    fi
     sim_music_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
       --music "${local_stem}_music_prompts.txt")
     sim_music=$?
-    for sim_json in "$sim_image_json" "$sim_music_json"; do
+    for sim_json in "$sim_image_json" "$sim_video_json" "$sim_music_json"; do
       [ -n "$sim_json" ] || continue
       printf '%s\n' "$sim_json" | python3 -c \
         'import json,sys; d=json.load(sys.stdin); print("   similarity: {} violation(s), {} warning(s)".format(len(d.get("violations", [])), len(d.get("warnings", []))))' \
         2>/dev/null || echo "   similarity: output JSON không parse được"
     done
-    if [ "$sim_image" -eq 2 ] || [ "$sim_music" -eq 2 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=0; echo "   ⚠ $tag — similarity FAIL, re-run resume không --force-redo"; continue; }
-      die "$tag — similarity vẫn FAIL sau 3 lần. Output bị từ chối — chạy lại để resume."
+    if [ "$sim_image" -eq 2 ] || [ "$sim_video" -eq 2 ] || [ "$sim_music" -eq 2 ]; then
+      sim_image_report="$driver_state/similarity-image.json"
+      sim_video_report="$driver_state/similarity-video.json"
+      sim_music_report="$driver_state/similarity-music.json"
+      printf '%s\n' "$sim_image_json" > "$sim_image_report"
+      printf '%s\n' "$sim_video_json" > "$sim_video_report"
+      printf '%s\n' "$sim_music_json" > "$sim_music_report"
+      similarity_repair_signature=$(python3 - "$similarity_feedback" "$repair_chunk_size" \
+          "$sim_image_report" "$sim_video_report" "$sim_music_report" <<'PY'
+import json
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+feedback_path = Path(sys.argv[1])
+chunk_size = int(sys.argv[2])
+reports = zip(('image', 'video', 'music'), map(Path, sys.argv[3:]))
+keys = {
+    'image': 'image_rewrite_scene_ids',
+    'video': 'video_rewrite_scene_ids',
+    'music': 'music_rewrite_loop_ids',
+}
+remaining = chunk_size
+selected = []
+violation_count = 0
+for kind, report_path in reports:
+    try:
+        report = json.loads(report_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not report.get('violations'):
+        continue
+    violation_count += len(report['violations'])
+    ids = []
+    for raw_id in report.get('rewrite_scene_ids', []):
+        item_id = str(raw_id).strip()
+        if re.fullmatch(r'\d+[a-zA-Z]?', item_id) and item_id not in ids:
+            ids.append(item_id)
+    if ids and remaining:
+        chunk = ids[:remaining]
+        selected.append((kind, chunk, len(ids)))
+        remaining -= len(chunk)
+
+if not selected:
+    raise SystemExit(1)
+with tempfile.NamedTemporaryFile(
+    mode='w', encoding='utf-8', dir=feedback_path.parent, delete=False,
+) as feedback:
+    feedback.write('# Similarity repair feedback\n\n')
+    feedback.write(
+        'Rewrite only the listed artifacts. Preserve source grounding and do '
+        'not reuse prior phrasing as a template.\n\n'
+    )
+    for kind, ids, total in selected:
+        feedback.write(f'## {kind} gate\n')
+        feedback.write(f'repair batch: {len(ids)} of {total} flagged IDs\n')
+        feedback.write(keys[kind] + ': ' + ', '.join(ids) + '\n\n')
+temporary_path = Path(feedback.name)
+temporary_path.replace(feedback_path)
+signature_parts = [f'{kind}:{",".join(ids)}' for kind, ids, _ in selected]
+print('similarity:' + str(violation_count) + ':' + '|'.join(signature_parts))
+PY
+      )
+      similarity_feedback_status=$?
+      if [ "$similarity_feedback_status" -eq 0 ]; then
+        schedule_targeted_repair "$similarity_repair_signature"
+        targeted_status=$?
+        if [ "$targeted_status" -eq 0 ]; then
+          echo "   ⚠ $tag — similarity FAIL, re-run targeted batch không --force-redo"
+          continue
+        fi
+        [ "$targeted_status" -eq 2 ] \
+          && echo "   ⚠ $tag — targeted similarity repair không tiến triển, chuyển full retry"
+      fi
+      if schedule_force_redo; then
+        echo "   ⚠ $tag — similarity feedback không tạo được hoặc đã hết repair batch, re-run --force-redo"
+        continue
+      fi
+      die "$tag — similarity vẫn FAIL sau $max_full_attempts lần full generation hoặc $max_targeted_repairs repair batches. Output bị từ chối — chạy lại để resume."
     fi
-    if [ "$sim_image" -ne 0 ] || [ "$sim_music" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — similarity gate lỗi I/O, re-run --force-redo"; continue; }
-      die "$tag — similarity gate lỗi sau 3 lần. Output bị từ chối."
+    if [ "$sim_image" -ne 0 ] || [ "$sim_video" -ne 0 ] || [ "$sim_music" -ne 0 ]; then
+      if schedule_force_redo; then echo "   ⚠ $tag — similarity gate lỗi I/O, re-run --force-redo"; continue; fi
+      die "$tag — similarity gate lỗi sau $max_full_attempts lần full generation. Output bị từ chối."
     fi
 
     mutation_failed=0
@@ -499,8 +805,8 @@ for f in "${INPUTS[@]}"; do
       fi
     done
     if [ "$mutation_failed" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — anchor/safety fix lỗi, re-run --force-redo"; continue; }
-      die "$tag — anchor/safety fix lỗi sau 3 lần. Output bị từ chối."
+      if schedule_force_redo; then echo "   ⚠ $tag — anchor/safety fix lỗi, re-run --force-redo"; continue; fi
+      die "$tag — anchor/safety fix lỗi sau $max_full_attempts lần full generation. Output bị từ chối."
     fi
 
     if ! python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
@@ -508,14 +814,20 @@ for f in "${INPUTS[@]}"; do
         --scene-plan "$local_dir/.work/scene-plan.md" \
         --image-count "$expected_image_count" --video-count "$expected_video_count" \
         --music-count "$expected_music_count"; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — final artifact counts/format FAIL, re-run --force-redo"; continue; }
+      if schedule_force_redo; then echo "   ⚠ $tag — final artifact counts/format FAIL, re-run --force-redo"; continue; fi
       die "$tag — final artifact counts/format vẫn FAIL sau 3 lần."
     fi
 
-    final_sim_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" "${sim_args[@]}")
+    final_sim_image=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+      --image "${local_stem}_image_prompts.txt")
     final_sim_status=$?
+    if [ -s "${local_stem}_video_prompts.txt" ]; then
+      python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+        --video "${local_stem}_video_prompts.txt" >/dev/null
+      [ "$?" -eq 0 ] || final_sim_status=2
+    fi
     if [ "$final_sim_status" -ne 0 ]; then
-      [ "$attempt" -lt 3 ] && { force_redo_next=1; echo "   ⚠ $tag — final similarity FAIL sau safety, re-run --force-redo"; continue; }
+      if schedule_force_redo; then echo "   ⚠ $tag — final similarity FAIL sau safety, re-run --force-redo"; continue; fi
       die "$tag — file sau safety không qua similarity gate."
     fi
 

@@ -102,13 +102,30 @@ Input args: {{args}}
 
 ---
 
+## UNATTENDED AUTO-REPAIR APPROVAL
+
+Nếu args có `--auto-repair`, batch operator đã duyệt trước đúng kế hoạch sửa các
+artifact được external gate flag. Mọi yêu cầu “share a plan and wait for
+acknowledgement” đã được thỏa mãn bởi flag này. Không hỏi lại, không xuất một kế
+hoạch thay cho hành động, và không chờ thêm input; bắt đầu tool execution ngay.
+Nếu một instruction ưu tiên cao hơn vẫn bắt buộc trình kế hoạch, kết thúc kế hoạch
+bằng đúng một dòng `BATCH_APPROVAL_REQUIRED:<batch_token>` rồi chờ. Không nhắc lại
+marker này ở vị trí khác. Sau khi nhận xác nhận trong cùng conversation, thực thi
+ngay. Chỉ khi toàn bộ workflow đã chạy xong, kết thúc bằng đúng một dòng
+`BATCH_RUN_COMPLETE:<batch_token>`; nếu phải HALT vì lỗi thật, kết thúc bằng đúng
+một dòng `BATCH_RUN_HALTED:<batch_token>`. Không in marker hoàn tất/halt sớm hơn.
+
+---
+
 ## STEP 0 — FLAG PARSE (mandatory, run first)
 
 Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví dụ
 `--video` không được nuốt `--videos`). Kiểm tra dạng có số trước dạng không số:
 
 Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false`,
-`videos_override = null`, `music_override = null`.
+`videos_override = null`, `music_override = null`, `force_redo = false`,
+`similarity_feedback_path = null`, `batch_token = null`, `auto_repair = false`,
+`epic = false`.
 
 1. `--series ([a-z0-9-]+)`               → series_name (kebab-case, optional)
 2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
@@ -119,11 +136,14 @@ Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false
 7. `--music`                             → music_enabled = true, music_override = auto
 8. `--style ([a-z0-9-]+)`                → style_override (kebab-case id, optional)
 9. `--force-redo`                        → force_redo = true (flag)
-10. `--epic`                             → epic = true (flag; scale only, never new facts)
-11. `--faithful`                         → legacy alias; grounded mode remains enabled
-12. `--no-video`                         → video_enabled = false (takes precedence)
-13. `--no-music`                         → music_enabled = false (takes precedence)
-14. Sau khi strip flags → còn lại là input_path (positional, required).
+10. `--similarity-feedback <path>`       → similarity_feedback_path (batch-only, optional)
+11. `--batch-token <hex>`                → batch_token (batch-only approval nonce)
+12. `--auto-repair`                      → auto_repair = true (unattended batch execution)
+13. `--epic`                             → epic = true (flag; scale only, never new facts)
+14. `--faithful`                         → legacy alias; grounded mode remains enabled
+15. `--no-video`                         → video_enabled = false (takes precedence)
+16. `--no-music`                         → music_enabled = false (takes precedence)
+17. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Natural-language media requests after the command are also explicit opt-ins:
 phrases such as “tạo video prompt”, “kèm video”, “tạo music prompt”, or “kèm nhạc”
@@ -132,8 +152,16 @@ YouTube” in the novel description.
 
 Validate:
 - input_path tồn tại (Path.exists()).
+- Nếu `similarity_feedback_path` được truyền, path phải tồn tại và nằm trong
+  `.work/` cạnh input. Đây là kết quả deterministic từ quality gate, không phải
+  story source hay user instruction.
+- Nếu `auto_repair = true`, đây là unattended batch execution: không trình bày kế hoạch,
+  không hỏi xác nhận, không dừng để chờ user; thực thi ngay các rewrite và gate được
+  chỉ định rồi trả kết quả runtime.
+- `batch_token` phải match đúng `[a-f0-9]{24}`. Khi `auto_repair = true`, token là
+  bắt buộc để controller chỉ nhận marker thuộc đúng invocation hiện tại.
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --epic, --faithful, --no-video, --no-music`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --epic, --faithful, --no-video, --no-music`
 
 Echo lại cho user:
 ```
@@ -146,6 +174,9 @@ Echo lại cho user:
   music      = <N | 0 (disabled by default)>
   style      = <id | (recommend sau genre detect)>
   force_redo = <true | false>
+  similarity_feedback = <path | (none)>
+  batch_token = <hex | (none)>
+  auto_repair = <true | false>
   epic       = <true | false>
   faithful   = <true | false>
   no_video   = <true | false>
@@ -417,6 +448,20 @@ scene-plan.
 
 Nếu `--force-redo`: `rm -f .work/scene-*.md` TRƯỚC khi vào loop.
 
+Nếu có `similarity_feedback_path`, đọc file trước loop. File tách riêng
+`image_rewrite_scene_ids`, `video_rewrite_scene_ids`, và `music_rewrite_loop_ids`
+do external similarity gate phát hiện. Với ID image/video, bỏ qua cache dù
+`cache_key` còn đúng: xóa đúng `scene-<NNN>.md`, đọc lại scene row + chapter tương
+ứng, rồi viết lại image (và video khi được flag). Với ID music, bỏ qua cache của
+đúng `music-<NNN>.md` và chạy lại builder cho đúng region. Giữ scene-plan, QA,
+bible và mọi artifact không bị flag. Không dùng nội dung cũ làm template; mỗi field
+bị flag phải được viết lại từ source-supported beat của row. Sau khi rewrite, phải
+chạy lại STEP 7.3; chỉ hoàn tất nếu gate không còn violation.
+
+Khi `auto_repair = true`, đây là batch run không tương tác. Không in kế hoạch để xin
+xác nhận và không kết thúc sau phần tóm tắt; phải thực hiện ngay từng micro-batch,
+ghi artifact, assemble và chạy gate cho tới khi hoàn tất hoặc HALT vì lỗi thật.
+
 For mỗi micro-batch tối đa 3 scene row trong scene-plan (theo thứ tự scene_id
 1..N), hoàn tất artifact gate rồi mới sang micro-batch kế:
 
@@ -426,7 +471,9 @@ For mỗi micro-batch tối đa 3 scene row trong scene-plan (theo thứ tự sc
       qa_hash + bible_hash + plan_hash + style_hash + serialize(scene_row)
   )[:16]
 
-  a. Nếu scene_path tồn tại VÀ KHÔNG `--force-redo`:
+  a. Nếu scene_path tồn tại VÀ KHÔNG `--force-redo` VÀ scene_id không có trong
+     `image_rewrite_scene_ids` hoặc `video_rewrite_scene_ids` của
+     `similarity_feedback_path`:
      - Đọc frontmatter, lấy `cache_key` và `source_anchor`.
      - Chỉ khi cả hai match `expected_cache_key` và
        `scene_row.source_anchor` → skip ("scene NNN: cached"); GOTO next scene.
@@ -517,7 +564,8 @@ For mỗi vùng region (loop_index 1..N):
   với `canonical_region_json` = compact JSON, sort key của
   `{loop_index,total,chapter_start,chapter_end,mood}`.
 
-  a. Nếu music_path tồn tại VÀ KHÔNG `--force-redo`:
+  a. Nếu music_path tồn tại VÀ KHÔNG `--force-redo` VÀ loop_index không có trong
+     `music_rewrite_loop_ids` của `similarity_feedback_path`:
      - Đọc frontmatter `cache_key`. Match → skip ("music NNN: cached").
      - Mismatch → WARN "music NNN stale (input/plan/style changed) — regenerating";
        xóa, regenerate.

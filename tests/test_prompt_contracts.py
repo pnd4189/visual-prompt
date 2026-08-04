@@ -778,10 +778,77 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn('.work/bulk-generator', result.stdout)
 
+    def test_legit_report_lists_only_boilerplate_scene_ids(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            work = directory / '.work'
+            work.mkdir()
+            image = directory / 'image.txt'
+            report = directory / 'legit-report.json'
+            repeated = 'same eight word phrase repeats inside this scene block'
+            image.write_text(
+                '--- SCENE 001 ---\n'
+                'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
+                'Composition: foreground and background\nSubject: Lan\n'
+                'Action / Energy: walking\nStyle: painted\n'
+                'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n'
+                + '\n'.join([repeated] * 6),
+                encoding='utf-8',
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / 'check_run_legit.py'),
+                    '--work', str(work), '--image', str(image),
+                    '--report-json', str(report),
+                ],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+
+            payload = json.loads(report.read_text(encoding='utf-8'))
+
+        self.assertEqual(2, result.returncode)
+        self.assertEqual(['001'], payload['boilerplate_scene_ids'])
+        self.assertTrue(payload['only_boilerplate'])
+        self.assertNotIn('banned_phrases', payload)
+
+    def test_legit_report_marks_mixed_failure_as_not_targeted_repairable(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            work = directory / '.work'
+            work.mkdir()
+            (work / 'rogue.sh').write_text('#!/usr/bin/env bash\n', encoding='utf-8')
+            image = directory / 'image.txt'
+            report = directory / 'legit-report.json'
+            repeated = 'same eight word phrase repeats inside this scene block'
+            image.write_text(
+                '--- SCENE 001 ---\n'
+                'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
+                'Composition: foreground and background\nSubject: Lan\n'
+                'Action / Energy: walking\nStyle: painted\n'
+                'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n'
+                + '\n'.join([repeated] * 6),
+                encoding='utf-8',
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / 'check_run_legit.py'),
+                    '--work', str(work), '--image', str(image),
+                    '--report-json', str(report),
+                ],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            payload = json.loads(report.read_text(encoding='utf-8'))
+
+        self.assertEqual(2, result.returncode)
+        self.assertFalse(payload['only_boilerplate'])
+
 
 class CrossCliContractTests(unittest.TestCase):
     def test_command_and_adapters_lock_parent_only_image_default(self):
         command = (ROOT / 'commands' / 'visual-prompt.toml').read_text(encoding='utf-8')
+        runner = (ROOT / 'scripts' / 'run-folder.sh').read_text(encoding='utf-8')
         codex = (
             ROOT / 'adapters' / 'codex' / 'visual-prompt' / 'SKILL.md'
         ).read_text(encoding='utf-8')
@@ -794,6 +861,55 @@ class CrossCliContractTests(unittest.TestCase):
         self.assertIn('video_enabled = false', command)
         self.assertIn('music_enabled = false', command)
         self.assertIn('source_anchor: <exact scene_row.source_anchor>', command)
+        self.assertIn('--similarity-feedback <path>', command)
+        self.assertIn('--auto-repair', command)
+        self.assertIn('--batch-token <hex>', command)
+        self.assertIn('UNATTENDED AUTO-REPAIR APPROVAL', command)
+        self.assertIn('image_rewrite_scene_ids', command)
+        self.assertIn('video_rewrite_scene_ids', command)
+        self.assertIn('music_rewrite_loop_ids', command)
+        self.assertIn('similarity-feedback.md', runner)
+        self.assertNotIn('banned phrases (do not reuse):', runner)
+        self.assertNotIn('fields to rewrite:', runner)
+        self.assertIn('--similarity-feedback', runner)
+        self.assertIn('rm -f "$local_dir"/.work/music-*.md', runner)
+        self.assertIn('--report-json "$legit_report"', runner)
+        self.assertIn('VP_REPAIR_CHUNK_SIZE:-12', runner)
+        self.assertIn('max_targeted_repairs=10', runner)
+        self.assertIn("re.fullmatch(r'\\d+[a-zA-Z]?', item_id)", runner)
+        self.assertIn('repair batch:', runner)
+        self.assertIn('mktemp -d "$LOCAL_BASE/.driver-state.XXXXXX"', runner)
+        self.assertIn('only_boilerplate', runner)
+        self.assertIn('last_repair_signature', runner)
+        self.assertIn('targeted similarity repair không tiến triển', runner)
+        self.assertIn('--auto-repair', runner)
+        self.assertIn('secrets.token_hex(12)', runner)
+        self.assertIn('re.escape(batch_token)', runner)
+        self.assertIn('agy_status=$?', runner)
+        self.assertIn('assembled outputs found', runner)
+        self.assertIn('$local_dir/.vp-completion.json', runner)
+        self.assertIn("local_path / '.vp-complete.json'", runner)
+        self.assertIn('$local_dir/.work/completion_manifest.json', runner)
+        self.assertIn('post-gate manifest found', runner)
+        self.assertIn('outputs_ready = all(', runner)
+        self.assertIn('path.stat().st_mtime >= attempt_started', runner)
+        self.assertNotIn('finished artifacts but omitted the completion marker', runner)
+        self.assertIn('if [ "$agy_status" -eq 2 ]', runner)
+        self.assertIn('không auto-retry/force-redo', runner)
+        self.assertIn('available_models=$(agy models', runner)
+        self.assertIn('grep -qF "$MODEL" <<< "$available_models"', runner)
+        self.assertIn("--music $MUSIC --auto-repair", runner)
+        self.assertIn("'--mode', 'accept-edits'", runner)
+        self.assertIn('pexpect.spawn', runner)
+        self.assertIn('max_auto_approvals = 6', runner)
+        self.assertIn('Bạn có đồng ý với kế hoạch(?: này| trên)?', runner)
+        self.assertIn('Xác nhận để bắt đầu tiến hành', runner)
+        self.assertIn("How's the CLI experience so far", runner)
+        self.assertIn("child.sendline('0')", runner)
+        self.assertIn('BATCH_APPROVAL_REQUIRED', command)
+        self.assertIn('BATCH_RUN_COMPLETE', command)
+        self.assertIn('BATCH_RUN_HALTED', command)
+        self.assertIn('sim_video_json', runner)
         self.assertNotIn('PARALLEL EXPANSION', command)
         self.assertNotIn('Mặc định parallelism', command)
         self.assertIn('Never use subagents', codex)
