@@ -174,6 +174,26 @@ Worker contract (fail-closed):
 
 ---
 
+## PLAN-ONLY SUBMODE (head của bounded-parallel run, batch-runner-invoked)
+
+Nếu args có `--plan-only`, đây là head session của bounded-parallel run do batch
+runner spawn: chạy STEP 1 → STEP 5.5 (load input, continuity, QA, bible, genre,
+style, scene count, scene plan Pass 1 + plan variation gate) rồi DỪNG.
+
+- Không chạy STEP 6 (Pass-2 expand), STEP 6.5 (music), STEP 7 (assemble/gates),
+  STEP 8 (self-audit). Không ghi scene-NNN.md, không ghi completion marker file,
+  không publish visual-history. Pass-2 do các worker session riêng làm.
+- `--plan-only` chỉ đi cùng `--auto-repair` + `--batch-token` (batch context);
+  loại trừ `--worker-manifest`, `--similarity-feedback`, `--force-redo` (head
+  không sửa artifact của worker; nếu scene-plan cần làm lại, runner quyết định).
+- Sau khi STEP 5.5 pass và `.work/plan.hash` đã ghi: kết thúc bằng đúng một dòng
+  `BATCH_RUN_COMPLETE:<batch_token>`. Gate FAIL hoặc lỗi thật →
+  `BATCH_RUN_HALTED:<batch_token>`.
+- Run trực tiếp của user KHÔNG BAO GIỜ dùng `--plan-only`; full pipeline mặc định
+  giữ nguyên khi không có flag.
+
+---
+
 ## STEP 0 — FLAG PARSE (mandatory, run first)
 
 Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví dụ
@@ -182,7 +202,7 @@ Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví
 Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false`,
 `videos_override = null`, `music_override = null`, `force_redo = false`,
 `similarity_feedback_path = null`, `batch_token = null`, `auto_repair = false`,
-`worker_manifest_path = null`, `epic = false`.
+`worker_manifest_path = null`, `plan_only = false`, `epic = false`.
 
 1. `--series ([a-z0-9-]+)`               → series_name (kebab-case, optional)
 2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
@@ -197,11 +217,12 @@ Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false
 11. `--batch-token <hex>`                → batch_token (batch-only approval nonce)
 12. `--auto-repair`                      → auto_repair = true (unattended batch execution)
 13. `--worker-manifest <path>`           → worker_manifest_path (batch worker submode, Pass-2 only)
-14. `--epic`                             → epic = true (flag; scale only, never new facts)
-15. `--faithful`                         → legacy alias; grounded mode remains enabled
-16. `--no-video`                         → video_enabled = false (takes precedence)
-17. `--no-music`                         → music_enabled = false (takes precedence)
-18. Sau khi strip flags → còn lại là input_path (positional, required).
+14. `--plan-only`                        → plan_only = true (batch head submode, STEP 1-5.5 only)
+15. `--epic`                             → epic = true (flag; scale only, never new facts)
+16. `--faithful`                         → legacy alias; grounded mode remains enabled
+17. `--no-video`                         → video_enabled = false (takes precedence)
+18. `--no-music`                         → music_enabled = false (takes precedence)
+19. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Natural-language media requests after the command are also explicit opt-ins:
 phrases such as “tạo video prompt”, “kèm video”, “tạo music prompt”, or “kèm nhạc”
@@ -221,10 +242,14 @@ Validate:
 - Nếu `worker_manifest_path` được truyền: path phải tồn tại, parse được JSON, và
   `"schema": 1`. Worker submode loại trừ `--video`, `--videos`, `--music`,
   `--style`, `--series`, `--genre`, `--images`, `--force-redo`,
-  `--similarity-feedback`, `--epic` — mọi tham số đã nằm trong manifest; gặp flag
-  bị loại trừ → HALT với VN error. Video bật/tắt theo `video_enabled` của manifest.
+  `--similarity-feedback`, `--epic`, `--plan-only` — mọi tham số đã nằm trong
+  manifest; gặp flag bị loại trừ → HALT với VN error. Video bật/tắt theo
+  `video_enabled` của manifest.
+- Nếu `plan_only = true`: loại trừ `--worker-manifest`, `--similarity-feedback`,
+  `--force-redo`; yêu cầu `auto_repair = true` + `batch_token`. Head session chỉ
+  chạy STEP 1 → 5.5 rồi dừng (mục PLAN-ONLY SUBMODE).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --worker-manifest PATH, --epic, --faithful, --no-video, --no-music`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --worker-manifest PATH, --plan-only, --epic, --faithful, --no-video, --no-music`
 
 Echo lại cho user:
 ```
@@ -241,6 +266,7 @@ Echo lại cho user:
   batch_token = <hex | (none)>
   auto_repair = <true | false>
   worker_manifest = <path | (none — full pipeline)>
+  plan_only  = <true | false>
   epic       = <true | false>
   faithful   = <true | false>
   no_video   = <true | false>

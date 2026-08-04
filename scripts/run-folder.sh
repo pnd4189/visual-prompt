@@ -116,6 +116,168 @@ except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
 PY
 }
 
+# agy_harness <run_cmd> <workdir> <batch_token> <mode> [worker_manifest] [extra_dir]
+# mode: full | plan | worker. Serial runs call mode=full — behavior is identical
+# to the original inline harness (approval markers, CLI-feedback skip, completion
+# hints, nonce-scoped BATCH_RUN_COMPLETE/HALTED). plan/worker sessions only vary
+# the "outputs ready" hint set, the deadline, and an extra read-only dir.
+agy_harness() {
+python3 - "$1" "$MODEL" "$SKILL_DIR" "$2" "$BIBLES_DIR" "$3" "${4:-full}" "${5:-}" "${6:-}" <<'PY'
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import pexpect
+
+(run_cmd, model, skill_dir, local_dir, bibles_dir, batch_token, mode,
+ worker_manifest, extra_dir) = sys.argv[1:10]
+args = [
+    '-i', run_cmd,
+    '--model', model,
+    '--mode', 'accept-edits',
+    '--dangerously-skip-permissions',
+    '--add-dir', skill_dir,
+    '--add-dir', local_dir,
+]
+if os.path.isdir(bibles_dir):
+    args.extend(['--add-dir', bibles_dir])
+if extra_dir and os.path.isdir(extra_dir):
+    args.extend(['--add-dir', extra_dir])
+
+attempt_started = time.time()
+child = pexpect.spawn(
+    'agy', args, cwd=skill_dir, encoding='utf-8', codec_errors='replace',
+    timeout=90,
+)
+child.delaybeforesend = 0.1
+ansi = r'(?:\x1b\[[0-?]*[ -/]*[@-~])*'
+line_start = r'(?m)(?:^|\r?\n)' + ansi + r'[ \t]*'
+line_end = r'[ \t]*' + ansi + r'(?=\r?$)'
+patterns = [
+    re.compile(line_start + r'BATCH_APPROVAL_REQUIRED:' + re.escape(batch_token) + line_end),
+    re.compile(
+        r'(?:Bạn có đồng ý với kế hoạch(?: này| trên)?|Xin(?: bạn| vui lòng)? xác nhận kế hoạch(?: này| trên)?|Xác nhận để bắt đầu tiến hành)',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        line_start + r"How's the CLI experience so far\? Help us improve:" + line_end,
+        re.IGNORECASE,
+    ),
+    re.compile(line_start + r'BATCH_RUN_COMPLETE:' + re.escape(batch_token) + line_end),
+    re.compile(line_start + r'BATCH_RUN_HALTED:' + re.escape(batch_token) + line_end),
+    pexpect.EOF,
+    pexpect.TIMEOUT,
+]
+approvals = 0
+max_auto_approvals = 6
+completion_nudges = 0
+deadline_seconds = {'full': 4 * 3600, 'plan': 3 * 3600, 'worker': 2 * 3600}[mode]
+deadline = time.monotonic() + deadline_seconds
+outcome = None
+
+
+def scene_filename(scene_id):
+    match = re.fullmatch(r'(\d+)([a-zA-Z]?)', str(scene_id))
+    return f'scene-{int(match.group(1)):03d}{match.group(2)}.md'
+
+
+try:
+    while outcome is None:
+        matched = child.expect(patterns)
+        if matched in (0, 1):
+            approvals += 1
+            if approvals > max_auto_approvals:
+                raise RuntimeError('Agy requested approval more than 6 times')
+            print(
+                f'   agy: plan received — auto-approved '
+                f'({approvals}/{max_auto_approvals})',
+                flush=True,
+            )
+            child.sendline(
+                'Tôi xác nhận kế hoạch vừa nêu. Hãy thực thi ngay toàn bộ batch '
+                'đã được phê duyệt, không hỏi lại.'
+            )
+        elif matched == 2:
+            print('   agy: CLI feedback prompt — skipped', flush=True)
+            child.sendline('0')
+        elif matched == 3:
+            print('   agy: reported workflow complete', flush=True)
+            outcome = 0
+        elif matched == 4:
+            print('   agy: reported workflow halted', flush=True)
+            outcome = 2
+        elif matched == 5:
+            tail = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', child.before or '')[-800:]
+            print(f'   agy: exited before batch marker: {tail}', file=sys.stderr)
+            outcome = 1
+        else:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Agy interactive run exceeded its deadline')
+            local_path = Path(local_dir)
+            local_stem = local_path / local_path.name
+            if mode == 'plan':
+                expected_outputs = [
+                    local_path / '.work' / 'scene-plan.md',
+                    local_path / '.work' / 'chapters_qa.json',
+                ]
+                ready_label = 'scene plan ready'
+            elif mode == 'worker':
+                payload = json.loads(Path(worker_manifest).read_text(encoding='utf-8'))
+                worker_path = Path(payload['work_dir'])
+                expected_outputs = [
+                    worker_path / scene_filename(scene_id)
+                    for scene_id in payload['scene_ids']
+                ]
+                ready_label = 'assigned scenes ready'
+            else:
+                expected_outputs = [
+                    Path(f'{local_stem}_qa.txt'),
+                    Path(f'{local_stem}_image_prompts.txt'),
+                    Path(f'{local_stem}_music_prompts.txt'),
+                    local_path / '.work' / 'scene-plan.md',
+                ]
+                ready_label = 'assembled outputs found'
+            outputs_ready = all(
+                path.is_file() and path.stat().st_size > 0
+                and path.stat().st_mtime >= attempt_started
+                for path in expected_outputs
+            )
+            completion_hint = local_path / '.vp-completion.json'
+            if not completion_hint.is_file():
+                completion_hint = local_path / '.vp-complete.json'
+            post_gate_hint = local_path / '.work' / 'completion_manifest.json'
+            if mode == 'full' and post_gate_hint.is_file():
+                print('   agy: post-gate manifest found — continuing to external gates', flush=True)
+                outcome = 0
+                continue
+            ready = outputs_ready
+            if mode == 'full':
+                ready = ready or completion_hint.is_file()
+            if ready and completion_nudges == 0:
+                completion_nudges = 1
+                print(
+                    f'   agy: {ready_label} — requesting final marker',
+                    flush=True,
+                )
+                child.sendline(
+                    'Nếu workflow đã hoàn tất, hãy trả marker kết thúc nonce-scoped '
+                    'đã được yêu cầu trong instruction. Nếu chưa, hoàn tất gate trước.'
+                )
+finally:
+    if child.isalive():
+        child.sendcontrol('d')
+        try:
+            child.expect(pexpect.EOF, timeout=10)
+        except (pexpect.TIMEOUT, pexpect.EOF):
+            child.close(force=True)
+
+raise SystemExit(outcome)
+PY
+}
+
 [[ "$MUSIC" =~ ^[1-9][0-9]*$ ]] || die "VP_MUSIC phải là số nguyên >= 1: $MUSIC"
 [[ "$WORKERS" =~ ^[1-9][0-9]*$ ]] || die "VP_WORKERS phải là số nguyên >= 1: $WORKERS"
 [ "$WORKERS" -le 16 ] || die "VP_WORKERS tối đa 16 (hiện là $WORKERS) — tăng worker không được nới gate."
@@ -332,6 +494,9 @@ for f in "${INPUTS[@]}"; do
   if [ "$DRYRUN" = "1" ]; then
     echo "   DRYRUN: Agy interactive controller → plan approval → execution (model=$MODEL, mode=accept-edits, timeout=4h)"
     echo "   DRYRUN: gate order legit → artifacts → similarity → anchor/safety --fix → final artifacts/similarity → copy/cache → history/manifest"
+    if [ "$WORKERS" -ge 2 ]; then
+      echo "   DRYRUN: parallel pass-2: VP_WORKERS=$WORKERS (head --plan-only → worker fan-out --worker-manifest → tail full; mọi gate post-join giữ nguyên)"
+    fi
     # simulate style-lock on the first file so dry-run shows later files inheriting it
     [ -z "$STYLE" ] && { STYLE="donghua-xianxia"; echo "   DRYRUN: (giả lập) khoá style=$STYLE → $CONF"; }
     continue
@@ -362,6 +527,211 @@ for f in "${INPUTS[@]}"; do
   similarity_feedback="$driver_state/similarity-feedback.md"
   legit_report="$driver_state/legit-report.json"
   last_repair_signature=''
+
+  # ---- Bounded-parallel Pass-2 (opt-in: VP_WORKERS >= 2) -------------------
+  # Head session (--plan-only) runs STEP 1-5.5 and freezes QA/bible/style/plan
+  # into a read-only snapshot; worker sessions expand disjoint scene ranges in
+  # isolated workdirs; the join verifies ownership + full coverage BEFORE any
+  # shared-state write. The while-loop below then acts as the tail: its
+  # full-mode session skips cached scenes (STEP 6 resume), runs music/assemble/
+  # gates, and every post-join gate stays coordinator-only. Any head/fan-out/
+  # join failure falls through to unchanged serial full generation in the loop.
+  parallel_ok=0
+  workers_base="$LOCAL_BASE/.workers/$(basename "${local_in%.txt}")"
+  if [ "$WORKERS" -ge 2 ]; then
+    fanout_started=$SECONDS
+    echo "▶ $tag — parallel pass-2: VP_WORKERS=$WORKERS (head --plan-only → workers → tail)"
+    head_token=$(python3 -c 'import secrets; print(secrets.token_hex(12))') \
+      || die "$tag — không tạo được head batch token."
+    rm -f "$local_dir/.vp-completed.json" "$local_dir/.vp-completion.json" \
+      "$local_dir/.work/completion_manifest.json" 2>/dev/null
+    python3 "$SKILL_DIR/scripts/check_run_legit.py" --purge-skill-dir "$SKILL_DIR" || true
+    agy_harness "$cmd --plan-only --batch-token '$head_token'" \
+      "$local_dir" "$head_token" plan > "$driver_state/head-session.log" 2>&1
+    head_status=$?
+    plan_gate_ok=0
+    if [ "$head_status" -eq 0 ] && [ -s "$local_dir/.work/scene-plan.md" ] \
+        && [ -s "$local_dir/.work/chapters_qa.json" ]; then
+      if python3 "$SKILL_DIR/scripts/validate_scene_plan.py" \
+          --plan "$local_dir/.work/scene-plan.md" \
+          --chapters-json "$local_dir/.work/chapters_qa.json" \
+          > "$driver_state/head-plan-gate.json"; then
+        plan_gate_ok=1
+      fi
+    fi
+    worker_manifests=()
+    if [ "$plan_gate_ok" = "1" ]; then
+      video_enabled_flag=0
+      [ "${VP_NO_VIDEO:-0}" != "1" ] && video_enabled_flag=1
+      # Freeze the snapshot + split disjoint ranges + write immutable manifests.
+      mapfile -t worker_manifests < <(python3 - "$SKILL_DIR/scripts" "$local_dir" \
+          "$driver_state" "$WORKERS" "$HOME/.gemini/bibles/$SERIES.md" \
+          "$HOME/.gemini/bibles/$SERIES-visual-history.md" "$workers_base" \
+          "$video_enabled_flag" <<'PY'
+import hashlib
+import json
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import worker_manifest as wm
+
+(local_dir, driver_state, workers_cap, bible_path,
+ history_path, workers_base, video_flag) = sys.argv[2:9]
+work = Path(local_dir) / '.work'
+snapshot = Path(driver_state) / 'snapshot'
+snapshot.mkdir(parents=True, exist_ok=True)
+bundle = {
+    'qa_hash': (work / 'chapters_qa.json', 'chapters_qa.json'),
+    'plan_hash': (work / 'scene-plan.md', 'scene-plan.md'),
+    'style_hash': (work / 'active-style.md', 'active-style.md'),
+    'bible_hash': (Path(bible_path), 'character-bible.md'),
+}
+hashes = {}
+for field, (source, dest) in bundle.items():
+    if not source.is_file() or source.stat().st_size == 0:
+        print(f'freeze FAIL: thiếu {source}', file=sys.stderr)
+        raise SystemExit(2)
+    shutil.copy2(source, snapshot / dest)
+    hashes[field] = hashlib.sha256((snapshot / dest).read_bytes()).hexdigest()
+history_hash = ''
+history_source = Path(history_path)
+if history_source.is_file() and history_source.stat().st_size > 0:
+    shutil.copy2(history_source, snapshot / 'visual-history.md')
+    history_hash = hashlib.sha256(
+        (snapshot / 'visual-history.md').read_bytes()
+    ).hexdigest()
+ranges, violations = wm.split_plan(work / 'scene-plan.md', int(workers_cap))
+if violations:
+    print('freeze FAIL: ' + '; '.join(violations), file=sys.stderr)
+    raise SystemExit(2)
+base = Path(workers_base)
+for entry in ranges:
+    worker_dir = base / entry['worker_id']
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        'schema': 1,
+        'worker_id': entry['worker_id'],
+        'scene_ids': entry['scene_ids'],
+        **hashes,
+        'history_hash': history_hash,
+        'snapshot_dir': str(snapshot),
+        'work_dir': str(worker_dir),
+        'video_enabled': video_flag == '1',
+    }
+    path = Path(driver_state) / f"manifest-{entry['worker_id']}.json"
+    path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    print(path)
+PY
+      )
+      [ ${#worker_manifests[@]} -gt 0 ] \
+        || echo "   ⚠ $tag — freeze snapshot FAIL, fallback serial (log: $driver_state)"
+    else
+      echo "   ⚠ $tag — head --plan-only FAIL (exit $head_status, log: $driver_state/head-session.log), fallback serial"
+    fi
+
+    join_ok=0
+    if [ ${#worker_manifests[@]} -gt 0 ]; then
+      # Fan out: one isolated agy session per manifest (own workdir, token,
+      # direct-redirect log — no tee), all sharing the read-only snapshot.
+      worker_pids=()
+      for m in "${worker_manifests[@]}"; do
+        wtoken=$(python3 -c 'import secrets; print(secrets.token_hex(12))') \
+          || die "$tag — không tạo được worker batch token."
+        wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
+        agy_harness "$cmd --worker-manifest '$m' --batch-token '$wtoken'" \
+          "$wdir" "$wtoken" worker "$m" "$driver_state/snapshot" \
+          > "$driver_state/$(basename "$m" .json).log" 2>&1 &
+        worker_pids+=("$!")
+      done
+      worker_exits=()
+      for pid in "${worker_pids[@]}"; do
+        wait "$pid"
+        worker_exits+=("$?")
+      done
+      # Join: ownership fence + worker-run legit gate per worker. A failed
+      # range gets ONE bounded retry — same immutable manifest (STEP 6 cache
+      # resume makes the respawn idempotent), fresh token.
+      join_ok=1
+      retry_manifests=()
+      for i in "${!worker_manifests[@]}"; do
+        m="${worker_manifests[$i]}"
+        wlog="$driver_state/$(basename "$m" .json)"
+        wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
+        if [ "${worker_exits[$i]}" -ne 0 ]; then
+          echo "   ⚠ $tag — worker $(basename "$m" .json) exit ${worker_exits[$i]} (log: $wlog.log)"
+        fi
+        if python3 "$SKILL_DIR/scripts/worker_manifest.py" --verify-run "$m" > "$wlog.verify.json" \
+            && python3 "$SKILL_DIR/scripts/check_run_legit.py" \
+              --work "$wdir" --worker-manifest "$m" > "$wlog.legit.txt"; then
+          continue
+        fi
+        join_ok=0
+        retry_manifests+=("$m")
+      done
+      if [ "$join_ok" != "1" ] && [ ${#retry_manifests[@]} -gt 0 ]; then
+        echo "   ⚠ $tag — bounded targeted retry: ${#retry_manifests[@]} worker range(s)"
+        retry_pids=()
+        for m in "${retry_manifests[@]}"; do
+          wtoken=$(python3 -c 'import secrets; print(secrets.token_hex(12))') \
+            || die "$tag — không tạo được retry worker batch token."
+          wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
+          agy_harness "$cmd --worker-manifest '$m' --batch-token '$wtoken'" \
+            "$wdir" "$wtoken" worker "$m" "$driver_state/snapshot" \
+            > "$driver_state/$(basename "$m" .json)-retry.log" 2>&1 &
+          retry_pids+=("$!")
+        done
+        join_ok=1
+        for i in "${!retry_manifests[@]}"; do
+          m="${retry_manifests[$i]}"
+          wait "${retry_pids[$i]}"
+          wexit=$?
+          wlog="$driver_state/$(basename "$m" .json)"
+          wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
+          if [ "$wexit" -ne 0 ] \
+              || ! python3 "$SKILL_DIR/scripts/worker_manifest.py" --verify-run "$m" > "$wlog.verify-retry.json" \
+              || ! python3 "$SKILL_DIR/scripts/check_run_legit.py" \
+                    --work "$wdir" --worker-manifest "$m" > "$wlog.legit-retry.txt"; then
+            join_ok=0
+            echo "   ⚠ $tag — retry worker $(basename "$m" .json) vẫn FAIL"
+          fi
+        done
+      fi
+    fi
+
+    if [ "$join_ok" = "1" ] && [ ${#worker_manifests[@]} -gt 0 ]; then
+      merge_ok=1
+      for m in "${worker_manifests[@]}"; do
+        wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
+        cp "$wdir"/scene-*.md "$local_dir/.work/" 2>/dev/null || merge_ok=0
+      done
+      if [ "$merge_ok" = "1" ] && python3 - "$SKILL_DIR/scripts" \
+          "$local_dir/.work/scene-plan.md" "$local_dir/.work" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from validate_artifacts import _scene_filename, _scene_plan_details
+scene_ids, _, plan_errors, _, _ = _scene_plan_details(Path(sys.argv[2]))
+if plan_errors:
+    raise SystemExit(2)
+work = Path(sys.argv[3])
+missing = [sid for sid in scene_ids if not (work / _scene_filename(sid)).is_file()]
+if missing:
+    print(f'worker join thiếu {len(missing)} scene: {missing[:10]}', file=sys.stderr)
+    raise SystemExit(2)
+PY
+      then
+        parallel_ok=1
+        echo "✔ $tag — parallel pass-2 join OK: ${#worker_manifests[@]} workers, $((SECONDS - fanout_started))s (tail session chạy music/assemble/gates)"
+      else
+        echo "   ⚠ $tag — worker join: thiếu coverage sau merge, fallback serial"
+      fi
+    fi
+    [ "$parallel_ok" = "1" ] \
+      || echo "   ⚠ $tag — parallel pass-2 không hoàn tất; vòng lặp serial full-generate (scene hợp lệ đã có được cache-skip tái sử dụng)"
+  fi
+
   schedule_force_redo() {
     if [ "$full_attempts" -lt "$max_full_attempts" ]; then
       force_redo_next=1
@@ -416,132 +786,11 @@ for f in "${INPUTS[@]}"; do
     # so a clean retry never gets stale-poisoned by a prior attempt's bypass.
     python3 "$SKILL_DIR/scripts/check_run_legit.py" --purge-skill-dir "$SKILL_DIR" || true
     # Agy's global workflow requires plan acknowledgement for large edits. Print
-    # mode cannot receive that second turn, so use one interactive conversation:
-    # wait for the explicit approval marker, send the operator's approval, then
-    # wait for a completion/halt marker. The external gates below remain authoritative.
-    python3 - "$run_cmd" "$MODEL" "$SKILL_DIR" "$local_dir" "$BIBLES_DIR" "$batch_token" <<'PY'
-import os
-import re
-import sys
-import time
-from pathlib import Path
-
-import pexpect
-
-run_cmd, model, skill_dir, local_dir, bibles_dir, batch_token = sys.argv[1:]
-args = [
-    '-i', run_cmd,
-    '--model', model,
-    '--mode', 'accept-edits',
-    '--dangerously-skip-permissions',
-    '--add-dir', skill_dir,
-    '--add-dir', local_dir,
-]
-if os.path.isdir(bibles_dir):
-    args.extend(['--add-dir', bibles_dir])
-
-attempt_started = time.time()
-child = pexpect.spawn(
-    'agy', args, cwd=skill_dir, encoding='utf-8', codec_errors='replace',
-    timeout=90,
-)
-child.delaybeforesend = 0.1
-ansi = r'(?:\x1b\[[0-?]*[ -/]*[@-~])*'
-line_start = r'(?m)(?:^|\r?\n)' + ansi + r'[ \t]*'
-line_end = r'[ \t]*' + ansi + r'(?=\r?$)'
-patterns = [
-    re.compile(line_start + r'BATCH_APPROVAL_REQUIRED:' + re.escape(batch_token) + line_end),
-    re.compile(
-        r'(?:Bạn có đồng ý với kế hoạch(?: này| trên)?|Xin(?: bạn| vui lòng)? xác nhận kế hoạch(?: này| trên)?|Xác nhận để bắt đầu tiến hành)',
-        re.IGNORECASE,
-    ),
-    re.compile(
-        line_start + r"How's the CLI experience so far\? Help us improve:" + line_end,
-        re.IGNORECASE,
-    ),
-    re.compile(line_start + r'BATCH_RUN_COMPLETE:' + re.escape(batch_token) + line_end),
-    re.compile(line_start + r'BATCH_RUN_HALTED:' + re.escape(batch_token) + line_end),
-    pexpect.EOF,
-    pexpect.TIMEOUT,
-]
-approvals = 0
-max_auto_approvals = 6
-completion_nudges = 0
-deadline = time.monotonic() + 4 * 60 * 60
-outcome = None
-try:
-    while outcome is None:
-        matched = child.expect(patterns)
-        if matched in (0, 1):
-            approvals += 1
-            if approvals > max_auto_approvals:
-                raise RuntimeError('Agy requested approval more than 6 times')
-            print(
-                f'   agy: plan received — auto-approved '
-                f'({approvals}/{max_auto_approvals})',
-                flush=True,
-            )
-            child.sendline(
-                'Tôi xác nhận kế hoạch vừa nêu. Hãy thực thi ngay toàn bộ batch '
-                'đã được phê duyệt, không hỏi lại.'
-            )
-        elif matched == 2:
-            print('   agy: CLI feedback prompt — skipped', flush=True)
-            child.sendline('0')
-        elif matched == 3:
-            print('   agy: reported workflow complete', flush=True)
-            outcome = 0
-        elif matched == 4:
-            print('   agy: reported workflow halted', flush=True)
-            outcome = 2
-        elif matched == 5:
-            tail = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', child.before or '')[-800:]
-            print(f'   agy: exited before batch marker: {tail}', file=sys.stderr)
-            outcome = 1
-        else:
-            if time.monotonic() >= deadline:
-                raise TimeoutError('Agy interactive run exceeded 4 hours')
-            local_path = Path(local_dir)
-            local_stem = local_path / local_path.name
-            expected_outputs = [
-                Path(f'{local_stem}_qa.txt'),
-                Path(f'{local_stem}_image_prompts.txt'),
-                Path(f'{local_stem}_music_prompts.txt'),
-                local_path / '.work' / 'scene-plan.md',
-            ]
-            outputs_ready = all(
-                path.is_file() and path.stat().st_size > 0
-                and path.stat().st_mtime >= attempt_started
-                for path in expected_outputs
-            )
-            completion_hint = local_path / '.vp-completion.json'
-            if not completion_hint.is_file():
-                completion_hint = local_path / '.vp-complete.json'
-            post_gate_hint = local_path / '.work' / 'completion_manifest.json'
-            if post_gate_hint.is_file():
-                print('   agy: post-gate manifest found — continuing to external gates', flush=True)
-                outcome = 0
-                continue
-            if (completion_hint.is_file() or outputs_ready) and completion_nudges == 0:
-                completion_nudges = 1
-                print(
-                    '   agy: assembled outputs found — requesting final marker',
-                    flush=True,
-                )
-                child.sendline(
-                    'Nếu workflow đã hoàn tất, hãy trả marker kết thúc nonce-scoped '
-                    'đã được yêu cầu trong instruction. Nếu chưa, hoàn tất gate trước.'
-                )
-finally:
-    if child.isalive():
-        child.sendcontrol('d')
-        try:
-            child.expect(pexpect.EOF, timeout=10)
-        except (pexpect.TIMEOUT, pexpect.EOF):
-            child.close(force=True)
-
-raise SystemExit(outcome)
-PY
+    # mode cannot receive that second turn, so agy_harness drives one interactive
+    # conversation: wait for the explicit approval marker, send the operator's
+    # approval, then wait for a completion/halt marker. The external gates below
+    # remain authoritative. mode=full keeps serial behavior unchanged.
+    agy_harness "$run_cmd" "$local_dir" "$batch_token" full
     agy_status=$?
     if [ "$agy_status" -eq 2 ]; then
       die "$tag — Agy báo HALT; giữ local artifacts tại $local_dir, không auto-retry/force-redo."
@@ -876,7 +1125,7 @@ PY
       "$video_output" "$music_cache/music-plan.md" "$SKILL_DIR" "$SERIES" \
       "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}" \
     || die "$tag — output đã copy nhưng không ghi được completion manifest."
-  rm -rf "$local_dir"   # local scratch no longer needed; gdrive has the outputs
+  rm -rf "$local_dir" "$workers_base"   # local scratch no longer needed; gdrive has the outputs
   echo "✅ $tag — xong (chạy local, đã copy output về gdrive)"
 done
 

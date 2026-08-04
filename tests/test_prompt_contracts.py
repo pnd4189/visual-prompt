@@ -23,17 +23,6 @@ import calc_scene_count  # type: ignore  # noqa: E402
 import validate_artifacts as artifacts  # type: ignore  # noqa: E402
 import validate_scene_plan as scene_plan_validator  # type: ignore  # noqa: E402
 
-try:
-    import pytest  # type: ignore  # noqa: E402
-
-    def xfail_phase(phase: str):
-        return pytest.mark.xfail(
-            strict=True, reason=f'{phase} worker contract not implemented yet',
-        )
-except ImportError:  # bare `python -m unittest` fallback: xfail tests run red
-    def xfail_phase(phase: str):
-        return lambda target: target
-
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -1049,6 +1038,10 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertIn('DỪNG ngay sau scene validation', command)
         self.assertIn('RULE 0 giữ nguyên TRONG worker', command)
         self.assertIn('worker_manifest = <path | (none — full pipeline)>', command)
+        self.assertIn('PLAN-ONLY SUBMODE (head của bounded-parallel run', command)
+        self.assertIn('--plan-only', command)
+        self.assertIn('plan_only = false', command)
+        self.assertIn('plan_only  = <true | false>', command)
         self.assertIn('Batch worker submode', codex)
         self.assertIn('Batch worker submode', claude)
         self.assertIn('Adapters never start workers', codex)
@@ -1260,14 +1253,12 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertEqual(0, run.returncode, run.stderr)
         self.assertNotIn('parallel pass-2', run.stdout)
 
-    @xfail_phase('phase-03')
     def test_vp_workers_opt_in_announces_fan_out(self):
         run = self._dryrun_output({'VP_WORKERS': '3'})
 
         self.assertEqual(0, run.returncode, run.stderr)
         self.assertIn('parallel pass-2: VP_WORKERS=3', run.stdout)
 
-    @xfail_phase('phase-03')
     def test_runner_contract_locks_join_before_marker(self):
         runner = (ROOT / 'scripts' / 'run-folder.sh').read_text(encoding='utf-8')
 

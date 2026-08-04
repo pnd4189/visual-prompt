@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Implement Coordinator Fan-out and Join"
-status: pending
+status: completed
 effort: "M"
 ---
 
@@ -40,17 +40,40 @@ Teach the coordinator to freeze Pass-2 inputs, fan out the worker ranges, and jo
 5. Preserve the current retry/fail-closed behavior for timeout, crash, and partial completion.
 
 ## Success Criteria
-- [ ] Completion marker appears only after join + final gates.
-- [ ] No worker can publish history or marker.
-- [ ] Partial completion and crash cases fail closed without leaking to shared state.
+- [x] Completion marker appears only after join + final gates.
+- [x] No worker can publish history or marker.
+- [x] Partial completion and crash cases fail closed without leaking to shared state.
 
 ## Todo List
-- [ ] Add coordinator snapshot freeze.
-- [ ] Parameterize the pexpect harness per worker (batch_token, workdir, markers, direct-redirect logs).
-- [ ] Add fan-out range split and join.
-- [ ] Add coverage/duplicate checks.
-- [ ] Keep all post-join gates coordinator-only.
-- [ ] Verify serial fallback remains unchanged.
+- [x] Add coordinator snapshot freeze.
+- [x] Parameterize the pexpect harness per worker (batch_token, workdir, markers, direct-redirect logs).
+- [x] Add fan-out range split and join.
+- [x] Add coverage/duplicate checks.
+- [x] Keep all post-join gates coordinator-only.
+- [x] Verify serial fallback remains unchanged.
+
+## Completion Notes (2026-08-04)
+- `agy_harness()` extracted from the inline pexpect heredoc — byte-identical
+  behavior for `mode=full` (serial); `plan`/`worker` modes vary only the
+  outputs-ready hint set, deadline (4h/3h/2h), and an extra read-only dir.
+  All locked contract strings preserved (tests green).
+- Coordinator flow when `VP_WORKERS>=2`: head session `--plan-only` (TOML
+  PLAN-ONLY SUBMODE) → runner-side plan gate (validate_scene_plan) → freeze
+  snapshot (chapters_qa.json + scene-plan.md + active-style.md + bible +
+  optional visual-history, sha256) → `worker_manifest.py --split` ranges →
+  per-worker manifests → parallel fan-out (own workdir/token/log, no tee) →
+  join (`--verify-run` + `check_run_legit --worker-manifest` per worker) →
+  ONE bounded retry per failed range (same immutable manifest, fresh token;
+  STEP 6 cache resume makes respawn idempotent) → merge + full coverage check
+  → tail = the existing serial loop (cached Pass-2 skip, then music/assemble/
+  gates; completion manifest + history publish stay post-gate, coordinator-only).
+- Fail-closed fallback: any head/freeze/fan-out/join failure drops into the
+  unchanged serial full generation in the same loop; valid partial scenes are
+  reused via cache keys, never leaked unverified.
+- DRYRUN announces `parallel pass-2: VP_WORKERS=<N>` (locked by test); serial
+  path has no worker code path when the env is absent (parse + skip only).
+- Suite: 53 passed, 0 xfailed. Standalone smoke of freeze/verify/legit/coverage/
+  negative-fence chain run outside the test suite — all green.
 
 ## Risk Assessment
 - High: orphaned or hung workers. Mitigation: hard per-worker timeout plus cleanup on join failure.
