@@ -49,3 +49,11 @@ The complete user argument string is available after `/prompts:visual-prompt` or
 
 If a bounded repair cannot pass a gate, preserve the scratch directory and report
 the exact file and scene IDs. Do not silently substitute an incomplete result.
+
+## Batch worker submode
+
+Direct invocations stay parent-only and serial. The batch driver may opt into a
+runner-level worker submode (`--worker-manifest <path>` in
+`commands/visual-prompt.toml`): isolated Pass-2 sessions, each owning a disjoint
+scene-ID range, exiting after scene validation. Adapters never start workers —
+only `scripts/run-folder.sh` does, and RULE 0 still binds every worker session.

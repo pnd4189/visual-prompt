@@ -117,6 +117,63 @@ một dòng `BATCH_RUN_HALTED:<batch_token>`. Không in marker hoàn tất/halt 
 
 ---
 
+## WORKER SUBMODE (Pass-2 only, batch-runner-invoked)
+
+Nếu args có `--worker-manifest <path>`, đây là **worker submode**: một isolated
+Pass-2 scene-expansion worker do batch runner (`scripts/run-folder.sh`) spawn ở
+runner level. Direct user invocation KHÔNG BAO GIỜ dùng submode này; parent-only
+generation cho lệnh trực tiếp giữ nguyên.
+
+Worker manifest là JSON bất biến do coordinator ghi TRƯỚC khi spawn; worker không
+được sửa nó. Schema (đúng đủ, deterministic script `scripts/worker_manifest.py`
+validate — model không tự validate hash bằng mắt):
+
+```
+{
+  "schema": 1,
+  "worker_id": "w1",
+  "scene_ids": ["041", "042", "..."],
+  "qa_hash": "<sha256 hex>",
+  "bible_hash": "<sha256 hex>",
+  "style_hash": "<sha256 hex>",
+  "plan_hash": "<sha256 hex>",
+  "history_hash": "<sha256 hex | empty string nếu chưa có history>",
+  "snapshot_dir": "<read-only frozen bundle: chapters_qa.json, character-bible.md, active-style.md, scene-plan.md, visual-history snapshot>",
+  "work_dir": "<worker-private workdir — nơi DUY NHẤT worker được ghi>",
+  "video_enabled": false
+}
+```
+
+Worker contract (fail-closed):
+
+1. Việc đầu tiên: chạy
+   `python3 scripts/worker_manifest.py --validate <manifest>`. Exit khác 0 (schema
+   sai, hash stale so với frozen bundle, scene_id sai dạng) → kết thúc bằng
+   `BATCH_RUN_HALTED:<batch_token>`, KHÔNG sinh gì thêm.
+2. Bỏ qua STEP 1–5 (load/continuity/QA/bible/genre/style/scene count/scene plan):
+   mọi input đã đóng băng trong `snapshot_dir`. Đọc scene-plan, chapters_qa.json,
+   bible, style, visual-history snapshot từ `snapshot_dir` (read-only).
+3. Chạy đúng STEP 6 (Pass 2) CHỈ cho các scene_id trong manifest, giữ nguyên
+   parent-only micro-batch ≤3, cache-key công thức, source-anchor grounding.
+   RULE 0 giữ nguyên TRONG worker: chính worker model tự viết từng
+   `scene-NNN.md`; không spawn/delegate thêm tầng nào nữa. Ủy quyền chỉ tồn tại
+   ở runner level (runner spawn worker sessions), không phải bên trong worker.
+4. Ghi file CHỈ vào `work_dir`: đúng các `.work`-style `scene-<NNN>.md` có trong
+   `scene_ids`. KHÔNG ghi bất kỳ file nào khác (không scratch, không script,
+   không copy snapshot vào work_dir).
+5. Sau Pass-2: chạy artifact gate
+   `python3 scripts/validate_artifacts.py --check scenes --work-dir <work_dir> --scene-plan <snapshot_dir>/scene-plan.md`
+   rồi `python3 scripts/worker_manifest.py --verify-run <manifest>` (ownership
+   fence: work_dir chứa đúng và đủ scene files được giao, không runtime code).
+6. DỪNG ngay sau scene validation. KHÔNG chạy STEP 6.5 (music), STEP 7 (assemble/
+   depth/similarity/history), STEP 8 (self-audit); KHÔNG ghi completion marker,
+   KHÔNG publish visual-history, KHÔNG copy output đi đâu. Join + mọi gate cuối
+   là việc của coordinator.
+7. Hoàn tất → kết thúc bằng đúng một dòng `BATCH_RUN_COMPLETE:<batch_token>`.
+   Lỗi thật (anchor không khớp, gate FAIL, thiếu file) → `BATCH_RUN_HALTED:<batch_token>`.
+
+---
+
 ## STEP 0 — FLAG PARSE (mandatory, run first)
 
 Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví dụ
@@ -125,7 +182,7 @@ Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví
 Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false`,
 `videos_override = null`, `music_override = null`, `force_redo = false`,
 `similarity_feedback_path = null`, `batch_token = null`, `auto_repair = false`,
-`epic = false`.
+`worker_manifest_path = null`, `epic = false`.
 
 1. `--series ([a-z0-9-]+)`               → series_name (kebab-case, optional)
 2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
@@ -139,11 +196,12 @@ Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false
 10. `--similarity-feedback <path>`       → similarity_feedback_path (batch-only, optional)
 11. `--batch-token <hex>`                → batch_token (batch-only approval nonce)
 12. `--auto-repair`                      → auto_repair = true (unattended batch execution)
-13. `--epic`                             → epic = true (flag; scale only, never new facts)
-14. `--faithful`                         → legacy alias; grounded mode remains enabled
-15. `--no-video`                         → video_enabled = false (takes precedence)
-16. `--no-music`                         → music_enabled = false (takes precedence)
-17. Sau khi strip flags → còn lại là input_path (positional, required).
+13. `--worker-manifest <path>`           → worker_manifest_path (batch worker submode, Pass-2 only)
+14. `--epic`                             → epic = true (flag; scale only, never new facts)
+15. `--faithful`                         → legacy alias; grounded mode remains enabled
+16. `--no-video`                         → video_enabled = false (takes precedence)
+17. `--no-music`                         → music_enabled = false (takes precedence)
+18. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Natural-language media requests after the command are also explicit opt-ins:
 phrases such as “tạo video prompt”, “kèm video”, “tạo music prompt”, or “kèm nhạc”
@@ -160,8 +218,13 @@ Validate:
   chỉ định rồi trả kết quả runtime.
 - `batch_token` phải match đúng `[a-f0-9]{24}`. Khi `auto_repair = true`, token là
   bắt buộc để controller chỉ nhận marker thuộc đúng invocation hiện tại.
+- Nếu `worker_manifest_path` được truyền: path phải tồn tại, parse được JSON, và
+  `"schema": 1`. Worker submode loại trừ `--video`, `--videos`, `--music`,
+  `--style`, `--series`, `--genre`, `--images`, `--force-redo`,
+  `--similarity-feedback`, `--epic` — mọi tham số đã nằm trong manifest; gặp flag
+  bị loại trừ → HALT với VN error. Video bật/tắt theo `video_enabled` của manifest.
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --epic, --faithful, --no-video, --no-music`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --worker-manifest PATH, --epic, --faithful, --no-video, --no-music`
 
 Echo lại cho user:
 ```
@@ -177,6 +240,7 @@ Echo lại cho user:
   similarity_feedback = <path | (none)>
   batch_token = <hex | (none)>
   auto_repair = <true | false>
+  worker_manifest = <path | (none — full pipeline)>
   epic       = <true | false>
   faithful   = <true | false>
   no_video   = <true | false>

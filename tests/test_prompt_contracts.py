@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,21 @@ import assemble_outputs  # type: ignore  # noqa: E402
 import calc_scene_count  # type: ignore  # noqa: E402
 import validate_artifacts as artifacts  # type: ignore  # noqa: E402
 import validate_scene_plan as scene_plan_validator  # type: ignore  # noqa: E402
+
+try:
+    import pytest  # type: ignore  # noqa: E402
+
+    def xfail_phase(phase: str):
+        return pytest.mark.xfail(
+            strict=True, reason=f'{phase} worker contract not implemented yet',
+        )
+except ImportError:  # bare `python -m unittest` fallback: xfail tests run red
+    def xfail_phase(phase: str):
+        return lambda target: target
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def music_paragraph(name: str) -> str:
@@ -43,6 +59,65 @@ def music_body(name: str) -> str:
         'soft percussion, underscore, spacious, narration, instrumental'
     )
     return f'{music_paragraph(name)}\n\nTags: {tags}'
+
+
+def scene_file_body(scene_id: str) -> str:
+    return (
+        f'---\nscene_id: {scene_id}\ncache_key: 0000000000000000\n'
+        f'source_anchor: Cảnh thử nghiệm cho scene {scene_id}\n'
+        'has_video: false\n---\n'
+        '## Image Prompt\nCamera: wide frame\n'
+    )
+
+
+def write_worker_fixture(directory: Path, scene_ids=('041', '042'), tamper=None):
+    """Frozen-snapshot worker manifest bundle per the WORKER SUBMODE contract."""
+    snapshot = directory / 'snapshot'
+    snapshot.mkdir(exist_ok=True)
+    work = directory / 'worker-w1'
+    work.mkdir(exist_ok=True)
+    bundle = {
+        'chapters_qa.json': '[{"id": 1, "text": "Chương 1. Test"}]',
+        'character-bible.md': '| name | age |\n|---|---|\n| Lan | 22 |\n',
+        'active-style.md': '### donghua-xianxia — test style\n',
+        'scene-plan.md': 'Genre: tien-hiep · Images: 2 · Videos: 0 · Chapters: 1\n',
+    }
+    for name, content in bundle.items():
+        (snapshot / name).write_text(content, encoding='utf-8')
+    manifest = {
+        'schema': 1,
+        'worker_id': 'w1',
+        'scene_ids': list(scene_ids),
+        'qa_hash': sha256_file(snapshot / 'chapters_qa.json'),
+        'bible_hash': sha256_file(snapshot / 'character-bible.md'),
+        'style_hash': sha256_file(snapshot / 'active-style.md'),
+        'plan_hash': sha256_file(snapshot / 'scene-plan.md'),
+        'history_hash': '',
+        'snapshot_dir': str(snapshot),
+        'work_dir': str(work),
+        'video_enabled': False,
+    }
+    if tamper == 'stale_plan':
+        (snapshot / 'scene-plan.md').write_text('TAMPERED\n', encoding='utf-8')
+    manifest_path = directory / 'worker-manifest.json'
+    manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+    return manifest_path, work
+
+
+def image_block(scene_id: str, seed: str) -> str:
+    return (
+        f'--- SCENE {scene_id} ---\n'
+        f'Camera: locked tripod framing around {seed}\n'
+        f'Story DNA: identical story beat about {seed} reused verbatim here\n'
+        f'Setting: identical courtyard of {seed} reused verbatim in this block\n'
+        'Composition: centered foreground subject against a plain background\n'
+        f'Subject: {seed}\n'
+        f'Action / Energy: identical slow walk by {seed} reused verbatim today\n'
+        'Style: painted illustration\n'
+        f'Lighting / Color: identical dusk palette over {seed} reused verbatim\n'
+        f'Atmosphere: identical hush settling on {seed} reused verbatim tonight\n'
+        'Negative: no logos\n'
+    )
 
 
 class IdentityAnchorTests(unittest.TestCase):
@@ -935,6 +1010,376 @@ class CrossCliContractTests(unittest.TestCase):
         self.assertIn('STRUCTURE ONLY, NEVER A CONTENT DEFAULT', template)
         self.assertNotIn('estimate if not stated', bible_extractor)
         self.assertIn('unknown values are exactly `not stated`', bible_extractor)
+
+
+class WorkerProtocolContractTests(unittest.TestCase):
+    """Locks the bounded-parallel worker contract (plan 260729-1645).
+
+    Phase 1 locks: TOML/adapters document the submode NOW (passing tests);
+    deterministic worker tooling (scripts/worker_manifest.py, worker-run legit
+    semantics, runner VP_WORKERS fan-out) is pinned as strict xfail until the
+    implementing phase lands and the marker must be removed.
+    """
+
+    def test_worker_submode_contract_is_documented(self):
+        command = (ROOT / 'commands' / 'visual-prompt.toml').read_text(encoding='utf-8')
+        codex = (
+            ROOT / 'adapters' / 'codex' / 'visual-prompt' / 'SKILL.md'
+        ).read_text(encoding='utf-8')
+        claude = (
+            ROOT / 'adapters' / 'claude-code' / 'visual-prompt' / 'SKILL.md'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('WORKER SUBMODE (Pass-2 only, batch-runner-invoked)', command)
+        self.assertIn('--worker-manifest <path>', command)
+        self.assertIn('worker_manifest_path = null', command)
+        self.assertIn('"schema": 1', command)
+        self.assertIn('"worker_id": "w1"', command)
+        self.assertIn('"scene_ids":', command)
+        self.assertIn('"qa_hash":', command)
+        self.assertIn('"bible_hash":', command)
+        self.assertIn('"style_hash":', command)
+        self.assertIn('"plan_hash":', command)
+        self.assertIn('"history_hash":', command)
+        self.assertIn('"snapshot_dir":', command)
+        self.assertIn('"work_dir":', command)
+        self.assertIn('"video_enabled": false', command)
+        self.assertIn('scripts/worker_manifest.py --validate <manifest>', command)
+        self.assertIn('scripts/worker_manifest.py --verify-run <manifest>', command)
+        self.assertIn('DỪNG ngay sau scene validation', command)
+        self.assertIn('RULE 0 giữ nguyên TRONG worker', command)
+        self.assertIn('worker_manifest = <path | (none — full pipeline)>', command)
+        self.assertIn('Batch worker submode', codex)
+        self.assertIn('Batch worker submode', claude)
+        self.assertIn('Adapters never start workers', codex)
+        self.assertIn('Adapters never start workers', claude)
+        # Direct generation stays parent-only; worker mode never relaxes RULE 0.
+        self.assertIn('at most three', codex)
+        self.assertIn('at most three', claude)
+
+    @xfail_phase('phase-02')
+    def test_worker_manifest_validation_fails_closed(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            valid, _ = write_worker_fixture(directory)
+            stale_dir = directory / 'stale'
+            stale_dir.mkdir()
+            stale, _ = write_worker_fixture(stale_dir, tamper='stale_plan')
+            bad_id_dir = directory / 'bad-id'
+            bad_id_dir.mkdir()
+            bad_id, _ = write_worker_fixture(bad_id_dir, scene_ids=('041', 'not-an-id'))
+            bad_schema = directory / 'bad-schema.json'
+            bad_schema.write_text('{"schema": 99}', encoding='utf-8')
+
+            results = {}
+            for label, path in (('valid', valid), ('stale', stale),
+                                ('bad_id', bad_id), ('bad_schema', bad_schema)):
+                run = subprocess.run(
+                    [sys.executable, str(SCRIPTS / 'worker_manifest.py'),
+                     '--validate', str(path)],
+                    cwd=ROOT, capture_output=True, text=True, check=False,
+                )
+                results[label] = run.returncode
+
+        self.assertEqual(0, results['valid'])
+        self.assertEqual(2, results['stale'])
+        self.assertEqual(2, results['bad_id'])
+        self.assertEqual(2, results['bad_schema'])
+
+    @xfail_phase('phase-02')
+    def test_worker_ownership_fence_fails_closed(self):
+        cases = {}
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+
+            def run_case(name, setup):
+                case_dir = directory / name
+                case_dir.mkdir()
+                manifest, work = write_worker_fixture(case_dir, scene_ids=('041', '042'))
+                setup(work)
+                run = subprocess.run(
+                    [sys.executable, str(SCRIPTS / 'worker_manifest.py'),
+                     '--verify-run', str(manifest)],
+                    cwd=ROOT, capture_output=True, text=True, check=False,
+                )
+                cases[name] = run.returncode
+
+            def exact(work):
+                (work / 'scene-041.md').write_text(scene_file_body('041'), encoding='utf-8')
+                (work / 'scene-042.md').write_text(scene_file_body('042'), encoding='utf-8')
+
+            def extra_scene(work):
+                exact(work)
+                (work / 'scene-043.md').write_text(scene_file_body('043'), encoding='utf-8')
+
+            def missing_scene(work):
+                (work / 'scene-041.md').write_text(scene_file_body('041'), encoding='utf-8')
+
+            def runtime_code(work):
+                exact(work)
+                (work / 'helper.py').write_text('x = 1\n', encoding='utf-8')
+
+            def outside_range(work):
+                exact(work)
+                (work / 'notes.txt').write_text('scratch\n', encoding='utf-8')
+
+            run_case('exact', exact)
+            run_case('extra_scene', extra_scene)
+            run_case('missing_scene', missing_scene)
+            run_case('runtime_code', runtime_code)
+            run_case('outside_range', outside_range)
+
+        self.assertEqual(0, cases['exact'])
+        self.assertEqual(2, cases['extra_scene'])
+        self.assertEqual(2, cases['missing_scene'])
+        self.assertEqual(2, cases['runtime_code'])
+        self.assertEqual(2, cases['outside_range'])
+
+    @xfail_phase('phase-02')
+    def test_worker_run_legit_semantics_scenes_only_workdir(self):
+        """--worker-manifest switches check_run_legit to scenes-only semantics,
+        mirroring the --no-video skip-rule: assembled outputs are legitimately
+        absent in a worker workdir; runtime-code and ownership checks stay."""
+        cases = {}
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+
+            def run_case(name, setup):
+                case_dir = directory / name
+                case_dir.mkdir()
+                manifest, work = write_worker_fixture(case_dir, scene_ids=('041', '042'))
+                setup(work)
+                run = subprocess.run(
+                    [sys.executable, str(SCRIPTS / 'check_run_legit.py'),
+                     '--work', str(work), '--worker-manifest', str(manifest)],
+                    cwd=ROOT, capture_output=True, text=True, check=False,
+                )
+                cases[name] = run.returncode
+
+            def valid(work):
+                (work / 'scene-041.md').write_text(scene_file_body('041'), encoding='utf-8')
+                (work / 'scene-042.md').write_text(scene_file_body('042'), encoding='utf-8')
+
+            def runtime_code(work):
+                valid(work)
+                (work / 'gen.py').write_text('x = 1\n', encoding='utf-8')
+
+            def extra_scene(work):
+                valid(work)
+                (work / 'scene-043.md').write_text(scene_file_body('043'), encoding='utf-8')
+
+            run_case('valid', valid)
+            run_case('runtime_code', runtime_code)
+            run_case('extra_scene', extra_scene)
+
+        self.assertEqual(0, cases['valid'])
+        self.assertEqual(2, cases['runtime_code'])
+        self.assertEqual(2, cases['extra_scene'])
+
+    def test_full_pipeline_legit_expectations_unchanged(self):
+        """Without --worker-manifest the gate keeps full-pipeline semantics:
+        a scenes-only workdir with no assembled output still fails."""
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            work = directory / '.work'
+            work.mkdir()
+            (work / 'scene-001.md').write_text(scene_file_body('001'), encoding='utf-8')
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / 'check_run_legit.py'),
+                 '--work', str(work)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn('thiếu/rỗng', result.stdout)
+
+    @xfail_phase('phase-02')
+    def test_canonical_scripts_include_worker_manifest(self):
+        import check_run_legit as legit  # type: ignore  # noqa: E402
+
+        self.assertIn('worker_manifest.py', legit.CANONICAL_SCRIPTS)
+
+    @xfail_phase('phase-03')
+    def test_split_ranges_disjoint_covering_capped(self):
+        plan = (
+            'Genre: tien-hiep · Images: 5 · Videos: 0 · Chapters: 1\n\n'
+            '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis | setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+            '|---|---|---|---|---|---|---|---|---|---|---|\n'
+        )
+        for index in range(1, 6):
+            plan += (
+                f'| {index:03d} | 1 | anchor {index} beat text | detail | Lan | '
+                f'synopsis {index} | setting {index} | camera {index} | action {index} '
+                f'| palette {index} | |\n'
+            )
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            directory = Path(temp_dir)
+            plan_path = directory / 'scene-plan.md'
+            plan_path.write_text(plan, encoding='utf-8')
+
+            def split(workers):
+                run = subprocess.run(
+                    [sys.executable, str(SCRIPTS / 'worker_manifest.py'),
+                     '--split', '--plan', str(plan_path), '--workers', str(workers)],
+                    cwd=ROOT, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(0, run.returncode, run.stderr)
+                return json.loads(run.stdout)
+
+            payload = split(3)
+            ranges = [entry['scene_ids'] for entry in payload['workers']]
+            flat = [scene_id for entry in ranges for scene_id in entry]
+            self.assertEqual(['001', '002', '003', '004', '005'], flat)
+            self.assertEqual(len(flat), len(set(flat)))
+            for entry in payload['workers']:
+                self.assertTrue(entry['worker_id'])
+
+            capped = split(999)
+            self.assertLessEqual(len(capped['workers']), 5)
+
+    @staticmethod
+    def _dryrun_output(env_extra):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            base = Path(temp_dir)
+            folder = base / 'novel'
+            folder.mkdir()
+            (folder / 'chapter-001.txt').write_text('Chương 1. Test\n', encoding='utf-8')
+            environment = os.environ.copy()
+            environment.update({
+                'HOME': str(base / 'home'),
+                'VP_DRYRUN': '1',
+                'VP_SERIES': 'safe-series',
+                'VP_LOCAL': str(base / 'local'),
+            })
+            environment.update(env_extra)
+            run = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=environment, capture_output=True, text=True, check=False,
+            )
+        return run
+
+    def test_serial_path_unchanged_without_vp_workers(self):
+        run = self._dryrun_output({})
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertNotIn('parallel pass-2', run.stdout)
+
+    @xfail_phase('phase-03')
+    def test_vp_workers_opt_in_announces_fan_out(self):
+        run = self._dryrun_output({'VP_WORKERS': '3'})
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertIn('parallel pass-2: VP_WORKERS=3', run.stdout)
+
+    @xfail_phase('phase-03')
+    def test_runner_contract_locks_join_before_marker(self):
+        runner = (ROOT / 'scripts' / 'run-folder.sh').read_text(encoding='utf-8')
+
+        self.assertIn('VP_WORKERS', runner)
+        self.assertIn('worker join', runner.casefold())
+        join_index = runner.casefold().index('worker join')
+        marker_writes = [
+            index for index in (
+                runner.find('completion_manifest write', join_index),
+            ) if index != -1
+        ]
+        self.assertTrue(marker_writes)
+
+
+def distinct_image_block(scene_id: str, index: int) -> str:
+    """Scene block whose compared fields are disjoint across indices, so a
+    controlled batch of them stays below the similarity soft band."""
+    cameras = [
+        'extreme close-up on', 'high crane descent over', 'slow dolly beside',
+        'handheld pursuit of', 'static wide locked on', 'low oblique under',
+        'overhead top-down of', 'rack focus away from', 'whip pan across',
+        'long lens compression of', 'mirror reflection framing', 'backlit silhouette of',
+    ]
+    nouns = [
+        'weathered knuckles', 'terraced paddies', 'paper lanterns',
+        'a running courier', 'an empty courtyard', 'a stone bridge',
+        'market alley stalls', 'a burning scroll', 'a river ferry',
+        'a mountain gate', 'a broken sword', 'a falling leaf',
+    ]
+    verbs = [
+        'tightens around', 'unfolds across', 'sways above',
+        'hurries through', 'settles over', 'arches above',
+        'crowds into', 'curls around', 'drifts beside',
+        'guards behind', 'rests against', 'spirals from',
+    ]
+    lights = [
+        'amber lamplight', 'cold moonrise', 'dusty noon glare',
+        'green lantern glow', 'pale fog diffusion', 'red dusk ember',
+        'blue hour haze', 'flickering torchlight', 'silver rain sheen',
+        'golden window spill', 'violet storm light', 'white frost gleam',
+    ]
+    moods = [
+        'held breath before a strike', 'quiet parting at dawn', 'bustling barter noise',
+        'lonely watchfulness', 'ceremonial stillness', 'weary relief',
+        'covert exchange', 'smoldering defiance', 'uneasy crossing',
+        'guarded reunion', 'solemn vigil', 'brief wonder',
+    ]
+    noun = nouns[index % 12]
+    return (
+        f'--- SCENE {scene_id} ---\n'
+        f'Camera: {cameras[index % 12]} {noun}\n'
+        f'Story DNA: {verbs[index % 12]} {noun} while {moods[index % 12]} lingers\n'
+        f'Setting: {noun} framed by {lights[(index + 5) % 12]} and distant hills\n'
+        f'Composition: foreground {noun}, midground {nouns[(index + 3) % 12]}, '
+        f'background {lights[(index + 7) % 12]}\n'
+        f'Subject: {noun}\n'
+        f'Action / Energy: {verbs[(index + 4) % 12]} {nouns[(index + 6) % 12]} '
+        f'during {moods[(index + 2) % 12]}\n'
+        'Style: painted illustration\n'
+        f'Lighting / Color: {lights[index % 12]} against muted stone tones\n'
+        f'Atmosphere: {moods[(index + 8) % 12]} under {lights[(index + 1) % 12]}\n'
+        'Negative: no logos\n'
+    )
+
+
+class BenchmarkSmokeTests(unittest.TestCase):
+    """Reusable serial-vs-parallel benchmark hook for Phase 4.
+
+    Builds a deterministic controlled local fixture, times the similarity gate
+    wall-clock, and proves the harness never weakens the gate (the violation
+    fixture must still exit 2 inside the harness).
+    """
+
+    @staticmethod
+    def _run_harness(image_text):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            image = Path(temp_dir) / 'image.txt'
+            image.write_text(image_text, encoding='utf-8')
+            started = time.monotonic()
+            run = subprocess.run(
+                [sys.executable, str(SCRIPTS / 'check_prompt_similarity.py'),
+                 '--image', str(image)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            wall = time.monotonic() - started
+        return {
+            'exit_code': run.returncode,
+            'wall_seconds': wall,
+            'payload': json.loads(run.stdout),
+        }
+
+    def test_benchmark_smoke_harness_keeps_gates_strict(self):
+        clean_text = ''.join(
+            distinct_image_block(f'{index:03d}', index - 1)
+            for index in range(1, 13)
+        )
+        clean = self._run_harness(clean_text)
+        self.assertEqual(0, clean['exit_code'], clean['payload'])
+        self.assertGreaterEqual(clean['payload']['stats']['image']['scene_count'], 12)
+        self.assertGreater(clean['wall_seconds'], 0.0)
+
+        copied = image_block('001', 'twin alpha') + image_block('002', 'twin alpha')
+        copied += image_block('003', 'twin beta') + image_block('004', 'twin beta')
+        violation = self._run_harness(copied)
+        self.assertEqual(2, violation['exit_code'])
+        self.assertTrue(violation['payload']['violations'])
+        self.assertTrue(violation['payload']['rewrite_scene_ids'])
 
 
 class BatchResumeTests(unittest.TestCase):

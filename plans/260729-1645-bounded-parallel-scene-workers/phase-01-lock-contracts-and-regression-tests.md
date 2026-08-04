@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Lock Contracts and Regression Tests"
-status: pending
+status: completed
 effort: "S"
 ---
 
@@ -45,18 +45,33 @@ Freeze the current serial baseline before touching orchestration. The repo still
 4. Run the focused test slice until the new contract fails for the right reasons.
 
 ## Success Criteria
-- [ ] Default serial path still passes unchanged when the opt-in mode is disabled.
-- [ ] New tests fail on collision, stale snapshot, crash/timeout, and marker-before-gates.
-- [ ] Worker-run legit semantics pinned: valid partial worker workdir passes; full-pipeline expectations unchanged.
-- [ ] Benchmark harness exists without weakening any gate.
+- [x] Default serial path still passes unchanged when the opt-in mode is disabled.
+- [x] New tests fail on collision, stale snapshot, crash/timeout, and marker-before-gates.
+- [x] Worker-run legit semantics pinned: valid partial worker workdir passes; full-pipeline expectations unchanged.
+- [x] Benchmark harness exists without weakening any gate.
 
 ## Todo List
-- [ ] Pin current serial path in tests.
-- [ ] Add collision and stale-snapshot assertions.
-- [ ] Add crash/timeout and partial-completion assertions.
-- [ ] Add marker-ordering assertion.
-- [ ] Pin worker-run legit semantics (partial worker workdir passes; full-pipeline expectations unchanged).
-- [ ] Capture baseline test output for later comparison.
+- [x] Pin current serial path in tests.
+- [x] Add collision and stale-snapshot assertions.
+- [x] Add crash/timeout and partial-completion assertions.
+- [x] Add marker-ordering assertion.
+- [x] Pin worker-run legit semantics (partial worker workdir passes; full-pipeline expectations unchanged).
+- [x] Capture baseline test output for later comparison.
+
+## Completion Notes (2026-08-04)
+- TOML: `WORKER SUBMODE (Pass-2 only, batch-runner-invoked)` section +
+  `--worker-manifest <path>` flag (flag 13, mutex vs media/style/series flags);
+  adapters (codex + claude-code) document the submode and that adapters never
+  start workers.
+- Tests: `WorkerProtocolContractTests` + `BenchmarkSmokeTests` in
+  `tests/test_prompt_contracts.py`. Suite = 44 passed + 7 xfailed(strict).
+- Deviation (recorded): the 7 worker-protocol tests are `xfail(strict=True)`
+  instead of plain-failing — same contract lock, suite stays green, and any
+  accidental early pass fails the suite until Phase 2/3 removes the markers.
+- xfail markers to remove: phase-02 (manifest validate/verify-run, worker-run
+  legit semantics, CANONICAL_SCRIPTS membership), phase-03 (split ranges,
+  VP_WORKERS fan-out announce, join-before-marker runner lock).
+- Baseline captured: `baseline-test-output.txt` in this phase directory.
 
 ## Risk Assessment
 - High: tests overfit log text instead of state. Mitigation: assert files, hashes, and exit codes first.
