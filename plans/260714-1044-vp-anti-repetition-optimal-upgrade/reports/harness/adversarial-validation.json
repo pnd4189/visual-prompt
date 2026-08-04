@@ -1,0 +1,20 @@
+{
+  "decision": "PASS",
+  "disprovenClaims": [],
+  "resolvedFindings": [
+    "Canonical music previously parsed as zero loops; the paragraph-plus-Tags parser and fail-closed validation now have regression coverage",
+    "Music plan metadata was previously trusted; current hashes, genre, region coverage, loop metadata, and counts are now bound",
+    "History previously raced; persistent OS advisory locking passed repeated concurrent stress",
+    "Batch skip previously trusted file existence; a cryptographic completion manifest now gates resume",
+    "Malformed scene rows previously reduced expected counts; declared totals and strict row parsing now reject the partial run"
+  ],
+  "unverifiedClaims": [
+    "Exact archived chap16 duplicate counts cannot be reproduced without the raw pre-dedup fixture",
+    "Real Agy rewrite convergence and cache reuse remain post-release operational checks"
+  ],
+  "missingProof": [
+    "Raw pre-dedup chap16 corpus",
+    "One authorized real Agy run and immediate rerun"
+  ],
+  "reachableRegressions": []
+}

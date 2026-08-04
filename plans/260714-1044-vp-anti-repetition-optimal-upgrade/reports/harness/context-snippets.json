@@ -1,0 +1,41 @@
+{
+  "skill": "ck:cook",
+  "mode": "code",
+  "task": "Implement visual-prompt 0.10.0 anti-repetition gates, visual history, music-plan persistence, and batch retry",
+  "acceptanceCriteria": [
+    "Similarity checks parse canonical image, video, and music outputs and enforce locked thresholds and exit codes",
+    "Visual history is deduplicated, capped, and populated from canonical series outputs",
+    "Scene plans reject duplicate synopses across the full plan",
+    "Music segmentation persists and matching reruns reuse valid region metadata",
+    "Pipeline and driver preserve gate order and choose force-redo only for missing or illegitimate output",
+    "Version, documentation, allowlist, syntax, and configuration remain synchronized"
+  ],
+  "touchpoints": [
+    "scripts/check_prompt_similarity.py",
+    "scripts/check_run_legit.py",
+    "scripts/validate_scene_plan.py",
+    "scripts/validate_artifacts.py",
+    "scripts/run-folder.sh",
+    "commands/visual-prompt.toml",
+    "prompts/scene-planner.md",
+    "prompts/music-prompt-builder.md",
+    "prompts/prompt-expander-image.md",
+    "SKILL.md",
+    "gemini-extension.json",
+    "HUONG-DAN-SU-DUNG.md"
+  ],
+  "publicContracts": [
+    "check_prompt_similarity.py flags, JSON fields, and exit codes 0/1/2",
+    "CANONICAL_SCRIPTS allowlist",
+    "visual-prompt TOML execution order and resume behavior",
+    "music output paragraph plus Tags format",
+    "per-series ~/.gemini/bibles/<series>-visual-history.md"
+  ],
+  "blastRadius": [
+    "Single-file Agy prompt generation",
+    "Batch retry and output shipping",
+    "Music cache validation and assembly",
+    "Cross-file series history"
+  ],
+  "scoutSummary": "The project is a Python and Bash I/O pipeline driven by an Agy TOML prompt contract; outputs are assembled from scene/music markdown artifacts and externally gated before shipping."
+}

@@ -1,0 +1,47 @@
+{
+  "commands": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v",
+      "status": "pass",
+      "exitCode": 0,
+      "timestamp": "2026-07-20T20:26:12+07:00",
+      "summary": "24/24 regression tests discovered and passed."
+    },
+    {
+      "command": "30x concurrent history update stress",
+      "status": "pass",
+      "exitCode": 0,
+      "timestamp": "2026-07-20T20:26:12+07:00",
+      "summary": "30/30 iterations completed without lost entries or write failures."
+    },
+    {
+      "command": "completion manifest mutation matrix",
+      "status": "pass",
+      "exitCode": 0,
+      "timestamp": "2026-07-20T20:26:12+07:00",
+      "summary": "Valid baseline skipped; input, output, cache, style, model, music count, video mode, and version mutations all reran."
+    },
+    {
+      "command": "python compile; bash -n; TOML/JSON parse; git diff --check",
+      "status": "pass",
+      "exitCode": 0,
+      "timestamp": "2026-07-20T20:26:12+07:00",
+      "summary": "Syntax, configuration, whitespace, version, and 3026/3072-byte TOML ceiling checks passed."
+    },
+    {
+      "command": "final adversarial BAD scene-row reproduction",
+      "status": "pass",
+      "exitCode": 0,
+      "timestamp": "2026-07-20T20:26:12+07:00",
+      "summary": "Plan and artifact/output validators rejected the partial 1-of-2 run; independent re-audit returned PASS."
+    }
+  ],
+  "beforeAfter": {
+    "before": "Similarity, resume, history, music cache, and scene count contracts had multiple fail-open paths.",
+    "after": "All reproduced fail-open paths are closed and the final independent audit passes."
+  },
+  "knownGaps": [
+    "Raw chap16 exact-count baseline unavailable",
+    "Real Agy/cache rerun not authorized or executed"
+  ]
+}

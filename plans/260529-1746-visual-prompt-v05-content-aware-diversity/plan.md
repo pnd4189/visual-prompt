@@ -6,7 +6,7 @@ description: >-
   enforcement gates (plan-level variation + assembly-level depth with
   auto-regenerate), add a gold-standard few-shot example to the image expander,
   and an optional --epic escape hatch.
-status: in-progress
+status: completed
 priority: P1
 branch: "main"
 tags:

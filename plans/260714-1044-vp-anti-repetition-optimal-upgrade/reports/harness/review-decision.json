@@ -1,0 +1,28 @@
+{
+  "decision": "PASS",
+  "score": 9.2,
+  "criticalCount": 0,
+  "contractStatus": "OK",
+  "acceptanceCoverage": [
+    "PASS — canonical image, video, and paragraph-plus-Tags music inputs fail closed and enforce similarity policy",
+    "PASS — scene plans bind strict rows to declared Images/Videos totals; malformed rows cannot lower expected counts",
+    "PASS — music plans bind current QA, genre, plan, style, region metadata, and requested count",
+    "PASS — completion manifests bind input, outputs, cache, version, model, series, style, music count, and video mode",
+    "PASS — history updates are locked, atomic/verified, deduplicated, and capped",
+    "PASS — version, allowlist, docs, TOML size, Python, Bash, JSON, and tests are synchronized"
+  ],
+  "regressionProof": [
+    "unittest discovery: 24/24 passed",
+    "history concurrency stress: 30/30 passed",
+    "completion manifest mutation matrix: baseline skip and 8/8 mutations rerun",
+    "final adversarial BAD-row reproduction: rejected by plan and artifact/output gates",
+    "independent final release audit: PASS"
+  ],
+  "warnings": [
+    "Archived raw chap16 fixture for exact 38/106/106 comparison is unavailable",
+    "Real Agy generation plus immediate cache-resume rerun was not executed",
+    "shellcheck is unavailable in the environment"
+  ],
+  "blockingReasons": [],
+  "criticals": []
+}

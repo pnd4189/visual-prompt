@@ -1,0 +1,15 @@
+{
+  "highRisk": true,
+  "reasons": [
+    "Release and production pipeline configuration changed",
+    "Batch retry, resume, and filesystem persistence changed",
+    "Public output parsing and cache contracts changed"
+  ],
+  "autoStopRequired": true,
+  "humanApproved": true,
+  "largeDiff": true,
+  "approvalEvidence": [
+    "User approved plan continuation",
+    "User explicitly requested fixing all remaining issues and continuing to completion"
+  ]
+}
