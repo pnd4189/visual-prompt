@@ -962,7 +962,9 @@ class CrossCliContractTests(unittest.TestCase):
         self.assertIn('không auto-retry/force-redo', runner)
         self.assertIn('available_models=$(agy models', runner)
         self.assertIn('grep -qF "$MODEL" <<< "$available_models"', runner)
-        self.assertIn("--music $MUSIC --auto-repair", runner)
+        self.assertIn("--series '$SERIES' --auto-repair", runner)
+        self.assertIn('cmd="$cmd --music $MUSIC"', runner)
+        self.assertIn('cmd="$cmd --no-music"', runner)
         self.assertIn("'--mode', 'accept-edits'", runner)
         self.assertIn('pexpect.spawn', runner)
         self.assertIn('max_auto_approvals = 6', runner)
@@ -1284,6 +1286,53 @@ class WorkerProtocolContractTests(unittest.TestCase):
         serial = self._dryrun_output({'VP_WORKERS': '1'})
         self.assertEqual(0, serial.returncode, serial.stderr)
 
+    def test_vp_no_music_opt_in_announces_and_wires_flag(self):
+        run = self._dryrun_output({'VP_NO_MUSIC': '1'})
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertIn('music: off', run.stdout)
+        self.assertIn('(no-music)', run.stdout)
+
+        # Default stays music-enabled: batch mode keeps opting into music.
+        default_run = self._dryrun_output({})
+        self.assertEqual(0, default_run.returncode, default_run.stderr)
+        self.assertNotIn('music: off', default_run.stdout)
+        self.assertNotIn('(no-music)', default_run.stdout)
+
+        runner = (ROOT / 'scripts' / 'run-folder.sh').read_text(encoding='utf-8')
+        self.assertIn('--no-music', runner)
+        # The full-mode harness must not wait on music outputs when music is off.
+        self.assertIn("os.environ.get('VP_NO_MUSIC') != '1'", runner)
+
+    def test_vp_no_music_env_validation(self):
+        rejected = self._dryrun_output({'VP_NO_MUSIC': 'abc'})
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn('VP_NO_MUSIC', rejected.stderr)
+
+    def test_vp_glob_selects_input_files(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            base = Path(temp_dir)
+            folder = base / 'novel'
+            folder.mkdir()
+            (folder / 'chapter-001.txt').write_text('Chương 1. Raw\n', encoding='utf-8')
+            (folder / 'chapter-001_vi.txt').write_text('Chương 1. Dịch\n', encoding='utf-8')
+            environment = os.environ.copy()
+            environment.update({
+                'HOME': str(base / 'home'),
+                'VP_DRYRUN': '1',
+                'VP_SERIES': 'safe-series',
+                'VP_LOCAL': str(base / 'local'),
+                'VP_GLOB': '*_vi.txt',
+            })
+            run = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=environment, capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertIn('glob: *_vi.txt', run.stdout)
+        self.assertIn('files: 1', run.stdout)
+        self.assertIn('chapter-001_vi.txt', run.stdout)
+        self.assertNotIn('[safe-series] 2/', run.stdout)
+
     def test_scene_artifact_subset_check_worker_mode(self):
         plan_text = (
             'Genre: tien-hiep · Images: 3 · Videos: 0 · Chapters: 1\n\n'
@@ -1533,6 +1582,62 @@ class BatchResumeTests(unittest.TestCase):
         self.assertEqual(0, rerun.returncode, rerun.stderr)
         self.assertNotIn('đã có output, skip', rerun.stdout)
         self.assertIn('DRYRUN:', rerun.stdout)
+
+    def test_no_music_manifest_only_validates_in_no_music_mode(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            base = Path(temp_dir)
+            folder = base / 'novel'
+            folder.mkdir()
+            chapter = folder / 'chapter-001.txt'
+            chapter.write_text('Chương 1. Test\n', encoding='utf-8')
+            stem = chapter.with_suffix('')
+            image = Path(f'{stem}_image_prompts.txt')
+            qa = Path(f'{stem}_qa.txt')
+            image.write_text('image\n', encoding='utf-8')
+            qa.write_text('qa\n', encoding='utf-8')
+            version = json.loads((ROOT / 'gemini-extension.json').read_text())['version']
+            manifest = Path(f'{stem}_visual-prompt-complete.json')
+            manifest.write_text(json.dumps({
+                'schema': 1,
+                'skill_version': version,
+                'series': 'safe-series',
+                'style': '',
+                'model': 'Gemini 3.1 Pro (High)',
+                'music_n': 0,
+                'no_video': True,
+                'no_music': True,
+                'artifacts': {
+                    'input': self._digest(chapter),
+                    'image': self._digest(image),
+                    'qa': self._digest(qa),
+                },
+            }), encoding='utf-8')
+            environment = os.environ.copy()
+            environment.update({
+                'HOME': str(base / 'home'),
+                'VP_DRYRUN': '1',
+                'VP_NO_VIDEO': '1',
+                'VP_NO_MUSIC': '1',
+                'VP_SERIES': 'safe-series',
+                'VP_LOCAL': str(base / 'local'),
+            })
+
+            skipped = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=environment, capture_output=True, text=True, check=False,
+            )
+            # Switching back to music mode must NOT reuse a no-music manifest.
+            music_env = dict(environment)
+            music_env.pop('VP_NO_MUSIC')
+            rerun = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=music_env, capture_output=True, text=True, check=False,
+            )
+
+        self.assertEqual(0, skipped.returncode, skipped.stderr)
+        self.assertIn('đã có output, skip', skipped.stdout)
+        self.assertEqual(0, rerun.returncode, rerun.stderr)
+        self.assertNotIn('đã có output, skip', rerun.stdout)
 
 
 if __name__ == '__main__':

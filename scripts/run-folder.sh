@@ -13,12 +13,16 @@
 # and the interactive style prompt never reappears.
 #
 # Usage:   run-folder.sh <series-folder>
-# Env:     VP_MODEL   pinned agy model        (default: "Gemini 3.1 Pro (High)")
-#          VP_MUSIC   music loops per file     (default: 4)
-#          VP_DRYRUN  =1 → print the agy command instead of running it (review)
-#          VP_LOCAL   local workdir base       (default: $HOME/.cache/vp-run-<series>)
-#          VP_WORKERS opt-in bounded-parallel Pass-2 workers (default 1 = serial;
-#                     >=2 = fan out after STEP 5, capped by remaining scene rows)
+# Env:     VP_MODEL    pinned agy model        (default: "Gemini 3.1 Pro (High)")
+#          VP_MUSIC    music loops per file     (default: 4)
+#          VP_NO_VIDEO =1 → skip video prompts (default 0)
+#          VP_NO_MUSIC =1 → skip music prompts (default 0; batch mode otherwise
+#                      opts into music — direct /visual-prompt stays image-only)
+#          VP_GLOB     input filename glob      (default '*.txt', e.g. '*_vi.txt')
+#          VP_DRYRUN   =1 → print the agy command instead of running it (review)
+#          VP_LOCAL    local workdir base       (default: $HOME/.cache/vp-run-<series>)
+#          VP_WORKERS  opt-in bounded-parallel Pass-2 workers (default 1 = serial;
+#                      >=2 = fan out after STEP 5, capped by remaining scene rows)
 #
 # Local-run strategy: the skill creates .work and writes its outputs next to the
 # INPUT file. Running directly on a gdrive/rclone FUSE mount breaks parent-model writes
@@ -57,7 +61,7 @@ import sys
 from pathlib import Path
 
 mode, manifest_name, input_name, image_name, music_name, qa_name, video_name, \
-    plan_name, skill_dir_name, series, style, model, music_n, no_video = sys.argv[1:]
+    plan_name, skill_dir_name, series, style, model, music_n, no_video, no_music = sys.argv[1:]
 
 
 def digest(filename):
@@ -73,20 +77,22 @@ try:
     skill_version = json.loads(
         (skill_dir / 'gemini-extension.json').read_text(encoding='utf-8')
     )['version']
-    count = int(music_n)
     no_video_enabled = no_video == '1'
+    no_music_enabled = no_music == '1'
+    count = 0 if no_music_enabled else int(music_n)
     plan_path = Path(plan_name)
     artifacts = {
         'input': digest(input_name),
         'image': digest(image_name),
-        'music': digest(music_name),
         'qa': digest(qa_name),
-        'music_plan': digest(plan_path),
-        'music_regions': [
+    }
+    if not no_music_enabled:
+        artifacts['music'] = digest(music_name)
+        artifacts['music_plan'] = digest(plan_path)
+        artifacts['music_regions'] = [
             digest(plan_path.parent / f'music-{index:03d}.md')
             for index in range(1, count + 1)
-        ],
-    }
+        ]
     if not no_video_enabled:
         artifacts['video'] = digest(video_name)
     expected = {
@@ -99,6 +105,10 @@ try:
         'no_video': no_video_enabled,
         'artifacts': artifacts,
     }
+    if no_music_enabled:
+        # New key only when active: existing music-enabled manifests (no key)
+        # must keep verifying byte-for-byte so resume is not invalidated.
+        expected['no_music'] = True
     manifest = Path(manifest_name)
     if mode == 'verify':
         actual = json.loads(manifest.read_text(encoding='utf-8'))
@@ -236,9 +246,10 @@ try:
                 expected_outputs = [
                     Path(f'{local_stem}_qa.txt'),
                     Path(f'{local_stem}_image_prompts.txt'),
-                    Path(f'{local_stem}_music_prompts.txt'),
                     local_path / '.work' / 'scene-plan.md',
                 ]
+                if os.environ.get('VP_NO_MUSIC') != '1':
+                    expected_outputs.append(Path(f'{local_stem}_music_prompts.txt'))
                 ready_label = 'assembled outputs found'
             outputs_ready = all(
                 path.is_file() and path.stat().st_size > 0
@@ -282,6 +293,9 @@ PY
 [[ "$WORKERS" =~ ^[1-9][0-9]*$ ]] || die "VP_WORKERS phải là số nguyên >= 1: $WORKERS"
 [ "$WORKERS" -le 16 ] || die "VP_WORKERS tối đa 16 (hiện là $WORKERS) — tăng worker không được nới gate."
 case "${VP_NO_VIDEO:-0}" in 0|1) ;; *) die "VP_NO_VIDEO phải là 0 hoặc 1" ;; esac
+case "${VP_NO_MUSIC:-0}" in 0|1) ;; *) die "VP_NO_MUSIC phải là 0 hoặc 1" ;; esac
+INPUT_GLOB="${VP_GLOB:-*.txt}"
+[ -n "$INPUT_GLOB" ] || die "VP_GLOB không được rỗng"
 
 # kebab-case a folder name into a stable, filesystem-safe series id
 slugify() {
@@ -382,13 +396,17 @@ LOCAL_BASE="${VP_LOCAL:-$HOME/.cache/vp-run-$SERIES}"
 BIBLES_DIR="$HOME/.gemini/bibles"
 
 # Collect input chapter files in chapter order (filenames sort lexically:
-# _0001_0010, _0011_0020, ...). Output .txt files are excluded.
-mapfile -t FILES < <(find "$FOLDER" -maxdepth 1 -type f -name '*.txt' | sort)
+# _0001_0010, _0011_0020, ...). Output .txt files are excluded. VP_GLOB selects
+# the input pattern (default '*.txt'; e.g. '*_vi.txt' to run only translations
+# when raw + _vi copies coexist in one folder).
+mapfile -t FILES < <(find "$FOLDER" -maxdepth 1 -type f -name "$INPUT_GLOB" | sort)
 INPUTS=()
 for f in "${FILES[@]}"; do is_output_file "$f" || INPUTS+=("$f"); done
-[ ${#INPUTS[@]} -gt 0 ] || die "Không có file truyện .txt nào trong: $FOLDER"
+[ ${#INPUTS[@]} -gt 0 ] || die "Không có file truyện .txt nào khớp '$INPUT_GLOB' trong: $FOLDER"
 
-echo "▶ Bộ: $SERIES | model: $MODEL | music: $MUSIC | files: ${#INPUTS[@]} | style: ${STYLE:-(auto file đầu)}"
+music_label="$MUSIC"
+[ "${VP_NO_MUSIC:-0}" = "1" ] && music_label="off"
+echo "▶ Bộ: $SERIES | model: $MODEL | music: $music_label | video: $([ "${VP_NO_VIDEO:-0}" = "1" ] && echo off || echo on) | glob: $INPUT_GLOB | files: ${#INPUTS[@]} | style: ${STYLE:-(auto file đầu)}"
 
 total=${#INPUTS[@]}; idx=0
 for f in "${INPUTS[@]}"; do
@@ -402,7 +420,7 @@ for f in "${INPUTS[@]}"; do
   if completion_manifest verify "$complete_manifest" "$f" \
       "${stem}_image_prompts.txt" "${stem}_music_prompts.txt" "${stem}_qa.txt" \
       "$video_output" "$music_cache/music-plan.md" "$SKILL_DIR" "$SERIES" \
-      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}"; then
+      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}" "${VP_NO_MUSIC:-0}"; then
     echo "⏭  $tag — đã có output, skip"
     continue
   fi
@@ -420,7 +438,7 @@ for f in "${INPUTS[@]}"; do
   else
     rm -rf "$local_dir" && mkdir -p "$local_dir/.work"
     cp "$f" "$local_in" || die "$tag — không copy được input sang local dir $local_dir"
-    if [ -s "$music_cache/music-plan.md" ]; then
+    if [ "${VP_NO_MUSIC:-0}" != "1" ] && [ -s "$music_cache/music-plan.md" ]; then
       cp "$music_cache/music-plan.md" "$local_dir/.work/music-plan.md" \
         || die "$tag — không restore được music-plan cache"
       cached_music_n=$(sed -n 's/^music_n:[[:space:]]*//p' "$music_cache/music-plan.md" | head -1)
@@ -470,11 +488,17 @@ for f in "${INPUTS[@]}"; do
     fi
   fi
 
-  # Batch mode explicitly opts into music and video; direct /visual-prompt runs
-  # remain image-only by default.
+  # Batch mode explicitly opts into music and video unless VP_NO_MUSIC /
+  # VP_NO_VIDEO disable them; direct /visual-prompt runs remain image-only by
+  # default.
   # Every folder run is explicitly pre-approved and unattended. Without this flag,
   # Agy may stop after presenting a plan and never write outputs.
-  cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --music $MUSIC --auto-repair"
+  cmd="/visual-prompt:visual-prompt '$local_in' --series '$SERIES' --auto-repair"
+  if [ "${VP_NO_MUSIC:-0}" = "1" ]; then
+    cmd="$cmd --no-music"
+  else
+    cmd="$cmd --music $MUSIC"
+  fi
   [ -n "$STYLE" ] && cmd="$cmd --style $STYLE"
   if [ "${VP_NO_VIDEO:-0}" = "1" ]; then
     cmd="$cmd --no-video"
@@ -483,13 +507,18 @@ for f in "${INPUTS[@]}"; do
     cmd="$cmd --video"
     no_video_label=""
   fi
+  if [ "${VP_NO_MUSIC:-0}" = "1" ]; then
+    no_music_label=" (no-music)"
+  else
+    no_music_label=""
+  fi
   if [ -n "$STYLE" ]; then
     style_label=" (style: $STYLE)"
   else
     style_label=""
   fi
 
-  echo "▶ $tag — đang chạy${style_label}${no_video_label}"
+  echo "▶ $tag — đang chạy${style_label}${no_video_label}${no_music_label}"
 
   if [ "$DRYRUN" = "1" ]; then
     echo "   DRYRUN: Agy interactive controller → plan approval → execution (model=$MODEL, mode=accept-edits, timeout=4h)"
@@ -821,7 +850,7 @@ PY
       if schedule_force_redo; then echo "   ⚠ $tag — thiếu output, re-run"; continue; fi
       die "$tag — thiếu/rỗng ${local_stem}_image_prompts.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
-    if [ ! -s "${local_stem}_music_prompts.txt" ]; then
+    if [ "${VP_NO_MUSIC:-0}" != "1" ] && [ ! -s "${local_stem}_music_prompts.txt" ]; then
       if schedule_force_redo; then echo "   ⚠ $tag — thiếu music output, re-run"; continue; fi
       die "$tag — thiếu/rỗng ${local_stem}_music_prompts.txt sau $full_attempts lần full generation (chạy lại để resume)."
     fi
@@ -917,20 +946,23 @@ PY
       die "$tag — scene artifact JSON không hợp lệ."
     fi
 
-    music_artifact_json=$(python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
-        --check music --work-dir "$local_dir/.work" --expected-music "$MUSIC" \
-        --music-plan "$local_dir/.work/music-plan.md")
-    music_artifact_status=$?
-    printf '%s\n' "$music_artifact_json"
-    if [ "$music_artifact_status" -ne 0 ]; then
-      if schedule_force_redo; then echo "   ⚠ $tag — music artifacts FAIL, re-run --force-redo"; continue; fi
-      die "$tag — music artifacts vẫn FAIL sau $max_full_attempts lần full generation. Output bị từ chối."
-    fi
-    expected_music_count=$(printf '%s\n' "$music_artifact_json" | python3 -c \
-      'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
-    if ! [[ "$expected_music_count" =~ ^[0-9]+$ ]]; then
-      if schedule_force_redo; then echo "   ⚠ $tag — không đọc được expected music count, re-run"; continue; fi
-      die "$tag — music artifact JSON không hợp lệ."
+    expected_music_count=0
+    if [ "${VP_NO_MUSIC:-0}" != "1" ]; then
+      music_artifact_json=$(python3 "$SKILL_DIR/scripts/validate_artifacts.py" \
+          --check music --work-dir "$local_dir/.work" --expected-music "$MUSIC" \
+          --music-plan "$local_dir/.work/music-plan.md")
+      music_artifact_status=$?
+      printf '%s\n' "$music_artifact_json"
+      if [ "$music_artifact_status" -ne 0 ]; then
+        if schedule_force_redo; then echo "   ⚠ $tag — music artifacts FAIL, re-run --force-redo"; continue; fi
+        die "$tag — music artifacts vẫn FAIL sau $max_full_attempts lần full generation. Output bị từ chối."
+      fi
+      expected_music_count=$(printf '%s\n' "$music_artifact_json" | python3 -c \
+        'import json,sys; print(json.load(sys.stdin)["results"][0]["expected"])' 2>/dev/null)
+      if ! [[ "$expected_music_count" =~ ^[0-9]+$ ]]; then
+        if schedule_force_redo; then echo "   ⚠ $tag — không đọc được expected music count, re-run"; continue; fi
+        die "$tag — music artifact JSON không hợp lệ."
+      fi
     fi
 
     sim_image_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
@@ -943,9 +975,13 @@ PY
         --video "${local_stem}_video_prompts.txt")
       sim_video=$?
     fi
-    sim_music_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
-      --music "${local_stem}_music_prompts.txt")
-    sim_music=$?
+    sim_music_json=''
+    sim_music=0
+    if [ "${VP_NO_MUSIC:-0}" != "1" ]; then
+      sim_music_json=$(python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" \
+        --music "${local_stem}_music_prompts.txt")
+      sim_music=$?
+    fi
     for sim_json in "$sim_image_json" "$sim_video_json" "$sim_music_json"; do
       [ -n "$sim_json" ] || continue
       printf '%s\n' "$sim_json" | python3 -c \
@@ -1094,36 +1130,42 @@ PY
   [ "$redo_ok" = "1" ] || die "$tag — run không hợp lệ"
 
   # Copy the gated outputs back to the gdrive folder (only the final _*.txt; .work
-  # scratch stays local). QA, image, and music are required; video depends on mode.
+  # scratch stays local). QA and image are required; music and video depend on mode.
   cp "${local_stem}_image_prompts.txt" "${stem}_image_prompts.txt" \
     || die "$tag — không copy được _image_prompts.txt về $FOLDER"
-  cp "${local_stem}_music_prompts.txt" "${stem}_music_prompts.txt" \
-    || die "$tag — không copy được _music_prompts.txt về $FOLDER"
+  if [ "${VP_NO_MUSIC:-0}" != "1" ]; then
+    cp "${local_stem}_music_prompts.txt" "${stem}_music_prompts.txt" \
+      || die "$tag — không copy được _music_prompts.txt về $FOLDER"
+  fi
   cp "${local_stem}_qa.txt" "${stem}_qa.txt" \
     || die "$tag — không copy được _qa.txt về $FOLDER"
   if [ "${VP_NO_VIDEO:-0}" != "1" ]; then
     cp "${local_stem}_video_prompts.txt" "${stem}_video_prompts.txt" \
       || die "$tag — không copy được _video_prompts.txt về $FOLDER"
   fi
-  mkdir -p "$music_cache"
-  cp "$local_dir/.work/music-plan.md" "$music_cache/music-plan.md" \
-    || die "$tag — không lưu được music-plan cache"
-  cache_index=1
-  while [ "$cache_index" -le "$expected_music_count" ]; do
-    printf -v cache_name 'music-%03d.md' "$cache_index"
-    cp "$local_dir/.work/$cache_name" "$music_cache/$cache_name" \
-      || die "$tag — không lưu được $cache_name"
-    cache_index=$((cache_index + 1))
-  done
+  if [ "${VP_NO_MUSIC:-0}" != "1" ]; then
+    mkdir -p "$music_cache"
+    cp "$local_dir/.work/music-plan.md" "$music_cache/music-plan.md" \
+      || die "$tag — không lưu được music-plan cache"
+    cache_index=1
+    while [ "$cache_index" -le "$expected_music_count" ]; do
+      printf -v cache_name 'music-%03d.md' "$cache_index"
+      cp "$local_dir/.work/$cache_name" "$music_cache/$cache_name" \
+        || die "$tag — không lưu được $cache_name"
+      cache_index=$((cache_index + 1))
+    done
+  fi
   history_path="$HOME/.gemini/bibles/${SERIES}-visual-history.md"
+  history_music_args=(--music "${local_stem}_music_prompts.txt")
+  [ "${VP_NO_MUSIC:-0}" = "1" ] && history_music_args=()
   python3 "$SKILL_DIR/scripts/check_prompt_similarity.py" --extract-history \
       --image "${local_stem}_image_prompts.txt" \
-      --music "${local_stem}_music_prompts.txt" --history "$history_path" \
+      "${history_music_args[@]}" --history "$history_path" \
     || die "$tag — output đã copy nhưng không cập nhật được visual history; manifest chưa ghi."
   completion_manifest write "$complete_manifest" "$f" \
       "${stem}_image_prompts.txt" "${stem}_music_prompts.txt" "${stem}_qa.txt" \
       "$video_output" "$music_cache/music-plan.md" "$SKILL_DIR" "$SERIES" \
-      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}" \
+      "$STYLE" "$MODEL" "$MUSIC" "${VP_NO_VIDEO:-0}" "${VP_NO_MUSIC:-0}" \
     || die "$tag — output đã copy nhưng không ghi được completion manifest."
   rm -rf "$local_dir" "$workers_base"   # local scratch no longer needed; gdrive has the outputs
   echo "✅ $tag — xong (chạy local, đã copy output về gdrive)"

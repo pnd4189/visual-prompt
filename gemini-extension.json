@@ -1,6 +1,6 @@
 {
   "name": "visual-prompt",
-  "version": "0.12.0",
-  "description": "Generate grounded, non-repetitive image prompts by default with strict source anchors and fail-closed gates; video/music prompts are explicit opt-ins and all creative generation stays in the active parent model; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) without changing the default serial run",
+  "version": "0.13.0",
+  "description": "Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow",
   "contextFileName": "SKILL.md"
 }

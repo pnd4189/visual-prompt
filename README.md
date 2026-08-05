@@ -37,7 +37,12 @@ trong truyện phải giữ `not stated`.
 ### Batch driver và parallel Pass-2 (opt-in)
 
 `scripts/run-folder.sh` / `run-all.sh` chạy batch nhiều file/series, mặc định
-**serial** — đường đi giữ nguyên byte-for-byte khi không đặt gì thêm. Từ v0.12.0,
+**serial** — đường đi giữ nguyên byte-for-byte khi không đặt gì thêm. Batch mode
+mặc định opt-in music + video; từng lần chạy có thể scope lại mà không đổi
+workflow gốc: `VP_NO_MUSIC=1` / `VP_NO_VIDEO=1` bỏ medium đó cho riêng phiên chạy
+(gate, harness wait, completion manifest và visual-history extract tự switch theo;
+manifest của các run có music cũ vẫn verify nguyên vẹn), và `VP_GLOB='*_vi.txt'`
+chỉ chọn file input khớp pattern (mặc định `*.txt`). Từ v0.12.0,
 driver có opt-in bounded parallel cho riêng Pass-2: đặt `VP_WORKERS=3` (số nguyên
 1–16, tự cap theo số scene còn lại) để chạy head `--plan-only` → fan-out các
 worker session isolated (mỗi worker một range scene-id rời nhau trên snapshot
