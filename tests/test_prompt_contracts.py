@@ -983,6 +983,21 @@ class CrossCliContractTests(unittest.TestCase):
         self.assertIn('at most three', codex)
         self.assertIn('at most three', claude)
 
+    def test_command_identity_is_cli_neutral(self):
+        command = (ROOT / 'commands' / 'visual-prompt.toml').read_text(encoding='utf-8')
+        claude = (
+            ROOT / 'adapters' / 'claude-code' / 'visual-prompt' / 'SKILL.md'
+        ).read_text(encoding='utf-8')
+
+        # The shared command contract must not brand one CLI: on Claude Code the
+        # session's active model executes the pipeline, on Agy the agy model does.
+        self.assertIn('active model của CLI đang chạy', command)
+        self.assertNotIn('active Antigravity/Agy CLI model', command)
+        self.assertNotIn('active Agy model', command)
+        # RULE 0 still binds the active model of whichever CLI runs it.
+        self.assertIn('KHÔNG được ủy thác việc sinh nội dung', command)
+        self.assertIn('Act as the active parent model', claude)
+
     def test_depth_rules_do_not_force_unsupported_story_details(self):
         skill = (ROOT / 'SKILL.md').read_text(encoding='utf-8')
         expander = (

@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.13.0
+version: 0.13.1
 description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow
 license: MIT
 contextFileName: SKILL.md
@@ -8,7 +8,7 @@ contextFileName: SKILL.md
 
 # Visual Prompt Skill
 
-Antigravity/Agy CLI LLM-driven workflow that reads a Vietnamese xianxia/wuxia novel file
+LLM-driven workflow (Antigravity/Agy, Codex, or Claude Code) that reads a Vietnamese xianxia/wuxia novel file
 (.txt / .md / .docx, 2k–18k words, suitable for a 1–2h audio video). The skill
 self-QAs the text first (no pre-proofread required), then emits QA + image
 prompts. Video and music files are opt-in:
