@@ -846,6 +846,26 @@ Print: `Content-safety: <PASS | WARN: <residual>>`.
 
 ---
 
+## STEP 9 — DỌN SCENE FILE (bắt buộc, sau khi STEP 8 PASS)
+
+Các file `.work/scene-NNN.md` là trung gian: sản phẩm giao cho user là
+`<stem>_image_prompts.txt`. Sau khi STEP 8 pass hết, gộp xong thì xoá chúng:
+
+```bash
+python3 scripts/cleanup_work.py --work .work --image "<stem>_image_prompts.txt"
+```
+
+Helper tự từ chối (exit 2) nếu output chưa đủ số scene so với `scene-plan.md` —
+KHÔNG được xoá tay để lách. Giữ nguyên `scene-plan.md` và
+`active-model-authorship.jsonl` (hợp đồng scene + vết kiểm chứng authorship).
+
+Chỉ chạy ở run trực tiếp. Batch (`--auto-repair`) BỎ QUA step này: driver còn
+phải chạy tiếp gate riêng của nó trên `.work` sau khi phiên kết thúc.
+
+Print: `Cleanup: <N> scene file đã xoá (output giữ <M> block)`.
+
+---
+
 ## POST-RUN SUMMARY (in cho user, VN)
 
 Omit every disabled-media output line and next step entirely; do not print a

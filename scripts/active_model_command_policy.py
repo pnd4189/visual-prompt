@@ -28,7 +28,8 @@ ALLOWED_HELPERS = {
     'append_bible_row.py', 'assemble_outputs.py', 'assemble_qa.py',
     'calc_scene_count.py', 'check_anchor_consistency.py',
     'check_content_safety.py', 'check_previous_continuity.py',
-    'check_prompt_similarity.py', 'check_run_legit.py', 'load_input.py',
+    'check_prompt_similarity.py', 'check_run_legit.py', 'cleanup_work.py',
+    'load_input.py',
     'validate_artifacts.py', 'validate_scene_plan.py', 'worker_manifest.py',
 }
 PROMPT_OUTPUT_RE = re.compile(r'_(?:image|video)_prompts\.txt$')
@@ -172,6 +173,16 @@ def _helper_denial(name: str, tokens: list[str], cwd: Path, payload: dict) -> st
             if target is None or not inside(target, global_bibles) \
                     or not target.name.endswith('-visual-history.md'):
                 return 'history extraction may only update the series visual history'
+
+    if name == 'cleanup_work.py':
+        raw_work, raw_image = _one(tokens, '--work'), _one(tokens, '--image')
+        if raw_work is None or raw_image is None:
+            return 'cleanup_work requires exactly one --work and one --image path'
+        work = _resolve(raw_work, cwd)
+        if work.name != '.work':
+            return 'cleanup_work may only clean a .work directory'
+        denial = write_denial({'TargetFile': str(work / 'scene-001.md')}, payload)
+        return denial or _final_denial(_resolve(raw_image, cwd), payload, PROMPT_OUTPUT_RE)
 
     if name == 'check_run_legit.py':
         if '--purge-skill-dir' in tokens:

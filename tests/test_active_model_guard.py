@@ -381,6 +381,33 @@ class StopGateTests(unittest.TestCase):
             self.assertEqual('continue', run_guard('stop', {**stop, 'executionNum': 2}, env)['decision'])
             self.assertEqual({}, run_guard('stop', {**stop, 'executionNum': 3}, env))
 
+    def test_a_cleaned_run_may_end_and_is_not_asked_for_its_scenes_back(self):
+        # cleanup_work.py removes scene-NNN.md once they are merged; the gate must
+        # read completeness off the deliverable instead of demanding the files.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            work = root / '.work'
+            (work / 'scene-plan.md').write_text(
+                '| 001 | 1 | beat |\n| 002 | 1 | beat |\n', encoding='utf-8',
+            )
+            (root / 'novel_image_prompts.txt').write_text(
+                self.IMAGE_PROMPT + self.IMAGE_PROMPT.replace('SCENE 001', 'SCENE 002')
+                .replace('quiet room', 'storm-lit courtyard')
+                .replace('opens a letter', 'draws a worn blade')
+                .replace('cool window light', 'harsh lightning')
+                .replace('restrained concern', 'braced defiance')
+                .replace('close frame', 'wide low angle')
+                .replace('grounded beat', 'the duel begins')
+                .replace('layered depth', 'diagonal sweep')
+                .replace('lone traveler', 'the old swordsman'),
+                encoding='utf-8',
+            )
+            (work / 'scene-001.md').unlink()
+            stop = {**payload, 'terminationReason': 'TERMINATION_REASON_NO_TOOL_CALL',
+                    'executionNum': 1}
+            self.assertEqual({}, run_guard('stop', stop, env))
+
     def test_error_and_non_model_stops_are_never_held(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
