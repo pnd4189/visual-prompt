@@ -37,7 +37,7 @@ class InstallAgyGuardTests(unittest.TestCase):
                 for entry in phase:
                     for hook in entry.get('hooks', [entry]):
                         commands.append(hook['command'])
-            self.assertEqual(3, len(commands))
+            self.assertEqual(4, len(commands))
             self.assertTrue(all(len(command.split()) == 3 for command in commands))
             launcher = target.parent / 'visual-prompt-active-model-guard.py'
             self.assertTrue(launcher.is_file())

@@ -1,6 +1,7 @@
 """Argument-level policy for commands allowed by the Agy runtime guard."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -19,6 +20,30 @@ ALLOWED_HELPERS = {
     'validate_artifacts.py', 'validate_scene_plan.py', 'worker_manifest.py',
 }
 PROMPT_OUTPUT_RE = re.compile(r'_(?:image|video)_prompts\.txt$')
+SKILL_ROOT_TOKEN = '__VP_SKILL_ROOT__'
+
+
+def _is_canonical_helper(script: Path) -> bool:
+    """Accept a helper from any install prefix, by name and byte identity.
+
+    setup.bat copies the whole skill when Windows denies symlinks, and Agy keeps
+    its own plugin copy, so pinning the allowlist to one prefix would deny every
+    legitimate helper there. Content identity keeps the allowlist strict: an
+    edited or invented script never matches its canonical bytes.
+    """
+    if script.name not in ALLOWED_HELPERS:
+        return False
+    expected = (SKILL_ROOT / 'scripts' / script.name).resolve()
+    if script == expected:
+        return True
+    try:
+        return (
+            script.parent.name == 'scripts'
+            and hashlib.sha256(script.read_bytes()).digest()
+            == hashlib.sha256(expected.read_bytes()).digest()
+        )
+    except OSError:
+        return False
 
 
 def _resolve(raw: str, cwd: Path) -> Path:
@@ -97,7 +122,8 @@ def _helper_denial(name: str, tokens: list[str], cwd: Path, payload: dict) -> st
             return denial
         raw_work = _one(tokens, '--work-dir')
         work = _resolve(raw_work, cwd) if raw_work else input_path.parent / '.work'
-        return write_denial({'TargetFile': str(work / 'chapters_qa.json')}, payload)
+        return write_denial({'TargetFile': str(work / 'chapters_qa.json')}, payload,
+                            from_helper=True)
 
     if name in {'check_anchor_consistency.py', 'check_content_safety.py'} \
             and '--fix' in tokens:
@@ -139,9 +165,17 @@ def command_denial(args: dict, payload: dict) -> str | None:
     if '\n' in command or '$' in command or '`' in command:
         return 'runtime generator shell composition is forbidden'
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|<>')
+        # The skill root may contain spaces, and an unquoted absolute helper path
+        # would then split into fragments and look like a rogue script. Mask the
+        # literal root before lexing and restore it afterwards, so the allowlist
+        # sees the real path either way. Masking grants nothing: the placeholder
+        # only ever expands back to the same root the model already typed.
+        lexer = shlex.shlex(
+            command.replace(str(SKILL_ROOT), SKILL_ROOT_TOKEN),
+            posix=True, punctuation_chars=';&|<>',
+        )
         lexer.whitespace_split = True
-        tokens = list(lexer)
+        tokens = [token.replace(SKILL_ROOT_TOKEN, str(SKILL_ROOT)) for token in lexer]
     except ValueError:
         return 'unparseable shell command is forbidden'
     if not tokens:
@@ -158,14 +192,15 @@ def command_denial(args: dict, payload: dict) -> str | None:
         if len(tokens) < 2 or tokens[1] in {'-', '-c', '-m'}:
             return 'runtime generator Python modes are forbidden'
         script = _resolve(tokens[1], cwd)
-        expected = SKILL_ROOT / 'scripts' / script.name
-        if script.name not in ALLOWED_HELPERS or script != expected.resolve():
-            return 'only canonical deterministic helper scripts may run'
+        if not _is_canonical_helper(script):
+            return ('only canonical deterministic helper scripts may run; quote any '
+                    f'path containing spaces and call them under {SKILL_ROOT}/scripts/')
         if '>' in tokens:
             index = tokens.index('>')
             if index + 1 >= len(tokens):
                 return 'invalid output redirection'
-            denial = write_denial({'TargetFile': str(_resolve(tokens[index + 1], cwd))}, payload)
+            denial = write_denial({'TargetFile': str(_resolve(tokens[index + 1], cwd))},
+                                  payload, from_helper=True)
             if denial:
                 return denial
             tokens = tokens[:index]
@@ -175,7 +210,9 @@ def command_denial(args: dict, payload: dict) -> str | None:
     if tokens[0] in {'sha1sum', 'sha256sum', 'wc', 'ls', 'stat', 'test'}:
         return None
     if tokens[0] not in {'mkdir', 'rm'}:
-        return 'runtime generator or non-canonical command is forbidden'
+        return ('runtime generator or non-canonical command is forbidden; the shell '
+                'may only run the canonical python3 helpers, sha1sum, sha256sum, wc, '
+                'ls, stat, test, mkdir -p, rm -f — read files with view_file instead')
     expected_flag = '-p' if tokens[0] == 'mkdir' else '-f'
     if len(tokens) < 3 or tokens[1] != expected_flag:
         return f'only scoped {tokens[0]} {expected_flag} is allowed'

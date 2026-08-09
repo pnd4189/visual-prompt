@@ -30,6 +30,13 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/active_model_guard.py stop",
+        "timeout": 120
+      }
     ]
   }
 }

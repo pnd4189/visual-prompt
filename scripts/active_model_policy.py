@@ -8,7 +8,19 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 WRITE_TOOLS = {'write_to_file', 'replace_file_content', 'multi_replace_file_content'}
-READ_TOOLS = {'view_file', 'list_dir', 'find_by_name', 'grep_search'}
+READ_TOOLS = {
+    'view_file', 'view_file_outline', 'view_code_item', 'view_content_chunk',
+    'list_dir', 'list_directory', 'find', 'find_by_name', 'grep_search',
+    'code_search', 'read_terminal', 'command_status',
+}
+# Agy step types that neither read artifacts nor author content. Everything
+# outside READ_TOOLS | NEUTRAL_TOOLS | WRITE_TOOLS | {'run_command'} stays
+# denied, so an unknown capability can never become a silent bypass.
+NEUTRAL_TOOLS = {
+    'ask_question', 'notify_user', 'suggested_responses', 'memory',
+    'retrieve_memory', 'brain_update', 'checkpoint', 'task_boundary',
+    'code_acknowledgement', 'finish',
+}
 FORBIDDEN_TOOLS = {
     'invoke_subagent': 'delegation is forbidden: the active model must author every scene',
     'define_subagent': 'delegation is forbidden: the active model must author every scene',
@@ -24,6 +36,11 @@ CODE_SUFFIXES = {
 }
 CONTENT_SUFFIXES = {'.md', '.json', '.txt', '.hash'}
 FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
+# Scratch artifacts that a canonical helper owns. Hand-writing chapters_qa.json
+# skips assemble_qa.py, which is also what emits <stem>_qa.txt — the run then
+# looks finished to the model and fails the driver's output check, costing a full
+# retry. Deny the shortcut instead of paying for it.
+HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
 
 
 def state_path(payload: dict) -> Path:
@@ -99,7 +116,8 @@ def _strings(value):
             yield from _strings(nested)
 
 
-def write_denial(args: dict, payload: dict) -> str | None:
+def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | None:
+    """Vet a write target. `from_helper` marks a canonical helper's own output."""
     target = target_path(args)
     if target is None:
         return 'absolute TargetFile is required for guarded creative writes'
@@ -123,6 +141,9 @@ def write_denial(args: dict, payload: dict) -> str | None:
         return 'only direct text artifacts are writable in guarded mode'
     if FINAL_OUTPUT_RE.search(target.name):
         return 'final outputs must be created by the canonical assembler'
+    if not from_helper and target.name in HELPER_OWNED_SCRATCH:
+        return (f'{target.name} is produced by a canonical helper '
+                '(load_input.py / assemble_qa.py) — run it instead of writing the file')
     allowed_roots = roots(payload)
     global_bibles = (Path.home() / '.gemini' / 'bibles').resolve()
     if inside(target, global_bibles) and target.name.endswith('-visual-history.md'):
@@ -136,7 +157,8 @@ def write_denial(args: dict, payload: dict) -> str | None:
             for root in allowed_roots
         )
     if not in_scope:
-        return 'write target is outside the guarded artifact roots'
+        roots_hint = os.pathsep.join(str(root) for root in allowed_roots)
+        return f'write target is outside the guarded artifact roots ({roots_hint})'
     return None
 
 

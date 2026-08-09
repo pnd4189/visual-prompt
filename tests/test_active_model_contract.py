@@ -46,7 +46,11 @@ class IntegrationContractTests(unittest.TestCase):
         self.assertIn('subagent: false', agent)
         self.assertIn("'--agent', 'visual-prompt-writer'", runner)
         self.assertIn("'--sandbox'", runner)
-        self.assertNotIn("'--dangerously-skip-permissions'", runner)
+        # accept-edits auto-approves edits only, so without this flag the first
+        # run_command raises an interactive confirmation and the unattended batch
+        # hangs until its deadline (observed 2026-08-09). Enforcement lives in the
+        # PreToolUse guard, not in Agy's permission prompts.
+        self.assertIn("'--dangerously-skip-permissions'", runner)
         self.assertIn('VP_WORKERS', runner)
         self.assertIn('--require-authorship', runner)
         self.assertIn("('.agents', 'scripts', 'prompts', 'references')", runner)

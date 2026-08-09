@@ -63,6 +63,50 @@ class CommandPolicyTests(unittest.TestCase):
         with patch.dict(os.environ, env):
             return policy.command_denial(args, payload)
 
+    def test_unquoted_absolute_helper_path_with_spaces_still_resolves(self):
+        # The installed skill root contains a space, so an unquoted absolute
+        # helper call must not be mistaken for a rogue script.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); (root / '.work').mkdir()
+            helper = f'{ROOT}/scripts/load_input.py'
+            self.assertIsNone(self.denial(f'python3 {helper} {root}/novel.txt', root))
+            self.assertIsNone(self.denial(f'python3 "{helper}" {root}/novel.txt', root))
+            rogue = self.denial(f'python3 {ROOT}/scripts/generate_scenes.py', root)
+            self.assertIn('canonical', rogue)
+
+    def test_mirrored_install_helper_is_accepted_only_while_byte_identical(self):
+        # Windows setup.bat copies the skill when symlinks are unavailable, so a
+        # helper may legitimately run from another prefix — but only unmodified.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); (root / '.work').mkdir()
+            mirror = root / 'skill-copy' / 'scripts'
+            mirror.mkdir(parents=True)
+            canonical = ROOT / 'scripts' / 'load_input.py'
+            mirrored = mirror / 'load_input.py'
+            mirrored.write_bytes(canonical.read_bytes())
+            self.assertIsNone(self.denial(f'python3 {mirrored} {root}/novel.txt', root))
+            mirrored.write_bytes(canonical.read_bytes() + b'\n# injected\n')
+            self.assertIn('canonical', self.denial(f'python3 {mirrored}', root))
+
+    def test_helper_owned_scratch_cannot_be_hand_written_but_helpers_still_emit_it(self):
+        # Hand-writing chapters_qa.json skips assemble_qa.py, which is what also
+        # emits <stem>_qa.txt — the run then fails the driver's output check and
+        # costs a whole retry.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); work = root / '.work'; work.mkdir()
+            payload = {'workspacePaths': [str(root)]}
+            with patch.dict(os.environ, {'VP_ALLOWED_WRITE_ROOTS': str(work)}):
+                for name in ('chapters.json', 'chapters_qa.json'):
+                    with self.subTest(name=name):
+                        self.assertIn('canonical helper', policy.write_denial(
+                            {'TargetFile': str(work / name)}, payload,
+                        ))
+            # The helper's own redirect into that same file must still pass.
+            self.assertIsNone(self.denial(
+                f'python3 {ROOT}/scripts/load_input.py {root}/novel.txt '
+                f'> {work}/chapters.json', root,
+            ))
+
     def test_canonical_helper_cannot_write_guard_config_or_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve(); (root / '.work').mkdir()

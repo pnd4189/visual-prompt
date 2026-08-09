@@ -43,7 +43,7 @@ def _guard_config(repo_root: Path, launcher: Path) -> tuple[dict, str]:
             for hook in hooks:
                 command = hook.get('command', '') if isinstance(hook, dict) else ''
                 event = command.rsplit(' ', 1)[-1]
-                if event not in {'pre-invocation', 'pre-tool-use', 'post-tool-use'}:
+                if event not in {'pre-invocation', 'pre-tool-use', 'post-tool-use', 'stop'}:
                     raise ValueError(f'unexpected guard command: {command}')
                 hook['command'] = f'{python_command} {launcher} {event}'
     return guard, _launcher_text(guard_script)

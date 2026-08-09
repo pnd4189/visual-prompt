@@ -224,5 +224,165 @@ class AuthorshipGateTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
+class InvocationArmingTests(unittest.TestCase):
+    """Agy stores the raw user turn, not the expanded slash-command prompt."""
+
+    USER_TURN = (
+        '{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT",'
+        '"content":"<USER_REQUEST>\\n/visual-prompt:visual-prompt '
+        "'/home/u/novel.txt' --series 'x'\\n</USER_REQUEST>\"}\n"
+    )
+
+    def _armed_artifact(self, root: Path, transcript_body: str) -> Path:
+        artifact = root / 'artifact'
+        artifact.mkdir()
+        (artifact / 'transcript.jsonl').write_text(transcript_body, encoding='utf-8')
+        return artifact
+
+    def test_user_invocation_line_arms_guard_without_a_contract_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), self.USER_TURN)
+            payload = {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            result = run_guard('pre-tool-use', payload, {})
+        self.assertEqual('deny', result['decision'])
+        self.assertIn('delegation', result['reason'])
+
+    def test_mentioning_the_command_mid_sentence_does_not_arm_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), (
+                '{"type":"USER_INPUT","content":"<USER_REQUEST>\\n'
+                'explain how /visual-prompt works\\n</USER_REQUEST>"}\n'
+            ))
+            payload = {**base_payload('unrelated', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            result = run_guard('pre-tool-use', payload, {})
+        self.assertEqual('allow', result['decision'])
+
+    def test_first_armed_invocation_announces_rules_after_turn_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), self.USER_TURN)
+            payload = {**base_payload('primary', artifact), 'invocationNum': 7}
+            first = run_guard('pre-invocation', payload, {})
+            second = run_guard('pre-invocation', payload, {})
+        self.assertIn('GUARDED', first['injectSteps'][0]['ephemeralMessage'])
+        self.assertIn('--require-authorship', first['injectSteps'][0]['ephemeralMessage'])
+        self.assertEqual({}, second)
+
+    def test_neutral_agy_tools_pass_while_unknown_capabilities_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = self._armed_artifact(root, self.USER_TURN)
+            env = {'VP_GUARD_STATE': str(root / 'guard.json')}
+            for tool, decision in (('notify_user', 'allow'), ('view_file_outline', 'allow'),
+                                   ('mcp_tool', 'deny'), ('browser_subagent', 'deny')):
+                with self.subTest(tool=tool):
+                    payload = {**base_payload('primary', artifact), 'toolCall': {
+                        'name': tool, 'args': {},
+                    }}
+                    self.assertEqual(decision, run_guard('pre-tool-use', payload, env)['decision'])
+
+
+class StopGateTests(unittest.TestCase):
+    """The run may not end on a failing legitimacy gate — but holds are bounded."""
+
+    IMAGE_PROMPT = (
+        '--- SCENE 001 ---\nCamera: close frame\nStory DNA: grounded beat\n'
+        'Setting: quiet room\nComposition: layered depth\nSubject: lone traveler\n'
+        'Action / Energy: opens a letter\nStyle: painted realism\n'
+        'Lighting / Color: cool window light\nAtmosphere: restrained concern\n'
+        'Negative: no logos, no text\n'
+    )
+
+    def _authored_run(self, root: Path) -> tuple[dict, dict[str, str]]:
+        artifact = root / 'artifact'; work = root / '.work'
+        artifact.mkdir(); work.mkdir()
+        (work / 'scene-plan.md').write_text('| 1 | chapter | grounded beat |\n', encoding='utf-8')
+        scene = work / 'scene-001.md'
+        scene.write_text('scene body', encoding='utf-8')
+        env = {'VP_GUARD_ACTIVE': '1', 'VP_GUARD_STATE': str(root / 'guard.json'),
+               'VP_AUTHORSHIP_LOG': str(work / 'authorship.jsonl'),
+               'VP_ALLOWED_WRITE_ROOTS': str(work)}
+        payload = {**base_payload('primary', artifact), 'toolCall': {
+            'name': 'write_to_file', 'args': {
+                'TargetFile': str(scene), 'CodeContent': 'scene body',
+            }}}
+        run_guard('post-tool-use', payload, env)
+        return base_payload('primary', artifact), env
+
+    def test_stop_is_held_then_released_after_the_bounded_retries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            # No assembled output yet -> the gate cannot pass. Each stop event has
+            # its own executionNum; the duplicate hook call must not consume one.
+            first = run_guard('stop', {**payload, 'executionNum': 1}, env)
+            self.assertEqual('continue', first['decision'])
+            self.assertIn('assemble', first['reason'])
+            self.assertEqual('continue',
+                             run_guard('stop', {**payload, 'executionNum': 1}, env)['decision'])
+            self.assertEqual('continue',
+                             run_guard('stop', {**payload, 'executionNum': 2}, env)['decision'])
+            self.assertEqual({}, run_guard('stop', {**payload, 'executionNum': 3}, env))
+
+    def test_stop_is_allowed_once_the_legitimacy_gate_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+            self.assertEqual({}, run_guard('stop', payload, env))
+
+    def test_template_stamped_output_holds_the_stop_even_with_valid_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            (root / 'novel_image_prompts.txt').write_text(
+                ''.join(self.IMAGE_PROMPT.replace('SCENE 001', f'SCENE {n:03d}')
+                        for n in (1, 2, 3)),
+                encoding='utf-8',
+            )
+            held = run_guard('stop', payload, env)
+        self.assertEqual('continue', held['decision'])
+        self.assertIn('pair_copy', held['reason'])
+
+    def test_error_and_non_model_stops_are_never_held(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            for extra in ({'error': 'interrupted'},
+                          {'terminationReason': 'max_steps_exceeded'}):
+                with self.subTest(stop=extra):
+                    self.assertEqual({}, run_guard('stop', {**payload, **extra}, env))
+
+    def test_plan_only_and_worker_sessions_opt_out_of_the_closing_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            self.assertEqual({}, run_guard('stop', payload, {**env, 'VP_GUARD_STOP_GATE': '0'}))
+
+    def test_a_scene_plan_alone_does_not_arm_the_closing_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / 'artifact'; work = root / '.work'
+            artifact.mkdir(); work.mkdir()
+            plan = work / 'scene-plan.md'
+            plan.write_text('| 1 | chapter | grounded beat |\n', encoding='utf-8')
+            env = {'VP_GUARD_ACTIVE': '1', 'VP_GUARD_STATE': str(root / 'guard.json'),
+                   'VP_AUTHORSHIP_LOG': str(work / 'authorship.jsonl'),
+                   'VP_ALLOWED_WRITE_ROOTS': str(work)}
+            run_guard('post-tool-use', {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'write_to_file', 'args': {
+                    'TargetFile': str(plan), 'CodeContent': 'plan',
+                }}}, env)
+            self.assertEqual({}, run_guard('stop', base_payload('primary', artifact), env))
+
+    def test_unrelated_sessions_are_never_held(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / 'artifact'; artifact.mkdir()
+            self.assertEqual({}, run_guard('stop', base_payload('other', artifact), {}))
+
+
 if __name__ == '__main__':
     unittest.main()

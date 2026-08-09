@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,27 +16,55 @@ except ImportError:  # Windows Agy has no fcntl; append-only records remain vali
     fcntl = None
 
 from active_model_policy import (
-    FORBIDDEN_TOOLS, READ_TOOLS, WRITE_TOOLS, command_denial, state_path,
-    target_path, write_denial,
+    FORBIDDEN_TOOLS, NEUTRAL_TOOLS, READ_TOOLS, SKILL_ROOT, WRITE_TOOLS,
+    command_denial, state_path, target_path, write_denial,
 )
 
-GUARD_MARKER = 'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
+MAX_STOP_HOLDS = 2
+
+GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
+# Agy records the raw user turn, not the expanded slash-command prompt, so the
+# invocation line is the only arming signal that does not depend on the model
+# choosing to read the contract first. Content is JSON-escaped in the
+# transcript, hence the literal "\n" alternative.
+INVOCATION_RE = re.compile(
+    rb'<USER_REQUEST>(?:\\[rnt]|\s)*/(?:[A-Za-z0-9._-]+:)?visual-prompt\b'
+)
+HEAD_BYTES = 131_072
+TAIL_BYTES = 262_144
+# Mirrors SCENE_FILE_RE in check_run_legit.py — the closing gate and the guard
+# must agree on what counts as an authored scene.
+SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
+GUARD_RULES = (
+    'VISUAL-PROMPT GUARDED (Agy runtime). You are the primary active model: '
+    'author every .work/scene-NNN.md yourself with the file-write tool using an '
+    'absolute path, at most three scenes per turn. No subagent, background task, '
+    'runtime generator script, or external model. Run only the canonical helpers '
+    f'under {SKILL_ROOT}/scripts/ — one command per run_command call, no &&, ||, '
+    'pipes, $(...) or backticks, and quote any path containing spaces. '
+    'check_run_legit.py must be called with --require-authorship '
+    '--authorship-log <work>/active-model-authorship.jsonl. The run cannot end '
+    'while that gate fails.'
+)
 
 
-def _tail_contains(path: str | None) -> bool:
+def _transcript_armed(path: str | None) -> bool:
+    """Arm on the user's /visual-prompt turn or on the contract marker."""
     if not path:
         return False
     try:
         with Path(path).open('rb') as stream:
+            head = stream.read(HEAD_BYTES)
             stream.seek(0, os.SEEK_END)
-            stream.seek(max(0, stream.tell() - 262_144))
-            return GUARD_MARKER.encode() in stream.read()
+            stream.seek(max(HEAD_BYTES, stream.tell() - TAIL_BYTES))
+            window = head + stream.read()
     except OSError:
         return False
+    return GUARD_MARKER in window or INVOCATION_RE.search(window) is not None
 
 
 def _active(payload: dict) -> bool:
-    if os.environ.get('VP_GUARD_ACTIVE') == '1' or _tail_contains(payload.get('transcriptPath')):
+    if os.environ.get('VP_GUARD_ACTIVE') == '1' or _transcript_armed(payload.get('transcriptPath')):
         return True
     path = state_path(payload)
     if not path.exists():
@@ -50,7 +80,8 @@ def _active(payload: dict) -> bool:
     )
 
 
-def _claim_primary(payload: dict) -> dict:
+def _claim_primary(payload: dict) -> tuple[dict, bool]:
+    """Return the guard state and whether this call created (armed) it."""
     path = state_path(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     state = {
@@ -64,16 +95,25 @@ def _claim_primary(payload: dict) -> dict:
         loaded = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(loaded, dict) or loaded.get('schema') != 1:
             raise ValueError('invalid guard state')
-        return loaded
+        return loaded, False
     with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
         json.dump(state, stream, ensure_ascii=False)
         stream.write('\n')
-    return state
+    return state, True
 
 
 def _log_path(target: Path) -> Path:
     configured = os.environ.get('VP_AUTHORSHIP_LOG')
     return Path(configured) if configured else target.parent / 'active-model-authorship.jsonl'
+
+
+def _work_marker(payload: dict) -> Path:
+    """Sidecar remembering which work dir this session authored scenes into."""
+    return state_path(payload).with_suffix('.work')
+
+
+def _stop_counter(payload: dict) -> Path:
+    return state_path(payload).with_suffix('.stop')
 
 
 def _digest(path: Path) -> str:
@@ -102,12 +142,13 @@ def _has_provenance(target: Path) -> bool:
 def _pre_invocation(payload: dict) -> dict:
     if not _active(payload):
         return {}
-    state = _claim_primary(payload)
+    state, claimed = _claim_primary(payload)
     if state.get('primary_conversation_id') != payload.get('conversationId'):
         message = 'Secondary agents cannot author visual-prompt artifacts.'
-    elif payload.get('invocationNum') == 0:
-        message = ('VISUAL-PROMPT GUARDED: directly author every creative artifact; '
-                   'never delegate or create/run a prompt generator. Maximum three scenes per turn.')
+    elif claimed:
+        # Arming can happen after invocation 0, and Agy calls each hook twice per
+        # event, so the exclusive state claim is the one-shot announcement point.
+        message = GUARD_RULES
     else:
         return {}
     return {'injectSteps': [{'ephemeralMessage': message}]}
@@ -121,8 +162,9 @@ def _pre_tool(payload: dict) -> dict:
     args = tool_call.get('args') or {}
     if tool in FORBIDDEN_TOOLS:
         return {'decision': 'deny', 'reason': FORBIDDEN_TOOLS[tool]}
-    state = _claim_primary(payload)
-    if state.get('primary_conversation_id') != payload.get('conversationId') and tool not in READ_TOOLS:
+    state, _ = _claim_primary(payload)
+    if (state.get('primary_conversation_id') != payload.get('conversationId')
+            and tool not in READ_TOOLS | NEUTRAL_TOOLS):
         reason = 'only the primary active-model conversation may mutate artifacts'
         return {'decision': 'deny', 'reason': reason}
     denial = None
@@ -135,8 +177,8 @@ def _pre_tool(payload: dict) -> dict:
             denial = 'unproven scene cannot be patched; rewrite its full content directly'
     elif tool == 'run_command':
         denial = command_denial(args, payload)
-    elif tool not in READ_TOOLS | {'ask_question'}:
-        denial = 'tool is outside the guarded visual-prompt capability set'
+    elif tool not in READ_TOOLS | NEUTRAL_TOOLS:
+        denial = f'tool {tool!r} is outside the guarded visual-prompt capability set'
     return {'decision': 'deny', 'reason': denial} if denial else {'decision': 'allow'}
 
 
@@ -148,7 +190,7 @@ def _post_tool(payload: dict) -> dict:
     if (tool_call.get('name') not in WRITE_TOOLS or target is None
             or not target.is_file() or not target.name.startswith('scene-')):
         return {}
-    state = _claim_primary(payload)
+    state, _ = _claim_primary(payload)
     conversation = str(payload.get('conversationId') or '')
     if state.get('primary_conversation_id') != conversation:
         return {}
@@ -160,6 +202,10 @@ def _post_tool(payload: dict) -> dict:
     }
     log = _log_path(target)
     log.parent.mkdir(parents=True, exist_ok=True)
+    if SCENE_FILE_RE.fullmatch(target.name):
+        # Only numbered scenes mean "this session authored prompts"; scene-plan.md
+        # alone must not arm the closing gate (plan-only sessions stop there).
+        _work_marker(payload).write_text(f'{target.parent}\n{log}\n', encoding='utf-8')
     with log.open('a+', encoding='utf-8') as stream:
         if fcntl is not None:
             fcntl.flock(stream, fcntl.LOCK_EX)
@@ -182,12 +228,84 @@ def _post_tool(payload: dict) -> dict:
     return {}
 
 
+def _gate_failure(work: Path, log: Path) -> str | None:
+    """Run the closing canonical gates; return the first failure text, or None."""
+    images = sorted(work.parent.glob('*_image_prompts.txt'))
+    if not images:
+        return ('no *_image_prompts.txt next to .work — assemble the final output '
+                'with scripts/assemble_outputs.py before ending the run')
+    helpers = SKILL_ROOT / 'scripts'
+    gates = (
+        [sys.executable, str(helpers / 'check_run_legit.py'),
+         '--work', str(work), '--image', str(images[0]),
+         '--require-authorship', '--authorship-log', str(log)],
+        # Anti-repetition is part of "done": template-stamped scenes must not be
+        # shippable just because every file has valid provenance.
+        [sys.executable, str(helpers / 'check_prompt_similarity.py'),
+         '--image', str(images[0])],
+    )
+    for command in gates:
+        try:
+            # Both gates must finish inside the hook's own 120s budget.
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=45)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f'{Path(command[1]).name} could not run ({type(exc).__name__})'
+        if completed.returncode != 0:
+            return (completed.stdout + completed.stderr).strip()[:1500]
+    return None
+
+
+def _stop(payload: dict) -> dict:
+    """Refuse to end a guarded run whose legitimacy gate has not passed.
+
+    Bounded by MAX_STOP_HOLDS so a run can never be trapped in a stop loop: after
+    that many holds the session is allowed to end and the failure stands.
+    """
+    if (not _active(payload) or payload.get('error')
+            or os.environ.get('VP_GUARD_STOP_GATE') == '0'):
+        return {}
+    # Only hold a normal "I am done" stop. Errors, cancellations and step-limit
+    # stops must end immediately — the user is already dealing with them.
+    if str(payload.get('terminationReason') or 'model_stop') != 'model_stop':
+        return {}
+    marker = _work_marker(payload)
+    if not marker.is_file():
+        return {}
+    state, _ = _claim_primary(payload)
+    if state.get('primary_conversation_id') != str(payload.get('conversationId') or ''):
+        return {}
+    counter = _stop_counter(payload)
+    # Global and plugin hook registrations both fire for one stop, so count holds
+    # per execution instead of per call — otherwise one stop burns the budget.
+    execution = str(payload.get('executionNum') or '')
+    try:
+        record = json.loads(counter.read_text(encoding='utf-8'))
+        holds, last = int(record['holds']), str(record.get('execution') or '')
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        holds, last = 0, ''
+    if holds >= MAX_STOP_HOLDS and execution != last:
+        return {}
+    work_line, _, log_line = marker.read_text(encoding='utf-8').partition('\n')
+    failure = _gate_failure(Path(work_line.strip()), Path(log_line.strip()))
+    if failure is None:
+        return {}
+    if execution != last:
+        holds += 1
+        counter.write_text(json.dumps({'holds': holds, 'execution': execution}),
+                           encoding='utf-8')
+    return {'decision': 'continue', 'reason': (
+        'visual-prompt run is not finished: the closing gate still fails. Fix the '
+        f'scenes yourself and re-run the gate ({MAX_STOP_HOLDS - holds} hold(s) '
+        f'left before the run ends as-is).\n{failure}'
+    )}
+
+
 def main() -> int:
     event = sys.argv[1] if len(sys.argv) == 2 else ''
     payload = json.load(sys.stdin)
     guard_active = _active(payload)
     handlers = {'pre-invocation': _pre_invocation, 'pre-tool-use': _pre_tool,
-                'post-tool-use': _post_tool}
+                'post-tool-use': _post_tool, 'stop': _stop}
     try:
         result = handlers[event](payload) if event in handlers else {}
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
