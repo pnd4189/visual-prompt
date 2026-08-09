@@ -24,7 +24,15 @@ delegation, runtime generators, and non-primary artifact mutation at tool time.
 
 ## Success Criteria
 
-- [x] Agy runner workspaces load the guard from `.agents/hooks.json`.
+- [ ] ~~Agy runner workspaces load the guard from `.agents/hooks.json`.~~
+  **Disproven 2026-08-09** on Agy 1.1.11: a probe hook placed there never fired in
+  print or interactive mode. The workspace copy is inert, kept only for forward
+  compatibility. Enforcement comes from two paths that do load — the global
+  `~/.gemini/config/hooks.json` and the imported plugin's own `hooks.json` — which
+  is why every hook event fires twice and the guard must stay idempotent.
 - [x] Direct setup installs a global fallback hook without overwriting unrelated
   user hooks.
 - [x] Delegation and runtime prompt generators fail closed.
+- [x] The guard arms from the user's `/visual-prompt` turn, not from a marker the
+  model must choose to read (fixed 2026-08-09; Agy stores only the raw user turn
+  in `transcript_full.jsonl`).

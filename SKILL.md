@@ -40,11 +40,14 @@ prompts. Video and music files are opt-in:
   `--worker-manifest` for Pass-2 scene expansion. Each worker is itself the
   parent model for its disjoint scene range — RULE 0 binds every worker
   session (no nested delegation), and direct invocations never use worker mode.
-- **Agy runtime authorship is enforced, not merely instructed.** Plugin, global,
-  and runner-workspace hook paths all route to the same guard, which blocks
-  delegation/background tools, runtime generators, non-canonical commands, and
-  non-primary writes. Every Agy scene write records content-hash provenance;
-  final and worker gates reject missing, secondary-agent, or stale hashes. The
+- **Agy runtime authorship is enforced, not merely instructed.** The guard loads
+  from the global `~/.gemini/config/hooks.json` and from the imported plugin's
+  `hooks.json` (so every event fires twice — the guard is idempotent), arms
+  on the user's `/visual-prompt` turn and blocks delegation/background tools,
+  runtime generators, non-canonical commands, and non-primary writes. Every Agy
+  scene write records content-hash provenance; final and worker gates reject
+  missing, secondary-agent, or stale hashes, and the `Stop` gate refuses to end a
+  run whose legitimacy gate still fails (bounded to 2 holds, never a loop). The
   restricted `visual-prompt-writer` primary agent plus `VP_WORKERS` keeps bounded
   parallel generation fast without permitting nested writers.
 - **Parent-only micro-batches.** Generate at most three scene files per creative

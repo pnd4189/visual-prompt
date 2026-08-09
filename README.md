@@ -41,9 +41,15 @@ hook chặn subagent/background/runtime generator và ghi SHA-256 provenance cho
 session độc lập và không thể spawn thêm tầng writer.
 
 `setup.sh` / `setup.bat` merge guard theo tên vào
-`~/.gemini/config/hooks.json` mà không thay thế hook khác. Runner còn tự gắn
-workspace hook dự phòng, nên cả lệnh trực tiếp lẫn batch worker đều được bảo vệ
-trên các bản Agy 1.1.x không nạp hook từ legacy plugin ổn định.
+`~/.gemini/config/hooks.json` mà không thay thế hook khác. Agy 1.1.11 nạp guard
+qua HAI đường — file global đó và `hooks.json` của plugin đã import — nên mỗi sự
+kiện hook chạy 2 lần; guard được viết idempotent để chịu điều đó.
+`.agents/hooks.json` trong workspace thì KHÔNG được nạp (đã đo ở cả print lẫn
+interactive), chỉ giữ lại để tương thích về sau.
+
+Guard tự bật khi thấy lượt gọi `/visual-prompt` của user trong transcript, không
+phụ thuộc việc model có chịu đọc contract hay không, và `setup.sh` trỏ
+`commands/` + `prompts/` của bản plugin copy về repo để contract không bị cũ.
 
 ### Batch driver và parallel Pass-2 (opt-in)
 
