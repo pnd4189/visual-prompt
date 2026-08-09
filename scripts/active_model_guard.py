@@ -20,15 +20,16 @@ from active_model_policy import (
     command_denial, state_path, target_path, write_denial,
 )
 
-# Agy sends the proto enum name, not the lowercase label its embedded docs show.
-# Hold only the "model finished talking" endings; errors, cancels and budget
-# limits must end immediately.
-HOLDABLE_STOPS = frozenset({
-    '', 'model_stop', 'TERMINATION_REASON_UNSPECIFIED',
-    'TERMINATION_REASON_NO_TOOL_CALL', 'TERMINATION_REASON_TERMINAL_STEP_TYPE',
-})
-MAX_STALLED_HOLDS = 1   # two consecutive holds without progress, then let it end
-MAX_TOTAL_HOLDS = 200   # 120 scenes at three per batch needs ~40 continuations
+# Measured on the wire: Agy sends the enum name with the TERMINATION_REASON_
+# prefix stripped ("NO_TOOL_CALL"), not the lowercase label its embedded docs
+# print. Compare on the suffix so either spelling works. Hold only the "model
+# finished talking" endings — errors, cancels and budget limits must end at once.
+HOLDABLE_STOPS = frozenset({'', 'UNSPECIFIED', 'NO_TOOL_CALL',
+                            'TERMINAL_STEP_TYPE', 'MODEL_STOP'})
+# Both counters advance on every hook call, and Agy fires each event twice, so
+# these budgets are roughly double the number of real stops they allow.
+MAX_STALLED_HOLDS = 3   # ~2 consecutive stops with no new scene, then release
+MAX_TOTAL_HOLDS = 300   # ~150 stops; a 120-scene run needs about 40
 
 GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
 # Agy records the raw user turn, not the expanded slash-command prompt, so the
@@ -290,22 +291,33 @@ def _planned_scenes(work: Path) -> int:
     return sum(1 for row in rows if PLAN_ROW_RE.match(row))
 
 
+def _deliverable(folder: Path) -> Path | None:
+    outputs = sorted(folder.glob('*_image_prompts.txt'))
+    return outputs[0] if outputs else None
+
+
 def _assembled_scenes(folder: Path) -> int:
     """Scene blocks already merged into the deliverable next to .work."""
     try:
-        outputs = sorted(folder.glob('*_image_prompts.txt'))
-        return len(SCENE_BLOCK_RE.findall(outputs[0].read_text(encoding='utf-8'))) if outputs else 0
-    except (OSError, UnicodeError, IndexError):
+        output = _deliverable(folder)
+        return len(SCENE_BLOCK_RE.findall(output.read_text(encoding='utf-8'))) if output else 0
+    except (OSError, UnicodeError):
         return 0
+
+
+def _stop_reason(payload: dict) -> str:
+    raw = str(payload.get('terminationReason') or '').strip().upper()
+    prefix = 'TERMINATION_REASON_'
+    return raw[len(prefix):] if raw.startswith(prefix) else raw
 
 
 def _load_counter(payload: dict) -> dict:
     try:
         record = json.loads(_stop_counter(payload).read_text(encoding='utf-8'))
-        return {'holds': int(record['holds']), 'execution': str(record.get('execution') or ''),
-                'scenes': int(record.get('scenes') or 0), 'stalls': int(record.get('stalls') or 0)}
+        return {'holds': int(record['holds']), 'scenes': int(record.get('scenes') or 0),
+                'stalls': int(record.get('stalls') or 0)}
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        return {'holds': 0, 'execution': '', 'scenes': 0, 'stalls': 0}
+        return {'holds': 0, 'scenes': 0, 'stalls': 0}
 
 
 def _stop(payload: dict) -> dict:
@@ -319,7 +331,7 @@ def _stop(payload: dict) -> dict:
     if (not _active(payload) or payload.get('error')
             or os.environ.get('VP_GUARD_STOP_GATE') == '0'):
         return {}
-    if str(payload.get('terminationReason') or '') not in HOLDABLE_STOPS:
+    if _stop_reason(payload) not in HOLDABLE_STOPS:
         return {}
     marker = _work_marker(payload)
     if not marker.is_file():
@@ -339,21 +351,24 @@ def _stop(payload: dict) -> dict:
     else:
         failure = _gate_failure(work, Path(log_line.strip()))
         if failure is None:
-            return {}
-        message = ('visual-prompt run is not finished: the closing gate still '
-                   f'fails. Fix the scenes yourself and re-run the gate.\n{failure}')
-    # Global and plugin hook registrations both fire for one stop, so only the
-    # first call per execution may move the counters.
-    execution = str(payload.get('executionNum') or '')
+            if not scenes:
+                return {}
+            message = (f'the gates pass — now merge and tidy up: run '
+                       f'{SKILL_ROOT}/scripts/cleanup_work.py --work "{work}" '
+                       f'--image "{_deliverable(work.parent)}" to remove the '
+                       f'{scenes} merged scene files, then report the summary.')
+        else:
+            message = ('visual-prompt run is not finished: the closing gate still '
+                       f'fails. Fix the scenes yourself and re-run the gate.\n{failure}')
+    # executionNum is not a reliable event key (it stays 0 for a whole print-mode
+    # session), so every hook call moves the counters. Agy fires each event twice,
+    # which just halves the effective budget — bounded either way, never a loop.
     record = _load_counter(payload)
-    if record['execution'] == execution:
-        return {'decision': 'continue', 'reason': message}
     stalls = record['stalls'] + 1 if scenes <= record['scenes'] else 0
     if stalls > MAX_STALLED_HOLDS or record['holds'] >= MAX_TOTAL_HOLDS:
         return {}
     _stop_counter(payload).write_text(json.dumps({
-        'holds': record['holds'] + 1, 'execution': execution,
-        'scenes': scenes, 'stalls': stalls,
+        'holds': record['holds'] + 1, 'scenes': scenes, 'stalls': stalls,
     }), encoding='utf-8')
     return {'decision': 'continue', 'reason': message}
 

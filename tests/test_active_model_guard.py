@@ -312,26 +312,33 @@ class StopGateTests(unittest.TestCase):
         run_guard('post-tool-use', payload, env)
         return base_payload('primary', artifact), env
 
-    def test_stop_is_held_then_released_after_the_bounded_retries(self):
+    def _hold_until_release(self, payload: dict, env: dict[str, str], limit: int = 12) -> int:
+        """Stop repeatedly without progress; return how many holds it took."""
+        for attempt in range(1, limit + 1):
+            if run_guard('stop', payload, env) == {}:
+                return attempt
+        self.fail(f'stop was still held after {limit} calls — unbounded')
+
+    def test_stop_is_held_then_released_when_no_progress_follows(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload, env = self._authored_run(root)
-            # No assembled output yet -> the gate cannot pass. Each stop event has
-            # its own executionNum; the duplicate hook call must not consume one.
-            first = run_guard('stop', {**payload, 'executionNum': 1}, env)
+            # No assembled output yet -> the gate cannot pass.
+            first = run_guard('stop', payload, env)
             self.assertEqual('continue', first['decision'])
             self.assertIn('assemble', first['reason'])
-            self.assertEqual('continue',
-                             run_guard('stop', {**payload, 'executionNum': 1}, env)['decision'])
-            self.assertEqual('continue',
-                             run_guard('stop', {**payload, 'executionNum': 2}, env)['decision'])
-            self.assertEqual({}, run_guard('stop', {**payload, 'executionNum': 3}, env))
+            self.assertLessEqual(self._hold_until_release(payload, env), 12)
 
-    def test_stop_is_allowed_once_the_legitimacy_gate_passes(self):
+    def test_passing_gates_are_held_until_the_merged_scene_files_are_cleaned(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload, env = self._authored_run(root)
             (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+            held = run_guard('stop', payload, env)
+            self.assertEqual('continue', held['decision'])
+            self.assertIn('cleanup_work.py', held['reason'])
+            # Doing the cleanup is what lets the run end.
+            (root / '.work' / 'scene-001.md').unlink()
             self.assertEqual({}, run_guard('stop', payload, env))
 
     def test_template_stamped_output_holds_the_stop_even_with_valid_provenance(self):
@@ -369,17 +376,21 @@ class StopGateTests(unittest.TestCase):
                     'stop', {**stop, 'executionNum': scene}, env,
                 )['decision'])
 
-    def test_two_holds_without_new_scenes_release_the_run(self):
+    def test_a_stalled_run_is_released_and_never_loops(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload, env = self._authored_run(root)
             (root / '.work' / 'scene-plan.md').write_text(
                 '| 001 | 1 | beat |\n| 002 | 1 | beat |\n', encoding='utf-8',
             )
-            stop = {**payload, 'terminationReason': 'TERMINATION_REASON_NO_TOOL_CALL'}
-            self.assertEqual('continue', run_guard('stop', {**stop, 'executionNum': 1}, env)['decision'])
-            self.assertEqual('continue', run_guard('stop', {**stop, 'executionNum': 2}, env)['decision'])
-            self.assertEqual({}, run_guard('stop', {**stop, 'executionNum': 3}, env))
+            # The wire value carries no TERMINATION_REASON_ prefix; both spellings
+            # and executionNum 0 (which is falsy) must behave the same.
+            for reason in ('NO_TOOL_CALL', 'TERMINATION_REASON_NO_TOOL_CALL'):
+                with self.subTest(reason=reason):
+                    stop = {**payload, 'terminationReason': reason, 'executionNum': 0}
+                    self.assertEqual('continue', run_guard('stop', stop, env)['decision'])
+                    self._hold_until_release(stop, env)
+                    (root / 'guard.stop').unlink(missing_ok=True)  # VP_GUARD_STATE sidecar
 
     def test_a_cleaned_run_may_end_and_is_not_asked_for_its_scenes_back(self):
         # cleanup_work.py removes scene-NNN.md once they are merged; the gate must
