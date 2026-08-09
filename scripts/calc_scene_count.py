@@ -63,6 +63,9 @@ def _classify_density(hits_per_1k: float) -> str:
     return 'high'
 
 
+MIN_IMAGES = 4
+WORDS_PER_SCENE_FLOOR = 50
+
 _GROUNDED_MIX = {
     'action': 'source-supported only',
     'establishing': 'source-supported only',
@@ -78,7 +81,11 @@ def compute(wordcount: int, override_images: int | None, override_videos: int | 
         raise ValueError('--images must be at least 1')
     if override_videos is not None and override_videos < 1:
         raise ValueError('--videos must be at least 1')
-    auto_images = min(150, max(120, round(wordcount / 120)))
+    # The 120..150 band assumes a full chapter file. A short source cannot ground
+    # that many distinct scenes, so cap the band at one scene per 50 words —
+    # asking for more forces the model to fabricate, pad, or halt on turn one.
+    grounding_cap = max(MIN_IMAGES, wordcount // WORDS_PER_SCENE_FLOOR)
+    auto_images = min(150, max(120, round(wordcount / 120)), grounding_cap)
     images = override_images if override_images is not None else auto_images
     auto_videos = min(images, max(20, round(images / 6)))
     if override_videos is not None and override_videos > images:
@@ -107,6 +114,8 @@ def compute(wordcount: int, override_images: int | None, override_videos: int | 
         'combat_hits': int(combat_hits),
         'combat_hits_per_1k': round(hits_per_1k, 2),
         'action_density': density,
+        'grounding_capped': bool(override_images is None and auto_images == grounding_cap
+                                 and grounding_cap < 120),
         'mode': 'grounded',
         'epic': bool(epic),
         'recommended_mix': _GROUNDED_MIX,

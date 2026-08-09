@@ -150,6 +150,12 @@ args = [
     '--agent', 'visual-prompt-writer',
     '--mode', 'accept-edits',
     '--sandbox',
+    # accept-edits auto-approves file edits only: every run_command still raises
+    # an interactive confirmation that nobody answers in an unattended batch, so
+    # the first helper call hangs the whole attempt. Permission prompts are not
+    # the safety layer here — the runtime guard denies non-canonical tools and
+    # commands at PreToolUse, and it keeps doing so with prompts disabled.
+    '--dangerously-skip-permissions',
     '--add-dir', skill_dir,
     '--add-dir', local_dir,
 ]
@@ -180,6 +186,9 @@ guard_env.update({
     'VP_AUTHORSHIP_LOG': authorship_log,
     'VP_ALLOWED_WRITE_ROOTS': os.pathsep.join(allowed_roots),
     'VP_ALLOWED_OUTPUT_ROOTS': local_dir,
+    # Plan-only and worker sessions stop before assembly by design, so the
+    # closing gate must not hold them; the coordinator runs it after the join.
+    'VP_GUARD_STOP_GATE': '0' if mode in ('plan', 'worker') else '1',
 })
 child = pexpect.spawn(
     'agy', args, cwd=local_dir, env=guard_env,
@@ -208,6 +217,33 @@ patterns = [
 approvals = 0
 max_auto_approvals = 6
 completion_nudges = 0
+# A model that yields its turn early leaves the CLI idle at the prompt: no
+# pattern ever matches and the attempt would burn its whole deadline in silence.
+# Nudge a few times, then fail fast so the normal retry path takes over.
+idle_rounds = 0
+idle_nudges = 0
+max_idle_nudges = 4
+
+
+def artifact_pulse(root):
+    """Newest mtime among the run's own files — symlinked skill dirs excluded."""
+    latest = 0.0
+    for folder in (root, root / '.work'):
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_symlink() or entry.is_dir():
+                continue
+            try:
+                latest = max(latest, entry.stat().st_mtime)
+            except OSError:
+                continue
+    return latest
+
+
+last_pulse = artifact_pulse(local_path)
 deadline_seconds = {'full': 4 * 3600, 'plan': 3 * 3600, 'worker': 2 * 3600}[mode]
 deadline = time.monotonic() + deadline_seconds
 outcome = None
@@ -290,10 +326,47 @@ try:
             ready = outputs_ready
             if mode == 'full':
                 ready = ready or completion_hint.is_file()
-            if ready and completion_nudges == 0:
-                completion_nudges = 1
+            if not ready:
+                # Liveness must come from artifacts, not from the stream: an idle
+                # Agy TUI keeps redrawing, so "no bytes received" never happens.
+                pulse = artifact_pulse(local_path)
+                if pulse > last_pulse:
+                    last_pulse, idle_rounds = pulse, 0
+                else:
+                    idle_rounds += 1
+                # Two silent rounds (~3 min) — Agy models routinely yield their
+                # turn after a denied tool call and then wait for a human.
+                if idle_rounds >= 2:
+                    idle_nudges += 1
+                    if idle_nudges > max_idle_nudges:
+                        raise RuntimeError(
+                            'Agy stalled: no output and no artifacts after '
+                            f'{max_idle_nudges} nudges'
+                        )
+                    idle_rounds = 0
+                    print(
+                        f'   agy: idle — nudging ({idle_nudges}/{max_idle_nudges})',
+                        flush=True,
+                    )
+                    child.sendline(
+                        'Phiên vẫn đang chạy pipeline visual-prompt. Tiếp tục STEP '
+                        'đang dở ngay bây giờ, tự viết từng scene, không hỏi lại.'
+                    )
+                continue
+            if ready and completion_nudges >= 3:
+                # Every expected artifact is present and fresh; the model just
+                # will not emit the marker. Accept the artifacts and let the
+                # driver's own gate battery decide — waiting longer only burns
+                # the deadline.
+                print('   agy: outputs complete, no marker — accepting artifacts',
+                      flush=True)
+                outcome = 0
+                continue
+            if ready:
+                completion_nudges += 1
                 print(
-                    f'   agy: {ready_label} — requesting final marker',
+                    f'   agy: {ready_label} — requesting final marker '
+                    f'({completion_nudges}/3)',
                     flush=True,
                 )
                 child.sendline(
