@@ -163,6 +163,14 @@ class IdentityAnchorTests(unittest.TestCase):
 
 
 class PromptSimilarityTests(unittest.TestCase):
+    def test_one_identical_image_pair_is_a_violation(self):
+        scenes = similarity.parse_image(image_block('001', 'same subject') + '\n' +
+                                        image_block('002', 'same subject'))
+
+        result = similarity.check_image(scenes, 0.60, 0.95, 0, 4)
+
+        self.assertTrue(any(item['type'] == 'pair_copy' for item in result['violations']))
+
     def test_canonical_music_blocks_are_parsed_and_compared(self):
         body = music_body('mountain mist')
         loops = similarity.parse_music(f'{body}\n\n{body}\n')
