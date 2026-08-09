@@ -35,6 +35,7 @@ REM 2. Create dirs
 if not exist "%USERPROFILE%\.gemini\extensions" mkdir "%USERPROFILE%\.gemini\extensions"
 if not exist "%USERPROFILE%\.gemini\commands" mkdir "%USERPROFILE%\.gemini\commands"
 if not exist "%USERPROFILE%\.gemini\antigravity-cli\plugins" mkdir "%USERPROFILE%\.gemini\antigravity-cli\plugins"
+if not exist "%USERPROFILE%\.gemini\config" mkdir "%USERPROFILE%\.gemini\config"
 if not exist "%AGENT_SKILLS_DIR%" mkdir "%AGENT_SKILLS_DIR%"
 if not exist "%CODEX_DIR%\prompts" mkdir "%CODEX_DIR%\prompts"
 if not exist "%CLAUDE_DIR%\skills" mkdir "%CLAUDE_DIR%\skills"
@@ -58,6 +59,12 @@ if errorlevel 1 (
     echo [OK] Symlinks created.
 )
 :agy_ready
+
+python "%REPO%\scripts\install_agy_guard.py" --repo-root "%REPO%" --target "%USERPROFILE%\.gemini\config\hooks.json"
+if errorlevel 1 (
+    echo ERROR: Failed to install the Agy runtime guard.
+    exit /b 1
+)
 
 REM 4. Codex native skill + custom prompt shim
 fsutil reparsepoint query "%AGENT_SKILLS_DIR%\%SKILL_NAME%" >nul 2>&1

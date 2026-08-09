@@ -1,6 +1,7 @@
 description = "Generate grounded, non-repetitive image prompts by default; optionally add video/music prompts from Vietnamese xianxia/wuxia novel files"
 prompt = """
-Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.13.1.
+VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1
+Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.14.0.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 
@@ -37,6 +38,13 @@ Chia batch = chính bạn tự viết TỪNG file `.work/scene-NNN.md` bằng wr
 Mỗi micro-batch tối đa 3 scene liên tiếp; sau mỗi batch phải kiểm tra artifact thật.
 Gặp rate-limit / 429 hoặc hết quota của chính bạn = DỪNG và báo user tại scene ID
 đang chờ. Không fallback, không retry bằng một model/process khác.
+
+Trên Agy, plugin runtime guard là cổng bắt buộc: nó chặn tool delegation,
+background task, runtime generator, command/script ngoài allowlist và mọi write
+từ conversation không phải primary. Nó ghi SHA-256 provenance sau mỗi lần chính
+active model ghi `scene-NNN.md`; thiếu provenance khớp nội dung hiện tại = run
+FAIL. Luôn dùng đường dẫn tuyệt đối khi gọi file-write tool. `VP_WORKERS` chỉ tăng
+tốc bằng nhiều phiên primary Agy độc lập; bên trong từng phiên vẫn cấm nested agent.
 
 ### 🛡️ RULE — CONTENT-SAFETY (bắt buộc)
 
@@ -577,7 +585,8 @@ For mỗi micro-batch tối đa 3 scene row trong scene-plan (theo thứ tự sc
 
   c. Load `@prompts/prompt-expander-image.md` +
      `@references/strict-generation-contract.md` + execute (truyền `mode=grounded`)
-     → write scene_path với frontmatter:
+     → CHÍNH active model write scene_path bằng file-write tool (đường dẫn tuyệt
+     đối trên Agy; không qua shell/script) với frontmatter:
      ```
      ---
      scene_id: <NNN>
@@ -794,7 +803,8 @@ python3 scripts/validate_artifacts.py --check scenes --work-dir .work --scene-pl
 python3 scripts/validate_scene_plan.py --plan .work/scene-plan.md --chapters-json .work/chapters_qa.json
 python3 scripts/check_run_legit.py --work .work \
   --image "<stem>_image_prompts.txt" [--video "<stem>_video_prompts.txt"] \
-  --skill-dir "<skill_root>"
+  --skill-dir "<skill_root>" \
+  [--require-authorship --authorship-log .work/active-model-authorship.jsonl]
 python3 scripts/check_prompt_similarity.py --image "<stem>_image_prompts.txt" \
   [--video "<stem>_video_prompts.txt"]  # chỉ khi video_enabled
 python3 scripts/check_prompt_similarity.py --music "<stem>_music_prompts.txt"  # chỉ khi music_enabled
@@ -814,6 +824,8 @@ Xác nhận:
 5. `check_run_legit.py` exit 0. Exit 2 = dấu vân tay bypass (script tự chế trong
    `.work`, scene count lệch plan, boilerplate loop, optional block trùng lặp) →
    HALT, không sửa gate/allowlist, không sửa tay output để né.
+   Trên Agy, hai flag authorship trong lệnh trên là bắt buộc; Codex/Claude omit
+   vì không có Agy hook. Log cũ không tự bật chế độ này trên CLI khác.
 6. Similarity gate exit 0 cho image và mọi medium đã bật. Không sửa
    gate/threshold để né; nếu chưa đạt → HALT.
 

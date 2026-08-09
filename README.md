@@ -34,6 +34,17 @@ hoặc setting/camera/action/palette bị lặp. Character bible cũng không đ
 thiện ngoại hình” bằng suy đoán: tuổi, tóc, mặt, trang phục hoặc đạo cụ không có
 trong truyện phải giữ `not stated`.
 
+Trên Agy, ràng buộc này được enforce ở runtime: primary agent bị giới hạn tool,
+hook chặn subagent/background/runtime generator và ghi SHA-256 provenance cho từng
+`scene-NNN.md`. Gate cuối chỉ nhận scene có hash do chính primary conversation ghi.
+`VP_WORKERS` vẫn chạy song song để giữ tốc độ, nhưng mỗi worker là một primary
+session độc lập và không thể spawn thêm tầng writer.
+
+`setup.sh` / `setup.bat` merge guard theo tên vào
+`~/.gemini/config/hooks.json` mà không thay thế hook khác. Runner còn tự gắn
+workspace hook dự phòng, nên cả lệnh trực tiếp lẫn batch worker đều được bảo vệ
+trên các bản Agy 1.1.x không nạp hook từ legacy plugin ổn định.
+
 ### Batch driver và parallel Pass-2 (opt-in)
 
 `scripts/run-folder.sh` / `run-all.sh` chạy batch nhiều file/series, mặc định

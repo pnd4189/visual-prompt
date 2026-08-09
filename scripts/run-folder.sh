@@ -147,8 +147,9 @@ import pexpect
 args = [
     '-i', run_cmd,
     '--model', model,
+    '--agent', 'visual-prompt-writer',
     '--mode', 'accept-edits',
-    '--dangerously-skip-permissions',
+    '--sandbox',
     '--add-dir', skill_dir,
     '--add-dir', local_dir,
 ]
@@ -158,8 +159,31 @@ if extra_dir and os.path.isdir(extra_dir):
     args.extend(['--add-dir', extra_dir])
 
 attempt_started = time.time()
+local_path = Path(local_dir)
+for resource in ('.agents', 'scripts', 'prompts', 'references'):
+    link = local_path / resource
+    source = Path(skill_dir) / resource
+    if not link.exists():
+        link.symlink_to(source, target_is_directory=True)
+if mode == 'worker':
+    authorship_log = str(Path(worker_manifest).with_suffix('.authorship.jsonl'))
+    allowed_roots = [local_dir]
+else:
+    authorship_log = str(local_path / '.work' / 'active-model-authorship.jsonl')
+    allowed_roots = [str(local_path / '.work')]
+    if os.path.isdir(bibles_dir):
+        allowed_roots.append(bibles_dir)
+guard_env = os.environ.copy()
+guard_env.update({
+    'VP_GUARD_ACTIVE': '1',
+    'VP_GUARD_STATE': str(Path(authorship_log).parent / f'.guard-{batch_token}.json'),
+    'VP_AUTHORSHIP_LOG': authorship_log,
+    'VP_ALLOWED_WRITE_ROOTS': os.pathsep.join(allowed_roots),
+    'VP_ALLOWED_OUTPUT_ROOTS': local_dir,
+})
 child = pexpect.spawn(
-    'agy', args, cwd=skill_dir, encoding='utf-8', codec_errors='replace',
+    'agy', args, cwd=local_dir, env=guard_env,
+    encoding='utf-8', codec_errors='replace',
     timeout=90,
 )
 child.delaybeforesend = 0.1
@@ -226,7 +250,6 @@ try:
         else:
             if time.monotonic() >= deadline:
                 raise TimeoutError('Agy interactive run exceeded its deadline')
-            local_path = Path(local_dir)
             local_stem = local_path / local_path.name
             if mode == 'plan':
                 expected_outputs = [
@@ -376,6 +399,9 @@ if [ "$DRYRUN" != "1" ]; then
     printf '%s\n' "$available_models" >&2
     die "Sửa VP_MODEL rồi chạy lại (vd: VP_MODEL='Gemini 4 Pro (High)' $0 '$FOLDER')."
   }
+  available_agents=$(agy agent 2>/dev/null) || die "Không đọc được danh sách agent từ agy."
+  grep -qxF "visual-prompt-writer" <<< "$available_agents" \
+    || die "Agy chưa nạp primary agent visual-prompt-writer. Chạy bash setup.sh rồi mở phiên Agy mới."
 fi
 
 # Load a previously locked style for this series from the shared config, if any.
@@ -693,7 +719,8 @@ PY
         fi
         if python3 "$SKILL_DIR/scripts/worker_manifest.py" --verify-run "$m" > "$wlog.verify.json" \
             && python3 "$SKILL_DIR/scripts/check_run_legit.py" \
-              --work "$wdir" --worker-manifest "$m" > "$wlog.legit.txt"; then
+              --work "$wdir" --worker-manifest "$m" --require-authorship \
+              --authorship-log "${m%.json}.authorship.jsonl" > "$wlog.legit.txt"; then
           continue
         fi
         join_ok=0
@@ -721,7 +748,8 @@ PY
           if [ "$wexit" -ne 0 ] \
               || ! python3 "$SKILL_DIR/scripts/worker_manifest.py" --verify-run "$m" > "$wlog.verify-retry.json" \
               || ! python3 "$SKILL_DIR/scripts/check_run_legit.py" \
-                    --work "$wdir" --worker-manifest "$m" > "$wlog.legit-retry.txt"; then
+                    --work "$wdir" --worker-manifest "$m" --require-authorship \
+                    --authorship-log "${m%.json}.authorship.jsonl" > "$wlog.legit-retry.txt"; then
             join_ok=0
             echo "   ⚠ $tag — retry worker $(basename "$m" .json) vẫn FAIL"
           fi
@@ -731,9 +759,13 @@ PY
 
     if [ "$join_ok" = "1" ] && [ ${#worker_manifests[@]} -gt 0 ]; then
       merge_ok=1
+      authorship_log="$local_dir/.work/active-model-authorship.jsonl"
       for m in "${worker_manifests[@]}"; do
         wdir=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['work_dir'])" "$m")
         cp "$wdir"/scene-*.md "$local_dir/.work/" 2>/dev/null || merge_ok=0
+        worker_authorship="${m%.json}.authorship.jsonl"
+        [ -s "$worker_authorship" ] && cat "$worker_authorship" >> "$authorship_log" \
+          || merge_ok=0
       done
       if [ "$merge_ok" = "1" ] && python3 - "$SKILL_DIR/scripts" \
           "$local_dir/.work/scene-plan.md" "$local_dir/.work" <<'PY'
@@ -868,6 +900,8 @@ PY
     if ! python3 "$SKILL_DIR/scripts/check_run_legit.py" \
         --work "$local_dir/.work" --image "${local_stem}_image_prompts.txt" \
         --video "${local_stem}_video_prompts.txt" --skill-dir "$SKILL_DIR" \
+        --require-authorship \
+        --authorship-log "$local_dir/.work/active-model-authorship.jsonl" \
         --report-json "$legit_report"; then
       legit_repair_signature=$(python3 - "$legit_report" "$similarity_feedback" "$repair_chunk_size" <<'PY'
 import json

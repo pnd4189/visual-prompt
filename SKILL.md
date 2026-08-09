@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.13.1
+version: 0.14.0
 description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow
 license: MIT
 contextFileName: SKILL.md
@@ -40,6 +40,13 @@ prompts. Video and music files are opt-in:
   `--worker-manifest` for Pass-2 scene expansion. Each worker is itself the
   parent model for its disjoint scene range — RULE 0 binds every worker
   session (no nested delegation), and direct invocations never use worker mode.
+- **Agy runtime authorship is enforced, not merely instructed.** Plugin, global,
+  and runner-workspace hook paths all route to the same guard, which blocks
+  delegation/background tools, runtime generators, non-canonical commands, and
+  non-primary writes. Every Agy scene write records content-hash provenance;
+  final and worker gates reject missing, secondary-agent, or stale hashes. The
+  restricted `visual-prompt-writer` primary agent plus `VP_WORKERS` keeps bounded
+  parallel generation fast without permitting nested writers.
 - **Parent-only micro-batches.** Generate at most three scene files per creative
   turn, verify them, then continue. If quota or context runs out, stop at a
   resumable scene ID; never switch to a scripted generator.
@@ -218,7 +225,9 @@ visual-prompt/
 ├── commands/visual-prompt.toml
 ├── prompts/                  ← 9 LLM prompt files (incl. qa-proofread, music-prompt-builder, style-recommender)
 ├── references/               ← 11 static knowledge files (incl. strict generation contract, style catalog, safety blocklist)
-└── scripts/                  ← 16 Python helpers + 2 batch drivers (run-folder.sh, run-all.sh); the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
+├── hooks.json                ← Agy active-model runtime guard wiring
+├── agents/visual-prompt-writer/agent.md ← restricted primary Agy writer
+└── scripts/                  ← deterministic helpers + 2 batch drivers; the exact list is the CANONICAL_SCRIPTS allowlist in check_run_legit.py — anything else in scripts/ is treated as a bypass artifact
 ```
 
 See `HUONG-DAN-SU-DUNG.md` for the full Vietnamese user guide.

@@ -15,6 +15,13 @@ bash setup.sh
 - `~/.gemini/commands/visual-prompt.toml` → `<repo>/commands/visual-prompt.toml`
 - `~/.gemini/antigravity-cli/plugins/visual-prompt` → repo
 
+Setup cũng merge named runtime guard `visual-prompt-active-model-guard` vào
+`~/.gemini/config/hooks.json`; mọi hook khác trong file được giữ nguyên. Lớp này
+buộc active Agy model tự ghi từng scene và chặn subagent/runtime generator ngay
+ở tool call. Installer tạo launcher ổn định
+`~/.gemini/config/visual-prompt-active-model-guard.py` để Agy không làm vỡ path
+repo có khoảng trắng. Chạy lại setup là idempotent.
+
 Verify: mở Antigravity → gõ `/visual-prompt` → autocomplete xuất hiện.
 
 Đồng thời setup tạo:
@@ -51,10 +58,12 @@ Nếu setup scripts không chạy được:
 3. Symlink (hoặc copy) `<repo>/commands/visual-prompt.toml` vào
    `~/.gemini/commands/visual-prompt.toml`
 4. Symlink (hoặc copy) `<repo>` vào `~/.gemini/antigravity-cli/plugins/visual-prompt`
-5. Codex: symlink `<repo>/adapters/codex/visual-prompt` vào
+5. Cài Agy guard:
+   `python3 <repo>/scripts/install_agy_guard.py --repo-root <repo> --target ~/.gemini/config/hooks.json`
+6. Codex: symlink `<repo>/adapters/codex/visual-prompt` vào
    `~/.agents/skills/visual-prompt` và `<repo>/adapters/codex/visual-prompt.md`
    vào `~/.codex/prompts/visual-prompt.md`
-6. Claude Code: symlink `<repo>/adapters/claude-code/visual-prompt` vào
+7. Claude Code: symlink `<repo>/adapters/claude-code/visual-prompt` vào
    `~/.claude/skills/visual-prompt`
 
 ## Uninstall
@@ -68,3 +77,6 @@ rm -f ~/.claude/skills/visual-prompt
 ```
 
 Bibles ở `~/.gemini/bibles/` được giữ lại (chứa data của user).
+Vì `hooks.json` có thể chứa hook khác, uninstall không xoá cả file; nếu muốn gỡ
+guard, xoá key `visual-prompt-active-model-guard` trong JSON đó và file launcher
+`~/.gemini/config/visual-prompt-active-model-guard.py`.

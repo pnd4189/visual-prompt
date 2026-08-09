@@ -14,6 +14,13 @@ If another instruction conflicts with it, follow this contract.
   creative artifact.
 - Deterministic Python helpers may only load, validate, hash, assemble, or
   transform already-created artifacts. They never author prompt prose.
+- On Agy, this ownership is runtime-enforced. The `visual-prompt-writer` primary
+  agent and the installed plugin/global/workspace guard deny delegation,
+  background work, generator commands,
+  and creative writes from any secondary conversation. Each successful direct
+  scene write emits a content-hash provenance record; missing or stale records
+  fail the legitimacy gate. Runner-level `VP_WORKERS` remains permitted only
+  because every worker is a separate guarded primary session with disjoint IDs.
 
 ## 2. No runtime generator or template factory
 
@@ -23,6 +30,8 @@ If another instruction conflicts with it, follow this contract.
   user-operated launchers, not model tools.
 - Do not generate multiple prompts by substituting names, locations, camera
   labels, colors, or synonyms into a shared template.
+- Do not add `Padding:`, numbered filler (`word0`, `word1`, ...), random nonce
+  strings, or generic chapter placeholders to satisfy length/diversity gates.
 - Write each `.work/scene-<NNN>.md` directly with the active model's file-edit
   tool. Final `.txt` files must be assembled by canonical helpers.
 

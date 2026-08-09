@@ -35,6 +35,7 @@ echo "[OK] $(python3 --version)"
 mkdir -p "$HOME/.gemini/extensions"
 mkdir -p "$HOME/.gemini/commands"
 mkdir -p "$HOME/.gemini/antigravity-cli/plugins"
+mkdir -p "$HOME/.gemini/config"
 mkdir -p "$AGENT_SKILLS_DIR" "$CODEX_CONFIG_DIR/prompts"
 mkdir -p "$CLAUDE_CONFIG_DIR/skills"
 
@@ -47,6 +48,13 @@ echo "[OK] Symlinks created:"
 echo "     ~/.gemini/extensions/$SKILL_NAME           -> $REPO"
 echo "     ~/.gemini/commands/$SKILL_NAME.toml         -> $REPO/commands/$SKILL_NAME.toml"
 echo "     ~/.gemini/antigravity-cli/plugins/$SKILL_NAME -> $REPO"
+
+# Agy 1.1.x does not consistently discover hooks from legacy-imported plugins.
+# Merge this named hook into the global config so direct slash invocations are
+# guarded in every working directory without replacing unrelated user hooks.
+python3 "$REPO/scripts/install_agy_guard.py" \
+    --repo-root "$REPO" \
+    --target "$HOME/.gemini/config/hooks.json"
 
 # 4. Codex links: native skill + explicit custom-prompt slash shim.
 link_path "$AGENT_SKILLS_DIR/$SKILL_NAME" \

@@ -1,0 +1,35 @@
+{
+  "visual-prompt-active-model-guard": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/active_model_guard.py pre-invocation",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/active_model_guard.py pre-tool-use",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/active_model_guard.py post-tool-use",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

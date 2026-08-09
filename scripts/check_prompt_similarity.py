@@ -30,6 +30,11 @@ SCENE_RE = re.compile(r'^--- SCENE (\d+[a-zA-Z]?) ---\s*$', re.MULTILINE)
 LOOP_RE = re.compile(r'^--- LOOP (\d+) / \d+.*---\s*$', re.MULTILINE)
 SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 WORD_RE = re.compile(r"[\w'-]+", re.UNICODE)
+NUMBERED_FILLER_RE = re.compile(r'^(?:word|token|pad|filler)[_-]?\d+$', re.I)
+GENERIC_TEMPLATE_RE = re.compile(
+    r'\b(?:scene setting based on chapter|padding to bypass|generic cinematic scene)\b',
+    re.I,
+)
 FIELD_PATTERNS = tuple(
     (
         name,
@@ -128,7 +133,16 @@ def parse_music(text: str) -> list[dict]:
 
 
 def _tokens(text: str) -> list[str]:
-    return WORD_RE.findall(text.lower())
+    normalized = []
+    for token in WORD_RE.findall(text):
+        if NUMBERED_FILLER_RE.fullmatch(token):
+            normalized.append('<filler>')
+        elif (len(token) >= 9 and sum(char.isupper() for char in token) >= 2
+              and sum(char.islower() for char in token) >= 2):
+            normalized.append('<nonce>')
+        else:
+            normalized.append(token.casefold())
+    return normalized
 
 
 def _tfidf_vectors(tokenized: list[list[str]]) -> tuple[list[dict[str, float]], list[float]]:
@@ -189,6 +203,24 @@ def check_image(scenes: list[dict], soft: float, near: float,
     pair_fields: dict[tuple[int, int], list[tuple[str, float, str, str]]] = defaultdict(list)
     exact_pairs: dict[str, list[tuple[int, int, float, str, str]]] = defaultdict(list)
     field_stats = {}
+
+    for scene in scenes:
+        all_fields = '\n'.join(scene['fields'].values())
+        filler_count = sum(
+            NUMBERED_FILLER_RE.fullmatch(token) is not None
+            for token in WORD_RE.findall(all_fields)
+        )
+        reasons = []
+        if filler_count >= 20:
+            reasons.append(f'numbered filler flood ({filler_count} tokens)')
+        if GENERIC_TEMPLATE_RE.search(all_fields):
+            reasons.append('generic template phrase')
+        if reasons:
+            violations.append({
+                'type': 'template_junk', 'scene_a': scene['scene_id'],
+                'reason': '; '.join(reasons),
+            })
+            banned_phrases.extend(reasons)
 
     for field in COMPARED_IMAGE_FIELDS:
         documents = [scene['fields'].get(field, '') for scene in scenes]
@@ -294,12 +326,15 @@ def _scene_id_sort_key(scene_id: int | str) -> tuple[int, str]:
 
 def _rewrite_scene_ids(violations: list[dict]) -> list[int | str]:
     graph: dict[int | str, set[int | str]] = defaultdict(set)
+    standalone = set()
     for violation in violations:
         left = violation.get('scene_a')
         right = violation.get('scene_b')
         if isinstance(left, (int, str)) and isinstance(right, (int, str)):
             graph[left].add(right)
             graph[right].add(left)
+        elif isinstance(left, (int, str)):
+            standalone.add(left)
     rewrite = []
     unseen = set(graph)
     while unseen:
@@ -315,7 +350,7 @@ def _rewrite_scene_ids(violations: list[dict]) -> list[int | str]:
         unseen -= component
         keep = min(component, key=_scene_id_sort_key)
         rewrite.extend(component - {keep})
-    return sorted(rewrite, key=_scene_id_sort_key)
+    return sorted(set(rewrite) | standalone, key=_scene_id_sort_key)
 
 
 def _dedupe_phrases(phrases: list[str]) -> list[str]:
@@ -441,7 +476,7 @@ def main() -> int:
     parser.add_argument('--history')
     parser.add_argument('--soft', type=float, default=0.60)
     parser.add_argument('--near', type=float, default=0.95)
-    parser.add_argument('--max-pair-copies', type=int, default=1)
+    parser.add_argument('--max-pair-copies', type=int, default=0)
     parser.add_argument('--max-exact-per-field', type=int, default=4)
     args = parser.parse_args()
 

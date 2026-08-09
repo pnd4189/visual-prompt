@@ -27,7 +27,9 @@ entry (non-canonical scripts/ file, root-level code file) into
 <skill_root>/.quarantine-auto/ — recoverable, never deletes. run-folder.sh calls
 this before each attempt so a prior bypass can't stale-poison the retry.
 """
+import hashlib
 import json
+import os
 import re
 import sys
 import tempfile
@@ -49,10 +51,13 @@ SHORT_MAJORITY_FRAC = 0.5
 # model-made bypass helper (contract #1/#5/#6). Update this set whenever the
 # skill adds a real helper — same release discipline as the SKILL.md version bump.
 CANONICAL_SCRIPTS = {
-    '__init__.py', '_io_utils.py', 'append_bible_row.py', 'assemble_outputs.py',
+    '__init__.py', '_io_utils.py', 'active_model_guard.py',
+    'active_model_command_policy.py', 'active_model_policy.py',
+    'append_bible_row.py', 'assemble_outputs.py',
     'assemble_qa.py', 'calc_scene_count.py', 'check_anchor_consistency.py',
     'check_content_safety.py', 'check_previous_continuity.py',
     'check_prompt_similarity.py', 'check_run_legit.py', 'load_input.py',
+    'install_agy_guard.py',
     'resize_16_9.py', 'run-all.sh', 'run-folder.sh',
     'validate_artifacts.py', 'validate_scene_plan.py', 'worker_manifest.py',
 }
@@ -67,6 +72,12 @@ ROOT_CODE_GLOBS = (
 )
 RUNTIME_CODE_SUFFIXES = {pattern[1:] for pattern in ROOT_CODE_GLOBS}
 RUNTIME_CODE_SUFFIXES.update({'.exe', '.com'})
+PADDING_HEADER_RE = re.compile(r'^\s*(?:padding|filler|word padding)\s*:', re.I | re.M)
+NUMBERED_FILLER_RE = re.compile(r'\b(?:word|token|pad|filler)[_-]?\d+\b', re.I)
+KNOWN_TEMPLATE_RE = re.compile(
+    r'\b(?:scene setting based on chapter|padding to bypass|generic cinematic scene)\b',
+    re.I,
+)
 
 
 def _looks_like_runtime_code(path):
@@ -77,6 +88,59 @@ def _looks_like_runtime_code(path):
             return stream.read(2) == b'#!'
     except OSError:
         return True
+
+
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _template_junk(body):
+    """Return explicit non-prose padding/template fingerprints."""
+    reasons = []
+    numbered = NUMBERED_FILLER_RE.findall(body)
+    if PADDING_HEADER_RE.search(body):
+        reasons.append('padding header')
+    if len(numbered) >= 20:
+        reasons.append(f'numbered filler flood ({len(numbered)} tokens)')
+    if KNOWN_TEMPLATE_RE.search(body):
+        reasons.append('generic template phrase')
+    return reasons
+
+
+def _authorship_errors(scene_files, log_path):
+    if log_path is None or not log_path.is_file():
+        return ['active-model authorship log thiếu']
+    records = []
+    try:
+        for line_number, raw in enumerate(log_path.read_text(encoding='utf-8').splitlines(), 1):
+            if not raw.strip():
+                continue
+            record = json.loads(raw)
+            if not isinstance(record, dict):
+                raise ValueError(f'line {line_number} không phải object')
+            records.append(record)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        return [f'active-model authorship log không hợp lệ: {exc}']
+    proven = {
+        (record.get('basename'), record.get('sha256'))
+        for record in records
+        if record.get('schema') == 1
+        and record.get('event') == 'creative_write'
+        and record.get('conversation_id')
+        and record.get('conversation_id') == record.get('primary_conversation_id')
+        and record.get('model')
+        and isinstance(record.get('size'), int) and record.get('size') > 0
+        and Path(str(record.get('target', ''))).name == record.get('basename')
+        and record.get('tool') in {'write_to_file', 'replace_file_content', 'multi_replace_file_content'}
+    }
+    errors = []
+    for scene in sorted(scene_files):
+        digest = _sha256(scene)
+        if (scene.name, digest) not in proven:
+            errors.append(
+                f'{scene.name} thiếu provenance khớp SHA-256 từ primary active model'
+            )
+    return errors
 
 
 def rogue_entries(skill_dir):
@@ -123,7 +187,9 @@ def _fail(errors):
 
 def write_report(path, boilerplate, only_boilerplate, worker_run=False):
     report = {
-        'boilerplate_scene_ids': [item['scene_id'] for item in boilerplate],
+        'boilerplate_scene_ids': list(dict.fromkeys(
+            item['scene_id'] for item in boilerplate
+        )),
         'only_boilerplate': only_boilerplate,
     }
     if worker_run:
@@ -148,6 +214,8 @@ def main():
     video_path = None
     skill_dir = None
     worker_manifest_path = None
+    authorship_log_path = None
+    require_authorship = False
     i = 0
     while i < len(args):
         a = args[i]
@@ -163,15 +231,26 @@ def main():
             skill_dir = Path(args[i + 1]); i += 2
         elif a == '--worker-manifest' and i + 1 < len(args):
             worker_manifest_path = Path(args[i + 1]); i += 2
+        elif a == '--authorship-log' and i + 1 < len(args):
+            authorship_log_path = Path(args[i + 1]); i += 2
+        elif a == '--require-authorship':
+            require_authorship = True; i += 1
         else:
             i += 1
     if work is None:
         print("usage: check_run_legit.py --work <work_dir> --image <img.txt> "
               "[--video <vid.txt>] [--skill-dir <skill_root>] "
-              "[--worker-manifest <manifest.json>]\n"
+              "[--worker-manifest <manifest.json>] [--require-authorship "
+              "--authorship-log <records.jsonl>]\n"
               "       check_run_legit.py --purge-skill-dir <skill_root>",
               file=sys.stderr)
         sys.exit(1)
+    default_authorship_log = work / 'active-model-authorship.jsonl'
+    if os.environ.get('VP_GUARD_ACTIVE') == '1':
+        require_authorship = True
+        if authorship_log_path is None:
+            configured = os.environ.get('VP_AUTHORSHIP_LOG')
+            authorship_log_path = Path(configured) if configured else default_authorship_log
     errors = []
     boilerplate = []
     worker_run = False
@@ -237,6 +316,16 @@ def main():
         for name in sorted(expected - set(actual)):
             errors.append(f"worker workdir thiếu scene file được giao: {name}")
 
+    scene_artifacts = [
+        path for path in work.rglob('*')
+        if path.is_file() and SCENE_FILE_RE.fullmatch(path.name)
+    ]
+    if require_authorship:
+        if not scene_artifacts:
+            errors.append('không có scene artifact để kiểm tra active-model authorship')
+        else:
+            errors.extend(_authorship_errors(scene_artifacts, authorship_log_path))
+
     # 2. scene-plan.md + scene-NNN.md count matches plan — ONLY when .work still
     # holds the artifacts. The skill sometimes cleans .work after assemble (its
     # log says "dọn dẹp .work"), which is legitimate; in that case the binding
@@ -291,8 +380,9 @@ def main():
             # scene-count checks above.
             for k, m in enumerate(markers):
                 end = markers[k + 1].start() if k + 1 < len(markers) else len(text)
-                body = text[m.end():end]
-                body = re.sub(r'^[A-Za-z][A-Za-z /]*:\s*', '', body, flags=re.M)
+                raw_body = text[m.end():end]
+                reasons = _template_junk(raw_body)
+                body = re.sub(r'^[A-Za-z][A-Za-z /]*:\s*', '', raw_body, flags=re.M)
                 words = body.lower().split()
                 counts = {}
                 for j in range(len(words) - NGRAM_N + 1):
@@ -303,13 +393,16 @@ def main():
                     if count > NGRAM_MAX_REPEAT
                 )
                 if repeated:
+                    reasons.extend(repeated)
+                if reasons:
                     boilerplate.append({
                         'scene_id': m.group(1),
-                        'phrases': repeated,
+                        'phrases': reasons,
                     })
             if boilerplate:
                 errors.append(
-                    f"{len(boilerplate)}/{len(markers)} scene block có boilerplate repeat (template-generated, bypass expander)"
+                    f"{len(boilerplate)}/{len(markers)} scene block có boilerplate/padding "
+                    "(template-generated, bypass expander)"
                 )
 
             # 3b. Header-structure check: the image expander spec mandates 10
