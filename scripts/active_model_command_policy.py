@@ -9,8 +9,20 @@ from glob import glob, has_magic
 from pathlib import Path
 
 from active_model_policy import (
-    FINAL_OUTPUT_RE, SKILL_ROOT, inside, roots, state_path, write_denial,
+    FINAL_OUTPUT_RE, SKILL_ROOT, inside, remember_input_root, roots, state_path,
+    write_denial,
 )
+
+# Helpers that receive the novel path the user named. The first one to resolve it
+# teaches the guard which folder this run owns, so a direct /visual-prompt works
+# from whatever workspace Agy happens to have open.
+INPUT_HELPERS = {
+    'load_input.py': None,                 # positional
+    'check_previous_continuity.py': None,  # positional
+    'assemble_qa.py': '--input',
+    'assemble_outputs.py': '--input',
+    'calc_scene_count.py': '--input',
+}
 
 ALLOWED_HELPERS = {
     'append_bible_row.py', 'assemble_outputs.py', 'assemble_qa.py',
@@ -44,6 +56,23 @@ def _is_canonical_helper(script: Path) -> bool:
         )
     except OSError:
         return False
+
+
+def _learn_input_root(name: str, tokens: list[str], cwd: Path, payload: dict) -> None:
+    """Teach the guard the input folder, from an already-approved helper call."""
+    if name not in INPUT_HELPERS:
+        return
+    option = INPUT_HELPERS[name]
+    if option is None:
+        candidates = [token for token in tokens if not token.startswith('-')]
+        raw = candidates[0] if candidates else None
+    else:
+        raw = _one(tokens, option)
+    if not raw:
+        return
+    target = _resolve(raw, cwd)
+    if target.is_file():
+        remember_input_root(payload, target.parent)
 
 
 def _resolve(raw: str, cwd: Path) -> Path:
@@ -204,7 +233,10 @@ def command_denial(args: dict, payload: dict) -> str | None:
             if denial:
                 return denial
             tokens = tokens[:index]
-        return _helper_denial(script.name, tokens[2:], cwd, payload)
+        denial = _helper_denial(script.name, tokens[2:], cwd, payload)
+        if denial is None:
+            _learn_input_root(script.name, tokens[2:], cwd, payload)
+        return denial
     if '>' in tokens:
         return 'only a canonical helper may redirect into a guarded artifact'
     if tokens[0] in {'sha1sum', 'sha256sum', 'wc', 'ls', 'stat', 'test'}:

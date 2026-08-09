@@ -51,6 +51,57 @@ class WriteRootTests(unittest.TestCase):
             )
 
 
+class InputRootLearningTests(unittest.TestCase):
+    """A direct /visual-prompt runs from whatever workspace Agy has open."""
+
+    def test_first_helper_call_opens_the_input_work_dir_and_nothing_more(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as novel:
+            workspace, novel_dir = Path(tmp).resolve(), Path(novel).resolve()
+            (novel_dir / 'chuong.txt').write_text('x', encoding='utf-8')
+            payload = {'workspacePaths': [str(workspace)],
+                       'artifactDirectoryPath': str(workspace)}
+            scene = novel_dir / '.work' / 'scene-001.md'
+            env = {'VP_GUARD_STATE': str(workspace / 'guard.json')}
+            with patch.dict(os.environ, env), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=workspace):
+                self.assertIn('outside the guarded artifact roots',
+                              policy.write_denial({'TargetFile': str(scene)}, payload))
+                self.assertIsNone(policy.command_denial({
+                    'CommandLine': f'python3 {ROOT}/scripts/load_input.py '
+                                   f'{novel_dir}/chuong.txt',
+                    'Cwd': str(workspace),
+                }, payload))
+                self.assertIsNone(policy.write_denial({'TargetFile': str(scene)}, payload))
+                # The folder itself stays closed — only .work/ opens up.
+                self.assertIn('outside the guarded artifact roots', policy.write_denial(
+                    {'TargetFile': str(novel_dir / 'stray.md')}, payload,
+                ))
+
+    def test_a_later_helper_cannot_repoint_the_learned_root(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as first, \
+                tempfile.TemporaryDirectory() as second:
+            workspace = Path(tmp).resolve()
+            one, two = Path(first).resolve(), Path(second).resolve()
+            (one / 'a.txt').write_text('x', encoding='utf-8')
+            (two / 'b.txt').write_text('y', encoding='utf-8')
+            payload = {'workspacePaths': [str(workspace)],
+                       'artifactDirectoryPath': str(workspace)}
+            with patch.dict(os.environ, {'VP_GUARD_STATE': str(workspace / 'guard.json')}), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=workspace):
+                for folder, name in ((one, 'a.txt'), (two, 'b.txt')):
+                    policy.command_denial({
+                        'CommandLine': f'python3 {ROOT}/scripts/load_input.py '
+                                       f'{folder}/{name}',
+                        'Cwd': str(workspace),
+                    }, payload)
+                self.assertIsNone(policy.write_denial(
+                    {'TargetFile': str(one / '.work' / 'scene-001.md')}, payload,
+                ))
+                self.assertIn('outside the guarded artifact roots', policy.write_denial(
+                    {'TargetFile': str(two / '.work' / 'scene-001.md')}, payload,
+                ))
+
+
 class CommandPolicyTests(unittest.TestCase):
     def denial(self, command: str, root: Path) -> str | None:
         env = {

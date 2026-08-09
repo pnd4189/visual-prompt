@@ -49,6 +49,38 @@ def state_path(payload: dict) -> Path:
     return Path(configured) if configured else base / '.visual-prompt-primary.json'
 
 
+def _input_root_marker(payload: dict) -> Path:
+    return state_path(payload).with_suffix('.root')
+
+
+def remember_input_root(payload: dict, folder: Path) -> None:
+    """Record the novel folder this session processes — once, never re-pointed.
+
+    A direct `/visual-prompt <path>` is normally invoked from whatever workspace
+    Agy happens to have open, so the run's own `.work/` would fall outside the
+    launch directory and every write would be denied. The folder of the input the
+    user named is the authoritative scope; it is learned from the first canonical
+    helper that resolves that input, and the exclusive create means a later call
+    cannot widen the scope somewhere else.
+    """
+    marker = _input_root_marker(payload)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError:
+        return
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+        stream.write(f'{folder}\n')
+
+
+def input_root(payload: dict) -> Path | None:
+    try:
+        recorded = _input_root_marker(payload).read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return None
+    return Path(recorded) if recorded else None
+
+
 def _agy_launcher_cwd() -> Path | None:
     """Recover Agy's launch directory when CLI 1.1.x sends no workspace paths."""
     if os.name != 'posix' or not Path('/proc').is_dir():
@@ -81,6 +113,9 @@ def roots(payload: dict) -> list[Path]:
             raw.append(str(launcher_cwd))
         else:
             raw.append(str(_hook_workspace_cwd()))
+        learned = input_root(payload)
+        if learned is not None:
+            raw.append(str(learned))
     resolved = [Path(item).expanduser().resolve() for item in raw if item]
     return list(dict.fromkeys(resolved))
 
