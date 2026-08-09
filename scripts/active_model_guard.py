@@ -20,7 +20,15 @@ from active_model_policy import (
     command_denial, state_path, target_path, write_denial,
 )
 
-MAX_STOP_HOLDS = 2
+# Agy sends the proto enum name, not the lowercase label its embedded docs show.
+# Hold only the "model finished talking" endings; errors, cancels and budget
+# limits must end immediately.
+HOLDABLE_STOPS = frozenset({
+    '', 'model_stop', 'TERMINATION_REASON_UNSPECIFIED',
+    'TERMINATION_REASON_NO_TOOL_CALL', 'TERMINATION_REASON_TERMINAL_STEP_TYPE',
+})
+MAX_STALLED_HOLDS = 1   # two consecutive holds without progress, then let it end
+MAX_TOTAL_HOLDS = 200   # 120 scenes at three per batch needs ~40 continuations
 
 GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
 # Agy records the raw user turn, not the expanded slash-command prompt, so the
@@ -35,6 +43,7 @@ TAIL_BYTES = 262_144
 # Mirrors SCENE_FILE_RE in check_run_legit.py — the closing gate and the guard
 # must agree on what counts as an authored scene.
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
+PLAN_ROW_RE = re.compile(r'^\s*\|\s*\d{1,3}[a-zA-Z]?\s*\|')
 GUARD_RULES = (
     'VISUAL-PROMPT GUARDED (Agy runtime). You are the primary active model: '
     'author every .work/scene-NNN.md yourself with the file-write tool using an '
@@ -257,18 +266,43 @@ def _gate_failure(work: Path, log: Path) -> str | None:
     return None
 
 
-def _stop(payload: dict) -> dict:
-    """Refuse to end a guarded run whose legitimacy gate has not passed.
+def _scene_count(work: Path) -> int:
+    try:
+        return sum(1 for entry in work.iterdir() if SCENE_FILE_RE.fullmatch(entry.name))
+    except OSError:
+        return 0
 
-    Bounded by MAX_STOP_HOLDS so a run can never be trapped in a stop loop: after
-    that many holds the session is allowed to end and the failure stands.
+
+def _planned_scenes(work: Path) -> int:
+    """How many scene rows the plan declares; 0 when there is no readable plan."""
+    try:
+        rows = (work / 'scene-plan.md').read_text(encoding='utf-8').splitlines()
+    except (OSError, UnicodeError):
+        return 0
+    return sum(1 for row in rows if PLAN_ROW_RE.match(row))
+
+
+def _load_counter(payload: dict) -> dict:
+    try:
+        record = json.loads(_stop_counter(payload).read_text(encoding='utf-8'))
+        return {'holds': int(record['holds']), 'execution': str(record.get('execution') or ''),
+                'scenes': int(record.get('scenes') or 0), 'stalls': int(record.get('stalls') or 0)}
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return {'holds': 0, 'execution': '', 'scenes': 0, 'stalls': 0}
+
+
+def _stop(payload: dict) -> dict:
+    """Drive a guarded run to completion instead of letting it pause or ship broken.
+
+    Two reasons to refuse a stop: scenes are still missing (the model likes to
+    write three and wait for a human), or the closing gates fail. Both are bounded
+    by progress — two consecutive holds that produce no new scene end the run — so
+    this can never become a loop.
     """
     if (not _active(payload) or payload.get('error')
             or os.environ.get('VP_GUARD_STOP_GATE') == '0'):
         return {}
-    # Only hold a normal "I am done" stop. Errors, cancellations and step-limit
-    # stops must end immediately — the user is already dealing with them.
-    if str(payload.get('terminationReason') or 'model_stop') != 'model_stop':
+    if str(payload.get('terminationReason') or '') not in HOLDABLE_STOPS:
         return {}
     marker = _work_marker(payload)
     if not marker.is_file():
@@ -276,30 +310,33 @@ def _stop(payload: dict) -> dict:
     state, _ = _claim_primary(payload)
     if state.get('primary_conversation_id') != str(payload.get('conversationId') or ''):
         return {}
-    counter = _stop_counter(payload)
-    # Global and plugin hook registrations both fire for one stop, so count holds
-    # per execution instead of per call — otherwise one stop burns the budget.
-    execution = str(payload.get('executionNum') or '')
-    try:
-        record = json.loads(counter.read_text(encoding='utf-8'))
-        holds, last = int(record['holds']), str(record.get('execution') or '')
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        holds, last = 0, ''
-    if holds >= MAX_STOP_HOLDS and execution != last:
-        return {}
     work_line, _, log_line = marker.read_text(encoding='utf-8').partition('\n')
-    failure = _gate_failure(Path(work_line.strip()), Path(log_line.strip()))
-    if failure is None:
+    work = Path(work_line.strip())
+    scenes, planned = _scene_count(work), _planned_scenes(work)
+    if planned and scenes < planned:
+        message = (f'visual-prompt is only {scenes}/{planned} scenes in. Write the '
+                   'next micro-batch now — do not stop to ask, do not summarise; '
+                   'keep going until every scene file exists, then run the gates.')
+    else:
+        failure = _gate_failure(work, Path(log_line.strip()))
+        if failure is None:
+            return {}
+        message = ('visual-prompt run is not finished: the closing gate still '
+                   f'fails. Fix the scenes yourself and re-run the gate.\n{failure}')
+    # Global and plugin hook registrations both fire for one stop, so only the
+    # first call per execution may move the counters.
+    execution = str(payload.get('executionNum') or '')
+    record = _load_counter(payload)
+    if record['execution'] == execution:
+        return {'decision': 'continue', 'reason': message}
+    stalls = record['stalls'] + 1 if scenes <= record['scenes'] else 0
+    if stalls > MAX_STALLED_HOLDS or record['holds'] >= MAX_TOTAL_HOLDS:
         return {}
-    if execution != last:
-        holds += 1
-        counter.write_text(json.dumps({'holds': holds, 'execution': execution}),
-                           encoding='utf-8')
-    return {'decision': 'continue', 'reason': (
-        'visual-prompt run is not finished: the closing gate still fails. Fix the '
-        f'scenes yourself and re-run the gate ({MAX_STOP_HOLDS - holds} hold(s) '
-        f'left before the run ends as-is).\n{failure}'
-    )}
+    _stop_counter(payload).write_text(json.dumps({
+        'holds': record['holds'] + 1, 'execution': execution,
+        'scenes': scenes, 'stalls': stalls,
+    }), encoding='utf-8')
+    return {'decision': 'continue', 'reason': message}
 
 
 def main() -> int:

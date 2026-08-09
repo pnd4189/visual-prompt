@@ -347,6 +347,40 @@ class StopGateTests(unittest.TestCase):
         self.assertEqual('continue', held['decision'])
         self.assertIn('pair_copy', held['reason'])
 
+    def test_yielded_turn_is_driven_on_while_scenes_are_still_missing(self):
+        # Agy reports a model that stopped talking as TERMINATION_REASON_NO_TOOL_CALL,
+        # not the lowercase label its embedded docs show.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            (root / '.work' / 'scene-plan.md').write_text(
+                '| scene_id | chapter |\n|---|---|\n'
+                + ''.join(f'| {n:03d} | 1 | beat |\n' for n in range(1, 6)),
+                encoding='utf-8',
+            )
+            stop = {**payload, 'terminationReason': 'TERMINATION_REASON_NO_TOOL_CALL'}
+            held = run_guard('stop', {**stop, 'executionNum': 1}, env)
+            self.assertEqual('continue', held['decision'])
+            self.assertIn('1/5 scenes', held['reason'])
+            # Progress resets the stall budget, so a long run keeps going.
+            for scene in range(2, 5):
+                (root / '.work' / f'scene-{scene:03d}.md').write_text('body', encoding='utf-8')
+                self.assertEqual('continue', run_guard(
+                    'stop', {**stop, 'executionNum': scene}, env,
+                )['decision'])
+
+    def test_two_holds_without_new_scenes_release_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            (root / '.work' / 'scene-plan.md').write_text(
+                '| 001 | 1 | beat |\n| 002 | 1 | beat |\n', encoding='utf-8',
+            )
+            stop = {**payload, 'terminationReason': 'TERMINATION_REASON_NO_TOOL_CALL'}
+            self.assertEqual('continue', run_guard('stop', {**stop, 'executionNum': 1}, env)['decision'])
+            self.assertEqual('continue', run_guard('stop', {**stop, 'executionNum': 2}, env)['decision'])
+            self.assertEqual({}, run_guard('stop', {**stop, 'executionNum': 3}, env))
+
     def test_error_and_non_model_stops_are_never_held(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

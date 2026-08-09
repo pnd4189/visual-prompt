@@ -125,9 +125,15 @@ Round-2 live checks:
 - The idle nudge fires exactly as designed (`agy: idle — nudging (1/3)`) after
   three silent rounds; threshold since tightened to two rounds because Agy models
   routinely yield their turn after a denied tool call.
-- The `Stop` gate is registered in all three hook configs and passes its unit
-  suite, but has not yet held a real Agy session — no live run has ended with a
-  failing gate since it was added.
+- The `Stop` gate was **dead in production and its unit suite did not notice**:
+  it compared `terminationReason` against `model_stop`, the label Agy's embedded
+  docs print, while the wire value is the proto enum name
+  (`TERMINATION_REASON_NO_TOOL_CALL` when a model stops talking). Every call
+  returned `{}`. The tests passed because they asserted against the same invented
+  value. Fixed by matching the real enum set, and the gate now also drives the run
+  forward while scenes are missing — bounded by progress, not by a fixed count.
+  Lesson: a test written from the same assumption as the code proves nothing;
+  the enum had to be read out of the binary.
 - Full batch run under the guard: idle nudge woke a yielded session, the model
   emitted the completion marker, the driver caught the missing `_qa.txt` and
   retried, and retry 2 produced complete artifacts. Gates on those artifacts:
