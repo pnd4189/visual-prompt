@@ -38,7 +38,9 @@ SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
 GUARD_RULES = (
     'VISUAL-PROMPT GUARDED (Agy runtime). You are the primary active model: '
     'author every .work/scene-NNN.md yourself with the file-write tool using an '
-    'absolute path, at most three scenes per turn. No subagent, background task, '
+    'absolute path, at most three scenes per write batch — then verify the files '
+    'and continue straight into the next batch yourself, without stopping to ask. '
+    'No subagent, background task, '
     'runtime generator script, or external model. Run only the canonical helpers '
     f'under {SKILL_ROOT}/scripts/ — one command per run_command call, no &&, ||, '
     'pipes, $(...) or backticks, and quote any path containing spaces. '
