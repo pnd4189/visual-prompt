@@ -177,7 +177,12 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | 
     if inside(target, SKILL_ROOT):
         return 'the visual-prompt skill directory is read-only'
     if target.suffix.casefold() in CODE_SUFFIXES:
-        return 'runtime code creation is forbidden; write the creative artifact directly'
+        # Terse refusals made the model retry variants for minutes (observed
+        # 2026-08-10). Close the door explicitly and point at the only way through.
+        return ('runtime code creation is forbidden and no variant of it will pass — '
+                'this skill has no generator path. Write .work/scene-plan.md and each '
+                '.work/scene-NNN.md yourself with the file-write tool, three scenes '
+                'per batch, and keep going until the plan is fully expanded')
     if any(value.lstrip().startswith('#!') for value in _strings(args)):
         return 'runtime code shebangs are forbidden'
     # A model blocked from writing .py will write the same program into a .md and
