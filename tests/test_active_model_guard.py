@@ -336,6 +336,10 @@ class StopGateTests(unittest.TestCase):
         artifact = root / 'artifact'; work = root / '.work'
         artifact.mkdir(); work.mkdir()
         (work / 'scene-plan.md').write_text('| 1 | chapter | grounded beat |\n', encoding='utf-8')
+        # What STEP 1.5 and the plan gate leave behind; the stop gate now refuses
+        # to grade a run that never produced them.
+        (work / 'chapters_qa.json').write_text('[]', encoding='utf-8')
+        (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
         scene = work / 'scene-001.md'
         scene.write_text('scene body', encoding='utf-8')
         env = {'VP_GUARD_ACTIVE': '1', 'VP_GUARD_STATE': str(root / 'guard.json'),
@@ -364,6 +368,49 @@ class StopGateTests(unittest.TestCase):
             self.assertEqual('continue', first['decision'])
             self.assertIn('assemble', first['reason'])
             self.assertLessEqual(self._hold_until_release(payload, env), 12)
+
+    def test_a_run_that_skipped_qa_and_the_plan_gate_cannot_end(self):
+        """Observed 2026-08-10: straight to scene-plan, no load/QA/bible/plan gate.
+
+        Every gate below agreed with it, because the scene files matched the plan
+        the model had written for itself and nothing ever read the source.
+        """
+        for absent in ('chapters_qa.json', 'plan.hash'):
+            with self.subTest(missing=absent), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                payload, env = self._authored_run(root)
+                (root / '.work' / absent).unlink()
+                (root / 'novel_image_prompts.txt').write_text(
+                    self.IMAGE_PROMPT, encoding='utf-8')
+
+                held = run_guard('stop', payload, env)
+
+                self.assertEqual('continue', held['decision'])
+                self.assertIn(absent, held['reason'])
+                self.assertIn('STEP 1', held['reason'])
+
+    def _stop_without_pipeline_artifacts(self, root: Path, worker: bool) -> dict:
+        payload, env = self._authored_run(root)
+        for name in ('chapters_qa.json', 'plan.hash'):
+            (root / '.work' / name).unlink()
+        state_path = root / 'guard.json'
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+        state['worker'] = worker
+        state_path.write_text(json.dumps(state), encoding='utf-8')
+        (root / 'novel_image_prompts.txt').write_text(
+            self.IMAGE_PROMPT, encoding='utf-8')
+        return run_guard('stop', payload, env)
+
+    def test_a_pass_two_worker_is_not_asked_for_steps_it_never_runs(self):
+        """A worker legitimately skips STEP 1-5, so the same .work must pass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = self._stop_without_pipeline_artifacts(Path(tmp), worker=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            allowed = self._stop_without_pipeline_artifacts(Path(tmp), worker=True)
+
+        # Same directory, same missing files — only the worker flag differs.
+        self.assertIn('skipped the steps', blocked['reason'])
+        self.assertNotIn('skipped the steps', str(allowed.get('reason', '')))
 
     def test_passing_gates_are_held_until_the_merged_scene_files_are_cleaned(self):
         with tempfile.TemporaryDirectory() as tmp:

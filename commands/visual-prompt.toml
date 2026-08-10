@@ -1,7 +1,7 @@
 description = "Generate grounded, non-repetitive image prompts by default; optionally add video/music prompts from Vietnamese xianxia/wuxia novel files"
 prompt = """
 VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1
-Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.16.1.
+Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.16.2.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 
@@ -89,6 +89,12 @@ lượng, size > 0, parse được frontmatter/header bắt buộc, và source a
 **Bắt buộc tồn tại để run hợp lệ:** `.work/scene-plan.md` (Pass 1) và
 `.work/scene-NNN.md` (Pass 2, mỗi cảnh 1 file). Thiếu hai thứ này = run SAI, phải
 làm lại đúng pipeline. Cuối run có SELF-AUDIT (sau STEP 7) kiểm tra điều này.
+
+KHÔNG được nhảy thẳng tới STEP 5. Kể cả khi input đã tên `*_qa.txt`, vẫn phải chạy
+STEP 1 (`chapters.json`) và STEP 1.5 (`chapters_qa.json`) — đó là nguồn DUY NHẤT
+mà `source_anchor` của mọi cảnh được đối chiếu; không có nó thì không gate nào
+kiểm chứng được truyện. Guard chặn ở `Stop`: thiếu `.work/chapters_qa.json` hoặc
+`.work/plan.hash` (do STEP 5.5 ghi) thì run KHÔNG được phép kết thúc.
 
 **Lý do:** scene-planner khóa beat vào source anchor, còn camera/setting/action/palette
 được active model sáng tạo riêng từng scene. Không được ép quota làm thay đổi truyện.

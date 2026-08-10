@@ -107,6 +107,12 @@ def _lean_invocation(path: str | None) -> bool:
     return turn is not None and b'--lean' in turn
 
 
+def _worker_invocation(path: str | None) -> bool:
+    """Is this a Pass-2 worker session, which is allowed to skip STEP 1-5?"""
+    turn = _invocation_turn(path)
+    return turn is not None and b'--worker-manifest' in turn
+
+
 def _images_invocation(path: str | None) -> int | None:
     """The image total the user's own /visual-prompt line overrode, if any.
 
@@ -147,6 +153,7 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         'model': str(payload.get('modelName') or ''),
         'lean': _lean_invocation(payload.get('transcriptPath')),
         'images_override': _images_invocation(payload.get('transcriptPath')),
+        'worker': _worker_invocation(payload.get('transcriptPath')),
     }
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -302,12 +309,49 @@ def _post_tool(payload: dict) -> dict:
     return {}
 
 
-def _gate_failure(work: Path, log: Path, lean: bool = False) -> str | None:
+# What a run that actually followed the pipeline leaves behind. chapters_qa.json
+# is the QA'd source every scene anchor is checked against; plan.hash is written
+# by the plan gate itself, so its absence means that gate never ran. Neither is
+# removed by cleanup_work, so both survive to the end of a healthy run.
+REQUIRED_PIPELINE_ARTIFACTS = ('chapters_qa.json', 'plan.hash')
+
+
+def _missing_pipeline_artifacts(work: Path) -> list[str]:
+    """Absent grounding artifacts — or nothing, when .work cannot be read at all.
+
+    These runs live on a gdrive FUSE mount that intermittently fails a stat with
+    EIO, and is_file() reports that as "absent". Accusing a healthy run of
+    skipping the pipeline because the mount blinked is worse than letting one bad
+    run reach the gates below, so read the directory once and only judge what it
+    actually returns.
+    """
+    try:
+        listing = {entry.name for entry in work.iterdir()}
+    except OSError:
+        return []
+    return [name for name in REQUIRED_PIPELINE_ARTIFACTS if name not in listing]
+
+
+def _gate_failure(work: Path, log: Path, lean: bool = False,
+                  worker: bool = False) -> str | None:
     """Run the closing canonical gates; return the first failure text, or None."""
     images = sorted(work.parent.glob('*_image_prompts.txt'))
     if not images:
         return ('no *_image_prompts.txt next to .work — assemble the final output '
                 'with scripts/assemble_outputs.py before ending the run')
+    # A run that jumps straight to the scene plan looks finished to every gate
+    # below: the scene files match the plan the model wrote for itself, and the
+    # repetition gate never reads the source (observed 2026-08-10, an Opus run
+    # that skipped load, continuity, QA, bible and the plan gate outright). The
+    # scene ids line up because nothing ever compared them to a chapter.
+    # A Pass-2 worker is different: it is meant to skip STEP 1-5.
+    missing = [] if worker else _missing_pipeline_artifacts(work)
+    if missing:
+        return ('the run skipped the steps that ground it — .work has no '
+                f'{" and no ".join(missing)}. chapters_qa.json is the only source '
+                'scene anchors are ever checked against, and plan.hash is written '
+                'by the plan gate, so a run without them was never validated at '
+                'all. Start again from STEP 1; do not assemble on top of this.')
     helpers = SKILL_ROOT / 'scripts'
     gates = []
     # cleanup_work.py removes the scene files only after they are merged, and the
@@ -412,7 +456,8 @@ def _stop(payload: dict) -> dict:
                    'next micro-batch now — do not stop to ask, do not summarise; '
                    'keep going until every scene file exists, then run the gates.')
     else:
-        failure = _gate_failure(work, Path(log_line.strip()), lean_mode(payload))
+        failure = _gate_failure(work, Path(log_line.strip()), lean_mode(payload),
+                                bool(state.get('worker')))
         if failure is None:
             if not scenes:
                 return {}
