@@ -225,6 +225,16 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | 
     if not from_helper and target.name in HELPER_OWNED_SCRATCH:
         return (f'{target.name} is produced by a canonical helper '
                 '(load_input.py / assemble_qa.py) — run it instead of writing the file')
+    # The scene plan is the first creative artifact, and every row of it cites the
+    # QA'd chapter text. Writing it before that text exists means the whole plan is
+    # ungrounded — observed 2026-08-10, a run that jumped here from genre detection
+    # and wrote 100 scenes no gate could check. The stop gate catches this too, but
+    # only after the scenes are written; refuse at the point the shortcut is taken.
+    if target.name == 'scene-plan.md' and not (target.parent / 'chapters_qa.json').exists():
+        return ('scene-plan.md cannot be written before .work/chapters_qa.json '
+                'exists — it is the text every source_anchor is checked against. '
+                'Run STEP 1 (load_input.py) and STEP 1.5 (the QA loop) first, even '
+                'when the input file is already named *_qa.txt')
     allowed_roots = roots(payload)
     global_bibles = (Path.home() / '.gemini' / 'bibles').resolve()
     if inside(target, global_bibles) and target.name.endswith('-visual-history.md'):

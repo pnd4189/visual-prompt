@@ -294,6 +294,42 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class PlanNeedsQaSourceTests(unittest.TestCase):
+    """The plan cites QA'd chapters, so it cannot be written before they exist."""
+
+    def test_the_shortcut_from_genre_straight_to_the_plan_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            work = root / '.work'; work.mkdir()
+            payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+            plan = {'TargetFile': str(work / 'scene-plan.md')}
+            env = {'VP_GUARD_STATE': str(root / 'guard.json')}
+
+            with patch.dict(os.environ, env), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                # Observed shape: genre and style written, no QA source anywhere.
+                (work / 'genre.txt').write_text('tien-hiep', encoding='utf-8')
+                denial = policy.write_denial(plan, payload)
+                self.assertIn('chapters_qa.json', denial)
+                self.assertIn('STEP 1', denial)
+
+                # Same write, once the QA loop has actually produced its source.
+                (work / 'chapters_qa.json').write_text('[]', encoding='utf-8')
+                self.assertIsNone(policy.write_denial(plan, payload))
+
+    def test_scene_files_are_not_caught_by_the_plan_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            work = root / '.work'; work.mkdir()
+            payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+            env = {'VP_GUARD_STATE': str(root / 'guard.json')}
+
+            with patch.dict(os.environ, env), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                self.assertIsNone(policy.write_denial(
+                    {'TargetFile': str(work / 'scene-001.md')}, payload))
+
+
 class ExpectImagesTests(unittest.TestCase):
     """The scene total is the formula's or the user's — never the model's."""
 
