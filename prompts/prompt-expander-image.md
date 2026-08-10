@@ -349,8 +349,8 @@ Tổng thân prompt 60-220 từ. Ngắn hơn không có nghĩa là mờ nhạt:
   vật và phong cách nhất quán. Gate không so trùng hai mục này.
 - `Setting` và `Action` PHẢI khác nhau ở từng cảnh — gate so trùng đúng hai mục
   này. Chép lại từ cảnh trước là hỏng.
-- Hai mục đó CÒN bị đo độ dài: dưới 8 từ hoặc trên 24 từ là FAIL ngay ở batch
-  đầu. Viết `Setting: living room` là sai — phải tả đúng nơi chốn của khoảnh
+- Hai mục đó CÒN bị đo độ dài: dưới 8 từ là FAIL ngay ở batch đầu (trần 40 từ
+  chỉ chặn trường hợp một mục nuốt cả prompt). Viết `Setting: living room` là sai — phải tả đúng nơi chốn của khoảnh
   khắc này. Mục cụt vừa vô nghĩa với model sinh ảnh, vừa ép các cảnh trùng nhau.
 - Mỗi `Action` bám vào `source_anchor` riêng của hàng scene-plan. Anchor đã khác
   nhau 100% giữa các cảnh, nên nếu bạn viết đúng khoảnh khắc đó thì `Action` tự

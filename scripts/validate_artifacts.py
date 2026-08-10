@@ -35,10 +35,15 @@ LEAN_IMAGE_SECTIONS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 # measured it: a run wrote 176 of its 177 Settings under eight words ("living
 # room"), which only surfaced at the very end as a flood of exact duplicates in
 # the similarity gate — after three hours of expansion. These are also the two
-# fields that gate compares, so a stub here blinds it. The minimum is the real
-# check; the maximum is a loose guard against one field swallowing the prompt.
+# fields that gate compares, so a stub here blinds it.
+#
+# The floor is the real check. The ceiling only catches one field eating the
+# prompt, and sits far above legitimate prose on purpose: assemble_outputs
+# already holds the lean body to 60-220 words, and a run that wrote these fields
+# in Vietnamese landed at 18 words each — a tight ceiling would fail good output
+# for being descriptive in a space-separated language.
 LEAN_FIELD_MIN_WORDS = 8
-LEAN_FIELD_MAX_WORDS = 24
+LEAN_FIELD_MAX_WORDS = 40
 LEAN_MEASURED_FIELDS = ('Setting', 'Action')
 _MUSIC_PLAN_COLUMNS = ('loop_index', 'chapter_start', 'chapter_end', 'mood')
 _MUSIC_MOODS = {

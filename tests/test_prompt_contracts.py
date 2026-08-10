@@ -1843,9 +1843,17 @@ class LeanFieldLengthTests(unittest.TestCase):
         self.assertEqual([], self._errors())
 
     def test_a_field_that_swallows_the_prompt_is_rejected(self):
-        errors = self._errors(setting=' '.join(['từ'] * 40))
+        errors = self._errors(setting=' '.join(['từ'] * 55))
 
-        self.assertIn('lean Setting has 40 word(s)', errors[0])
+        self.assertIn('lean Setting has 55 word(s)', errors[0])
+
+    def test_descriptive_vietnamese_is_not_punished_for_word_count(self):
+        """18 words each is what the run that wrote these fields well produced."""
+        vietnamese = ('Trước khe cửa gỗ của một căn phòng ngủ mờ tối, '
+                      'ánh sáng nhẹ từ ngoài hắt vào')
+        self.assertEqual(18, len(vietnamese.split()))
+
+        self.assertEqual([], self._errors(setting=vietnamese, action=vietnamese))
 
     def test_the_deep_spec_is_not_measured_by_the_lean_rule(self):
         # check_scenes only calls this when --lean; 'Action / Energy:' must not
