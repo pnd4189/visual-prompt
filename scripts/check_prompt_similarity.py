@@ -15,7 +15,10 @@ from _io_utils import atomic_write_text, exclusive_file_lock, read_text_checked
 
 IMAGE_FIELDS = (
     'Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
-    'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative',
+    # 'Action' is the lean spec's own field; 'Action / Energy: ...' cannot match
+    # its pattern, so the two coexist without shadowing each other.
+    'Action / Energy', 'Action', 'Style', 'Lighting / Color', 'Atmosphere',
+    'Negative',
 )
 COMPARED_IMAGE_FIELDS = (
     'Camera', 'Story DNA', 'Setting', 'Composition',

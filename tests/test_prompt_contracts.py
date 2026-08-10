@@ -1668,5 +1668,47 @@ class BatchResumeTests(unittest.TestCase):
         self.assertNotIn('đã có output, skip', rerun.stdout)
 
 
+class LeanSimilarityTests(unittest.TestCase):
+    """The lean spec compares Setting and Action; both must actually parse."""
+
+    def _blocks(self, pairs):
+        return ''.join(
+            f'--- SCENE {n:03d} ---\nSubject: Tr\u1ea7n V\u00e2n \u2014 nam, 18-20\n'
+            f'Setting: {setting}\nAction: {action}\n'
+            'Style: semi-realistic digital painting\nNegative: no logos, no gore\n\n'
+            for n, (setting, action) in enumerate(pairs, 1)
+        )
+
+    def test_lean_action_is_parsed_and_graded(self):
+        import check_prompt_similarity as sim
+        # Five scenes: ten pairs, enough to cross max_exact_per_field when copied.
+        varied = [('a snowbound cliff edge above the clouds', 'stands motionless as the gale tears at his robe'),
+                  ('the night sky over a churning sea of cloud', 'lifts his head to track a crane across the moon'),
+                  ('a narrow crevice behind an ice-sheathed boulder', 'presses flat and holds his breath, gripping a sword'),
+                  ('open air between thick banks of white cloud', 'lets himself drop, hair streaming upward'),
+                  ('a derelict hall with rotted floorboards', 'levels a finger at the man opposite and shouts')]
+        scenes = sim.parse_image(self._blocks(varied))
+        self.assertTrue(all(scene['fields'].get('Action') for scene in scenes),
+                        'lean Action field must parse, or repetition goes unmeasured')
+        clean = sim.check_image(scenes, 0.60, 0.95, 0, 4, sim.LEAN_COMPARED_FIELDS)
+        self.assertEqual([], clean['violations'])
+
+        stamped = [(setting, 'stands motionless as the gale tears at his robe')
+                   for setting, _ in varied]
+        flagged = sim.check_image(sim.parse_image(self._blocks(stamped)),
+                                  0.60, 0.95, 0, 4, sim.LEAN_COMPARED_FIELDS)
+        self.assertTrue(flagged['violations'], 'a copied Action must be caught')
+
+    def test_deep_action_energy_is_not_shadowed_by_the_lean_field(self):
+        import check_prompt_similarity as sim
+        deep = ('--- SCENE 001 ---\nCamera: wide\nStory DNA: beat\nSetting: a peak\n'
+                'Composition: layered\nSubject: a man\nAction / Energy: standing still\n'
+                'Style: painting\nLighting / Color: cold\nAtmosphere: tense\n'
+                'Negative: no logos\n')
+        fields = sim.parse_image(deep)[0]['fields']
+        self.assertEqual('standing still', fields.get('Action / Energy'))
+        self.assertFalse(fields.get('Action'))
+
+
 if __name__ == '__main__':
     unittest.main()
