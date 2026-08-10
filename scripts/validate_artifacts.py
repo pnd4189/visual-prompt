@@ -31,6 +31,15 @@ IMAGE_SECTIONS = (
 # --lean: only what the image model cannot infer — who, where, what they do —
 # plus the series style lock and the safety negatives.
 LEAN_IMAGE_SECTIONS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
+# The lean contract gives Setting and Action an 8-20 word range, and nothing
+# measured it: a run wrote 176 of its 177 Settings under eight words ("living
+# room"), which only surfaced at the very end as a flood of exact duplicates in
+# the similarity gate — after three hours of expansion. These are also the two
+# fields that gate compares, so a stub here blinds it. The minimum is the real
+# check; the maximum is a loose guard against one field swallowing the prompt.
+LEAN_FIELD_MIN_WORDS = 8
+LEAN_FIELD_MAX_WORDS = 24
+LEAN_MEASURED_FIELDS = ('Setting', 'Action')
 _MUSIC_PLAN_COLUMNS = ('loop_index', 'chapter_start', 'chapter_end', 'mood')
 _MUSIC_MOODS = {
     'calm/intro', 'mystery/journey', 'tension/battle',
@@ -294,6 +303,22 @@ def _split_music_output(text: str) -> tuple[list[str], bool]:
     return blocks, not pending
 
 
+def _lean_field_length_errors(name: str, text: str) -> list[str]:
+    """Reject a lean Setting/Action that is too thin to describe its moment."""
+    errors = []
+    for field in LEAN_MEASURED_FIELDS:
+        match = re.search(rf'^{field}:[ \t]*(.+)$', text, re.MULTILINE)
+        if match is None:
+            continue  # the missing-section check already reported it
+        words = len(match.group(1).split())
+        if not LEAN_FIELD_MIN_WORDS <= words <= LEAN_FIELD_MAX_WORDS:
+            errors.append(
+                f'{name} lean {field} has {words} word(s); the spec asks for '
+                f'{LEAN_FIELD_MIN_WORDS}-{LEAN_FIELD_MAX_WORDS}'
+            )
+    return errors
+
+
 def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None = None,
                  lean: bool = False) -> dict:
     """Validate scene artifacts. With assigned_ids (bounded-parallel worker
@@ -372,6 +397,8 @@ def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None
                     f'{path.name} image prompt is missing required section(s) '
                     f'({"lean" if lean else "deep"} spec): {absent}'
                 )
+            elif lean:
+                errors.extend(_lean_field_length_errors(path.name, text))
         if expected_has_video and '## Video Prompt' not in text:
             errors.append(f'{path.name} missing ## Video Prompt')
         if not expected_has_video and '## Video Prompt' in text:

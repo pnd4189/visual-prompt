@@ -1806,6 +1806,56 @@ class DeclaredSceneCountTests(unittest.TestCase):
         self.assertEqual([], scene_plan_validator.check_declared_genre(totals, None))
 
 
+class LeanFieldLengthTests(unittest.TestCase):
+    """A lean Setting/Action too thin to describe its moment must fail early."""
+
+    PROMPT = (
+        '## Image Prompt\n\n'
+        'Subject: Nhóc ma — child, small frail build, pale emotionless face\n'
+        'Setting: {setting}\n'
+        'Action: {action}\n'
+        'Style: semi-realistic-digital-painting\n'
+        'Negative: no logo, no watermark, no extra fingers\n'
+    )
+    RICH_SETTING = ('Trước khe cửa gỗ của một căn phòng ngủ mờ tối, '
+                    'ánh sáng nhẹ từ ngoài hắt vào')
+    RICH_ACTION = ('Hé mở cánh cửa gỗ và thò đầu ra ngoài nhìn ngó '
+                   'xung quanh một cách e dè')
+
+    def _errors(self, setting: str = None, action: str = None) -> list[str]:
+        return artifacts._lean_field_length_errors('scene-001.md', self.PROMPT.format(
+            setting=setting or self.RICH_SETTING, action=action or self.RICH_ACTION))
+
+    def test_a_two_word_setting_is_rejected(self):
+        # The exact shape shipped on 2026-08-10: 176 of 177 Settings under 8 words.
+        errors = self._errors(setting='living room')
+
+        self.assertEqual(1, len(errors))
+        self.assertIn('lean Setting has 2 word(s)', errors[0])
+
+    def test_a_stub_action_is_rejected(self):
+        errors = self._errors(action='he opens the door')
+
+        self.assertEqual(1, len(errors))
+        self.assertIn('lean Action has 4 word(s)', errors[0])
+
+    def test_spec_shaped_fields_pass(self):
+        self.assertEqual([], self._errors())
+
+    def test_a_field_that_swallows_the_prompt_is_rejected(self):
+        errors = self._errors(setting=' '.join(['từ'] * 40))
+
+        self.assertIn('lean Setting has 40 word(s)', errors[0])
+
+    def test_the_deep_spec_is_not_measured_by_the_lean_rule(self):
+        # check_scenes only calls this when --lean; 'Action / Energy:' must not
+        # be read as a lean 'Action:' line even if it somehow reaches here.
+        deep = ('## Image Prompt\n\nAction / Energy: he opens the door\n'
+                'Setting: ' + self.RICH_SETTING + '\n')
+
+        self.assertEqual([], artifacts._lean_field_length_errors('scene-001.md', deep))
+
+
 class ChapterBalanceTests(unittest.TestCase):
     """Coverage should track each chapter's share of the prose."""
 

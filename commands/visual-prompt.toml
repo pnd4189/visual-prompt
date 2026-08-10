@@ -900,6 +900,10 @@ Mục đích: prompt ngắn, sinh nhanh, và khác nhau thật giữa các cản
 `Style` lặp lại là ĐÚNG (giữ nhân vật + phong cách nhất quán); `Setting` +
 `Action` phải khác nhau ở từng cảnh — đó là hai mục gate đo trùng lặp.
 
+`validate_artifacts.py --lean` còn đo ĐỘ DÀI hai mục đó ngay từng micro-batch:
+dưới 8 từ hoặc trên 24 từ là FAIL. `Setting: living room` không hợp lệ — mục cụt
+làm gate trùng lặp mất khả năng phân biệt, và cuối run sẽ vỡ thành `field_dup_flood`.
+
 Mọi helper nhận biết chế độ PHẢI được gọi kèm `--lean` trong run này:
 `assemble_outputs.py`, `validate_artifacts.py`, `check_prompt_similarity.py`,
 `check_run_legit.py`. Guard đọc chế độ từ chính dòng lệnh của user và sẽ TỪ CHỐI
