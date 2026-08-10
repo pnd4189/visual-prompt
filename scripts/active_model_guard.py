@@ -200,7 +200,14 @@ def _pre_tool(payload: dict) -> dict:
             # a background task needs manage_task — which this guard forbids. On a
             # FUSE-backed run that dead-ends the model on its own helper output, so
             # keep guarded commands synchronous instead.
-            return {'decision': 'allow', 'overwrite': {'WaitMsBeforeAsync': SYNC_WAIT_MS}}
+            # A long wait alone does not hold a command in the foreground: Agy
+            # also backgrounds anything flagged daemon or persistent, which is how
+            # a helper still ended up unreadable (observed 2026-08-10, step 534).
+            return {'decision': 'allow', 'overwrite': {
+                'WaitMsBeforeAsync': SYNC_WAIT_MS,
+                'IsDaemon': False,
+                'RunPersistent': False,
+            }}
     elif tool not in READ_TOOLS | NEUTRAL_TOOLS:
         denial = f'tool {tool!r} is outside the guarded visual-prompt capability set'
     return {'decision': 'deny', 'reason': denial} if denial else {'decision': 'allow'}

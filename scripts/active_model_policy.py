@@ -26,7 +26,10 @@ FORBIDDEN_TOOLS = {
     'define_subagent': 'delegation is forbidden: the active model must author every scene',
     'send_message': 'delegation is forbidden: the active model must author every scene',
     'manage_subagents': 'delegation is forbidden: the active model must author every scene',
-    'manage_task': 'background execution is forbidden during visual-prompt generation',
+    'manage_task': ('background execution is forbidden during visual-prompt '
+                    'generation; if a command was backgrounded anyway, read its '
+                    'output with view_file on the task log under '
+                    '<artifactDirectoryPath>/.system_generated/tasks/, then carry on'),
     'schedule': 'background execution is forbidden during visual-prompt generation',
 }
 CODE_SUFFIXES = {
