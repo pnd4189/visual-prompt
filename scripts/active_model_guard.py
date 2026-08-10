@@ -200,9 +200,11 @@ def _pre_tool(payload: dict) -> dict:
             # a background task needs manage_task — which this guard forbids. On a
             # FUSE-backed run that dead-ends the model on its own helper output, so
             # keep guarded commands synchronous instead.
-            # A long wait alone does not hold a command in the foreground: Agy
-            # also backgrounds anything flagged daemon or persistent, which is how
-            # a helper still ended up unreadable (observed 2026-08-10, step 534).
+            # Best effort only: Agy kept backgrounding helpers even with these
+            # values overwritten (measured 2026-08-10), so it either ignores
+            # overwrite for run_command or decides asynchrony elsewhere. Left in
+            # because it costs nothing; the refusal text on manage_task is what
+            # actually keeps a backgrounded helper readable.
             return {'decision': 'allow', 'overwrite': {
                 'WaitMsBeforeAsync': SYNC_WAIT_MS,
                 'IsDaemon': False,

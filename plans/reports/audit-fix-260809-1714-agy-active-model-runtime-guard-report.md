@@ -142,6 +142,29 @@ Round-2 live checks:
   The run was stopped by hand at the marker-hang point described above, which is
   the defect the same round fixed; the fix itself is therefore untested live.
 
+## Round 3 — a full monitored run on Chap 21 (2026-08-10)
+
+Eight further defects, every one found by watching a real run rather than reasoning
+about the code.
+
+| Defect | Fix |
+|--------|-----|
+| Guard never armed on the batch path's own helpers because Agy backgrounds slow commands and `manage_task` is forbidden — the model could not read its own helper output | Refusal text now names the task log under `.system_generated/tasks/`, which `view_file` can read. The `overwrite` of `WaitMsBeforeAsync`/`IsDaemon`/`RunPersistent` was tried first and **does not work** — Agy backgrounded helpers anyway. |
+| `cleanup_work.py` refused to delete scenes while similarity failed, but `rm -f .work/scene-*.md` walked past it | Wholesale scene deletion is denied once the assembled output exists; the repair loop and `--force-redo` still work because they delete a handful, or delete before assembly. |
+| The model wrote all 120 scenes as flat prose, which **blinded** `check_prompt_similarity` — it errored with "no comparable fields" instead of reporting repetition | `validate_artifacts --check scenes` now requires the ten sections, so the mistake costs three scenes instead of a whole run. |
+| Model opened an `ask_question` offering to do 12 scenes as a sample, or to hand the job to `run-folder.sh` — which cannot even read that folder | Injected rules state the scene count is settled and forbid bargaining or pointing at the batch driver. |
+| Terse `runtime code creation is forbidden` left the model retrying variants for minutes | The refusal now says no variant will pass and names the only way through. Measured effect: after the new text, the model started writing scenes within one turn. |
+| Model wrote its program into `.work/fix.md` and asked the user to run it | Source code is rejected in text artifacts too. |
+
+**Quality outcome — the honest part.** With every bypass closed, the model did the
+only thing left: it wrote roughly fourteen variants of each field and dealt them
+out across 120 scenes, nine scenes per value. `check_prompt_similarity` scored
+3619 violations (456 exact-duplicate pairs in each of Camera, Story DNA, Setting,
+Composition, Action/Energy). The run cannot ship, which is the gates working — but
+it means the remaining problem is no longer a bypass to close. A hypothesis that
+the 120-scene floor was too dense for the source was tested and **rejected**: the
+duplicates are exact and evenly cycled, which is templating, not thin material.
+
 ## Residual risk / not fixed
 
 - F8 (leftover smoke dir inside the old plugin copy) is now in the moved-aside
