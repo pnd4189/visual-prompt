@@ -40,11 +40,11 @@ def _assembled_scenes(image: Path) -> int:
         return 0
 
 
-def _similarity_failure(image: Path) -> str | None:
+def _similarity_failure(image: Path, lean: bool = False) -> str | None:
     """The scene files are the only way to fix a repetitive output, so they may
     not be deleted until that output actually passes the anti-repetition gate."""
     command = [sys.executable, str(Path(__file__).resolve().parent / 'check_prompt_similarity.py'),
-               '--image', str(image)]
+               '--image', str(image)] + (['--lean'] if lean else [])
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -52,7 +52,7 @@ def _similarity_failure(image: Path) -> str | None:
     return None if done.returncode == 0 else (done.stdout + done.stderr).strip()[:600]
 
 
-def cleanup(work: Path, image: Path) -> tuple[int, dict]:
+def cleanup(work: Path, image: Path, lean: bool = False) -> tuple[int, dict]:
     if not work.is_dir():
         return 0, {'ok': True, 'removed': 0, 'reason': 'work dir already gone'}
     scenes = sorted(p for p in work.iterdir()
@@ -68,7 +68,7 @@ def cleanup(work: Path, image: Path) -> tuple[int, dict]:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': 'assembled output has fewer scenes than the plan — '
                              'finish the run before cleaning up'}
-    failure = _similarity_failure(image)
+    failure = _similarity_failure(image, lean)
     if failure is not None:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': 'similarity gate still fails — rewrite the flagged '
@@ -86,8 +86,10 @@ def main() -> int:
     parser.add_argument('--work', required=True, type=Path)
     parser.add_argument('--image', required=True, type=Path,
                         help='assembled <stem>_image_prompts.txt')
+    parser.add_argument('--lean', action='store_true',
+                        help='grade the lean prompt spec when re-checking similarity')
     args = parser.parse_args()
-    code, report = cleanup(args.work.expanduser(), args.image.expanduser())
+    code, report = cleanup(args.work.expanduser(), args.image.expanduser(), args.lean)
     print(json.dumps(report, ensure_ascii=False))
     return code
 

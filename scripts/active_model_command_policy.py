@@ -117,7 +117,8 @@ def _final_denial(target: Path, payload: dict, pattern=FINAL_OUTPUT_RE) -> str |
 
 
 LEAN_AWARE_HELPERS = {'assemble_outputs.py', 'validate_artifacts.py',
-                      'check_prompt_similarity.py', 'check_run_legit.py'}
+                      'check_prompt_similarity.py', 'check_run_legit.py',
+                      'cleanup_work.py'}
 
 
 def _lean_flag_denial(name: str, tokens: list[str], payload: dict) -> str | None:
