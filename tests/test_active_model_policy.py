@@ -177,6 +177,28 @@ class CommandPolicyTests(unittest.TestCase):
                     {'TargetFile': str(work / 'scene-001.md'), 'CodeContent': prose}, payload,
                 ))
 
+    def test_wholesale_scene_deletion_after_assembly_needs_the_cleanup_helper(self):
+        # Deleting the merged scenes by hand skips cleanup_work.py's similarity
+        # check — the shortcut that once left a run unable to repair itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); work = root / '.work'; work.mkdir()
+            for number in range(1, 31):
+                (work / f'scene-{number:03d}.md').write_text('body', encoding='utf-8')
+            payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+            wholesale = f'rm -f {work}/scene-*.md'
+            one_scene = f'rm -f {work}/scene-005.md'
+            with patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                # Before assembly this is just --force-redo clearing the way.
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': wholesale, 'Cwd': str(root)}, payload))
+                (root / 'novel_image_prompts.txt').write_text('--- SCENE 001 ---\n',
+                                                              encoding='utf-8')
+                self.assertIn('cleanup_work.py', policy.command_denial(
+                    {'CommandLine': wholesale, 'Cwd': str(root)}, payload))
+                # The repair loop keeps working on individual scenes.
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': one_scene, 'Cwd': str(root)}, payload))
+
     def test_canonical_helper_cannot_write_guard_config_or_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve(); (root / '.work').mkdir()

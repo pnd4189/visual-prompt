@@ -34,6 +34,8 @@ ALLOWED_HELPERS = {
 }
 PROMPT_OUTPUT_RE = re.compile(r'_(?:image|video)_prompts\.txt$')
 SKILL_ROOT_TOKEN = '__VP_SKILL_ROOT__'
+SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
+MAX_BULK_SCENE_DELETES = 10  # the repair loop touches a handful, not a run
 
 
 def _is_canonical_helper(script: Path) -> bool:
@@ -260,10 +262,12 @@ def command_denial(args: dict, payload: dict) -> str | None:
     if len(tokens) < 3 or tokens[1] != expected_flag:
         return f'only scoped {tokens[0]} {expected_flag} is allowed'
     allowed_roots = roots(payload)
+    scene_targets = 0
     for raw in tokens[2:]:
         if any(character in raw for character in '{}[]'):
             return 'brace and character-class expansion is forbidden for mutations'
         candidates = glob(str(_resolve(raw, cwd))) if has_magic(raw) else [str(_resolve(raw, cwd))]
+        scene_targets += sum(1 for c in candidates if SCENE_FILE_RE.fullmatch(Path(c).name))
         for candidate in candidates:
             target = Path(candidate).resolve()
             if not any(inside(target, root) for root in allowed_roots):
@@ -279,4 +283,22 @@ def command_denial(args: dict, payload: dict) -> str | None:
             denial = write_denial({'TargetFile': str(target / 'placeholder.md')}, payload)
             if denial:
                 return denial
+    # Deleting a few flagged scenes to regenerate them is the repair loop. Wiping
+    # them wholesale once the output exists is the post-run tidy-up, and that must
+    # go through cleanup_work.py — which refuses while the similarity gate fails.
+    # Skipping it is how a run once destroyed the only means of fixing itself.
+    if scene_targets > MAX_BULK_SCENE_DELETES and _assembled_output_exists(payload, cwd):
+        return (f'refusing to delete {scene_targets} scene files by hand — rewrite '
+                'flagged scenes individually, or run cleanup_work.py once the gates '
+                'pass; it verifies the output before removing the originals')
     return None
+
+
+def _assembled_output_exists(payload: dict, cwd: Path) -> bool:
+    for root in [*roots(payload), cwd]:
+        try:
+            if any(root.glob('*_image_prompts.txt')):
+                return True
+        except OSError:
+            continue
+    return False
