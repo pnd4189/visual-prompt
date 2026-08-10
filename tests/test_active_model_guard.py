@@ -249,6 +249,26 @@ class InvocationArmingTests(unittest.TestCase):
         self.assertEqual('deny', result['decision'])
         self.assertIn('delegation', result['reason'])
 
+    def _recorded_state(self, transcript_body: str) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), transcript_body)
+            run_guard('pre-invocation', base_payload('primary', artifact), {})
+            return json.loads(
+                (artifact / '.visual-prompt-primary.json').read_text(encoding='utf-8'))
+
+    def test_the_images_override_is_recorded_from_the_user_turn(self):
+        pinned = self.USER_TURN.replace("--series 'x'", "--series 'x' --images 200")
+
+        self.assertEqual(200, self._recorded_state(pinned)['images_override'])
+
+    def test_a_count_the_model_types_later_is_not_an_override(self):
+        # Only the user's own invocation line settles the number to be measured by.
+        model_turn = '{"type":"MODEL_OUTPUT","content":"running with --images 40"}\n'
+
+        state = self._recorded_state(self.USER_TURN + model_turn)
+
+        self.assertIsNone(state['images_override'])
+
     def test_mentioning_the_command_mid_sentence_does_not_arm_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = self._armed_artifact(Path(tmp), (

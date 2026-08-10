@@ -294,5 +294,43 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class ExpectImagesTests(unittest.TestCase):
+    """The scene total is the formula's or the user's — never the model's."""
+
+    def _state(self, root: Path, images_override) -> dict:
+        (root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary',
+            'images_override': images_override,
+        }), encoding='utf-8')
+        return {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+
+    def test_the_model_cannot_pick_the_number_it_is_measured_against(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); (root / '.work').mkdir()
+            command = (f'python3 {ROOT}/scripts/validate_scene_plan.py '
+                       f'--plan {root}/.work/scene-plan.md '
+                       f'--chapters-json {root}/.work/chapters_qa.json')
+            with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                auto = self._state(root, None)
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command, 'Cwd': str(root)}, auto))
+                self.assertIn('was not requested', policy.command_denial(
+                    {'CommandLine': command + ' --expect-images 114',
+                     'Cwd': str(root)}, auto))
+
+                pinned = self._state(root, 200)
+                self.assertIn('must be called with --expect-images 200',
+                              policy.command_denial(
+                                  {'CommandLine': command, 'Cwd': str(root)}, pinned))
+                self.assertIn('must be called with --expect-images 200',
+                              policy.command_denial(
+                                  {'CommandLine': command + ' --expect-images 114',
+                                   'Cwd': str(root)}, pinned))
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command + ' --expect-images 200',
+                     'Cwd': str(root)}, pinned))
+
+
 if __name__ == '__main__':
     unittest.main()

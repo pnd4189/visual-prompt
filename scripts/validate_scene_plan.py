@@ -12,10 +12,17 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
+
+_SCRIPT_DIR = str(Path(__file__).parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from calc_scene_count import deterministic_images  # type: ignore  # noqa: E402
 
 MIN_SYNOPSIS_WORDS = 4
 SYNOPSIS_SIMILARITY_THRESHOLD = 0.80
@@ -25,10 +32,19 @@ DIMENSION_SIMILARITY_THRESHOLD = 0.88
 
 _ROW_RE = re.compile(r'^\s*\|(.+)\|\s*$')
 _TOTALS_RE = re.compile(
-    r'^Genre:\s*.+?\s+·\s+Images:\s*(\d+)\s+·\s+Videos:\s*(\d+)'
-    r'\s+·\s+Chapters:\s*(\d+)\s*$',
+    r'^Genre:\s*(?P<genre>.+?)\s+·\s+Images:\s*(?P<images>\d+)'
+    r'\s+·\s+Videos:\s*(?P<videos>\d+)\s+·\s+Chapters:\s*(?P<chapters>\d+)\s*$',
     re.MULTILINE,
 )
+# Row share may run this far from a chapter's share of the words before the plan
+# counts as lopsided. Wide on purpose: a chapter can genuinely carry more visible
+# action. The run that shipped 52% of its scenes from one of four chapters sat at
+# 2.11x, and the chapter it starved at 0.39x.
+CHAPTER_SHARE_MAX = 2.0
+CHAPTER_SHARE_MIN = 0.5
+# Below this, one row moves the share too much for the ratio to mean anything.
+MIN_ROWS_FOR_BALANCE = 12
+MIN_ROWS_OFF_BALANCE = 5
 _PLAN_COLUMNS = (
     'scene_id', 'chapter', 'source_anchor', 'scene_tag', 'characters',
     'synopsis', 'setting_plan', 'camera_plan', 'action_plan', 'palette_plan',
@@ -43,7 +59,7 @@ def _split_row(line: str) -> list[str] | None:
     return [c.strip() for c in m.group(1).split('|')]
 
 
-def parse_plan_contract(text: str) -> tuple[list[dict], list[str], dict[str, int] | None]:
+def parse_plan_contract(text: str) -> tuple[list[dict], list[str], dict | None]:
     """Parse the declared totals and strict grounded scene table."""
     rows: list[dict] = []
     errors: list[str] = []
@@ -51,9 +67,10 @@ def parse_plan_contract(text: str) -> tuple[list[dict], list[str], dict[str, int
     totals = None
     if totals_match:
         totals = {
-            'images': int(totals_match.group(1)),
-            'videos': int(totals_match.group(2)),
-            'chapters': int(totals_match.group(3)),
+            'genre': totals_match.group('genre').strip(),
+            'images': int(totals_match.group('images')),
+            'videos': int(totals_match.group('videos')),
+            'chapters': int(totals_match.group('chapters')),
         }
         if totals['images'] < 1:
             errors.append('declared Images must be at least 1')
@@ -342,7 +359,95 @@ def check_visual_dimensions(rows: list[dict]) -> list[dict]:
     return violations
 
 
-def validate(text: str, chapters: list[dict] | None = None) -> dict:
+def check_declared_total(totals: dict | None, expected: int) -> list[dict]:
+    """Hold the plan to the deterministic scene count, not to its own header.
+
+    The row-count check above only compares the table against the `Images: N`
+    line — and the model writes both. A run that quietly plans fewer beats than
+    calc_scene_count settled on stays self-consistent and passes, which is how a
+    150-image run shipped 114 (observed 2026-08-10). Compare against the formula.
+    """
+    if totals is None or totals['images'] == expected:
+        return []
+    return [{
+        'type': 'scene_count_mismatch', 'scene_ids': [],
+        'reason': (f'declared Images {totals["images"]} does not match the '
+                   f'deterministic scene count {expected}'),
+    }]
+
+
+def check_declared_chapters(totals: dict | None, chapters: list[dict]) -> list[dict]:
+    """`Chapters: K` counts the chapters, not the highest chapter label.
+
+    A run over chapters 5-8 declared `Chapters: 8` (observed 2026-08-10). Nothing
+    read the field, so the header drifted from the source it claims to describe.
+    """
+    if totals is None or totals['chapters'] == len(chapters):
+        return []
+    return [{
+        'type': 'declared_chapters_mismatch', 'scene_ids': [],
+        'reason': (f'declared Chapters {totals["chapters"]} does not match the '
+                   f'{len(chapters)} chapters in the source'),
+    }]
+
+
+def check_declared_genre(totals: dict | None, genre: str | None) -> list[dict]:
+    """The header genre must stay the genre the run locked its style to.
+
+    The same run started at `đô thị` and ended declaring `Xianxia / Fantasy`,
+    while the style block underneath it was still the one picked for `đô thị`.
+    """
+    if totals is None or not genre:
+        return []
+    if totals['genre'].casefold() == genre.strip().casefold():
+        return []
+    return [{
+        'type': 'declared_genre_mismatch', 'scene_ids': [],
+        'reason': (f'declared Genre "{totals["genre"]}" does not match the '
+                   f'run genre "{genre.strip()}" in genre.txt'),
+    }]
+
+
+def check_chapter_balance(rows: list[dict], chapters: list[dict]) -> list[dict]:
+    """Scene coverage should track each chapter's share of the prose.
+
+    The planner contract asks for proportional coverage but nothing measured it:
+    one run put 52% of its scenes in one of four near-equal chapters and gave
+    another 10%. The band is deliberately loose — this catches a collapsed plan,
+    not an uneven one.
+    """
+    words = {str(ch.get('id')): len(ch.get('text', '').split()) for ch in chapters}
+    total_words = sum(words.values())
+    if len(rows) < MIN_ROWS_FOR_BALANCE or total_words == 0 or len(words) < 2:
+        return []
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row['chapter']] = counts.get(row['chapter'], 0) + 1
+
+    violations = []
+    for chapter_id, chapter_words in sorted(words.items()):
+        if not chapter_words:
+            continue
+        expected = len(rows) * chapter_words / total_words
+        actual = counts.get(chapter_id, 0)
+        if abs(actual - expected) < MIN_ROWS_OFF_BALANCE:
+            continue
+        ratio = actual / expected
+        if CHAPTER_SHARE_MIN <= ratio <= CHAPTER_SHARE_MAX:
+            continue
+        direction = 'over' if ratio > CHAPTER_SHARE_MAX else 'under'
+        violations.append({
+            'type': 'chapter_coverage_imbalance', 'scene_ids': [],
+            'reason': (f'chapter {chapter_id} is {direction}-covered: {actual} rows '
+                       f'against {expected:.0f} expected from its share of the prose '
+                       f'({ratio:.2f}x)'),
+        })
+    return violations
+
+
+def validate(text: str, chapters: list[dict] | None = None,
+             expected_images: int | None = None, genre: str | None = None) -> dict:
     rows, contract_errors, totals = parse_plan_contract(text)
     violations = [
         {'type': 'malformed_plan', 'scene_ids': [], 'reason': error}
@@ -353,7 +458,12 @@ def validate(text: str, chapters: list[dict] | None = None) -> dict:
         + check_synopsis_duplicates(rows)
         + check_visual_dimensions(rows)
     )
+    if expected_images is not None:
+        violations.extend(check_declared_total(totals, expected_images))
+    violations.extend(check_declared_genre(totals, genre))
     if chapters is not None:
+        violations.extend(check_declared_chapters(totals, chapters))
+        violations.extend(check_chapter_balance(rows, chapters))
         violations.extend(check_grounding(rows, chapters))
     return {
         'total': len(rows),
@@ -371,6 +481,11 @@ def main() -> int:
     p.add_argument(
         '--chapters-json', required=True,
         help='Path to the QA chapter source used by the planner',
+    )
+    p.add_argument(
+        '--expect-images', type=int, default=None,
+        help='Image total for a run whose invocation overrode it with --images; '
+             'omit so the deterministic count is recomputed from the chapters',
     )
     args = p.parse_args()
 
@@ -391,7 +506,27 @@ def main() -> int:
         print(f"ERROR: cannot read chapter source: {exc}", file=sys.stderr)
         return 1
 
-    result = validate(plan_path.read_text(encoding='utf-8'), chapters)
+    expected = args.expect_images
+    if expected is None:
+        try:
+            expected = deterministic_images(chapters)
+        except (TypeError, AttributeError, ValueError) as exc:
+            print(f"ERROR: cannot derive the scene count: {exc}", file=sys.stderr)
+            return 1
+
+    genre_path = plan_path.parent / 'genre.txt'
+    try:
+        genre = genre_path.read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        genre = None
+
+    plan_bytes = plan_path.read_bytes()
+    result = validate(plan_bytes.decode('utf-8'), chapters, expected, genre)
+    if result['ok']:
+        # The cache key the music path reads. Writing it here, from the bytes the
+        # gate just accepted, retires a hand-computed step the model kept skipping.
+        (plan_path.parent / 'plan.hash').write_text(
+            hashlib.sha1(plan_bytes).hexdigest()[:12] + '\n', encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result['ok'] else 2
 

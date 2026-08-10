@@ -9,8 +9,8 @@ from glob import glob, has_magic
 from pathlib import Path
 
 from active_model_policy import (
-    FINAL_OUTPUT_RE, SKILL_ROOT, inside, lean_mode, remember_input_root, roots,
-    state_path, write_denial,
+    FINAL_OUTPUT_RE, SKILL_ROOT, images_override, inside, lean_mode,
+    remember_input_root, roots, state_path, write_denial,
 )
 
 # Helpers that receive the novel path the user named. The first one to resolve it
@@ -139,8 +139,32 @@ def _lean_flag_denial(name: str, tokens: list[str], payload: dict) -> str | None
     return None
 
 
+def _expect_images_denial(name: str, tokens: list[str], payload: dict) -> str | None:
+    """The scene total is the formula's, or the user's — never the model's.
+
+    validate_scene_plan.py recomputes the deterministic count from the chapter
+    source on its own. --expect-images exists only for a run whose invocation
+    pinned --images, so a free-floating one would just be the model choosing an
+    easier number to be measured against.
+    """
+    if name != 'validate_scene_plan.py':
+        return None
+    pinned = images_override(payload)
+    passed = _one(tokens, '--expect-images')
+    if pinned is None:
+        if passed is not None:
+            return ('--expect-images was not requested for this run; '
+                    'validate_scene_plan.py derives the count from the chapters')
+        return None
+    if passed != str(pinned):
+        return (f'this run was invoked with --images {pinned} — '
+                f'validate_scene_plan.py must be called with --expect-images {pinned}')
+    return None
+
+
 def _helper_denial(name: str, tokens: list[str], cwd: Path, payload: dict) -> str | None:
-    denial = _lean_flag_denial(name, tokens, payload)
+    denial = (_lean_flag_denial(name, tokens, payload)
+              or _expect_images_denial(name, tokens, payload))
     if denial:
         return denial
     path_options = {

@@ -60,6 +60,14 @@ def state_path(payload: dict) -> Path:
     return Path(configured) if configured else base / '.visual-prompt-primary.json'
 
 
+def _guard_state(payload: dict) -> dict:
+    try:
+        state = json.loads(state_path(payload).read_text(encoding='utf-8'))
+        return state if isinstance(state, dict) else {}
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return {}
+
+
 def lean_mode(payload: dict) -> bool:
     """Whether the user asked for the lean prompt spec, per the guard state.
 
@@ -67,11 +75,13 @@ def lean_mode(payload: dict) -> bool:
     the model chooses: given the choice, the model takes the cheaper standard.
     The guard records it when it claims the session, in a file it owns.
     """
-    try:
-        state = json.loads(state_path(payload).read_text(encoding='utf-8'))
-        return bool(state.get('lean'))
-    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
-        return False
+    return bool(_guard_state(payload).get('lean'))
+
+
+def images_override(payload: dict) -> int | None:
+    """The image total the user pinned with --images, or None for the auto count."""
+    value = _guard_state(payload).get('images_override')
+    return value if isinstance(value, int) else None
 
 
 def _input_root_marker(payload: dict) -> Path:

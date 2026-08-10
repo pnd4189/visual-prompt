@@ -81,21 +81,43 @@ def _transcript_armed(path: str | None) -> bool:
     return GUARD_MARKER in window or INVOCATION_RE.search(window) is not None
 
 
-def _lean_invocation(path: str | None) -> bool:
-    """Did the user's own /visual-prompt line carry --lean?"""
+def _invocation_turn(path: str | None) -> bytes | None:
+    """The bytes of the user's own /visual-prompt turn, flags included.
+
+    Everything the user chose on the command line is read from here, so a flag
+    the model writes later in the transcript can never be mistaken for one the
+    user asked for.
+    """
     if not path:
-        return False
+        return None
     try:
         with Path(path).open('rb') as stream:
             window = stream.read(HEAD_BYTES)
     except OSError:
-        return False
+        return None
     match = INVOCATION_RE.search(window)
     if match is None:
-        return False
-    # Stay inside the invocation turn: the flag only counts where the user typed it.
-    turn = window[match.start():match.start() + 2_000]
-    return b'--lean' in turn.split(b'</USER_REQUEST>')[0]
+        return None
+    return window[match.start():match.start() + 2_000].split(b'</USER_REQUEST>')[0]
+
+
+def _lean_invocation(path: str | None) -> bool:
+    """Did the user's own /visual-prompt line carry --lean?"""
+    turn = _invocation_turn(path)
+    return turn is not None and b'--lean' in turn
+
+
+def _images_invocation(path: str | None) -> int | None:
+    """The image total the user's own /visual-prompt line overrode, if any.
+
+    Same reasoning as --lean: left to the model, an override is just a cheaper
+    number to validate against. Only the count the user typed counts.
+    """
+    turn = _invocation_turn(path)
+    if turn is None:
+        return None
+    match = re.search(rb'--images[= ]\s*(\d{1,4})\b', turn)
+    return int(match.group(1)) if match else None
 
 
 def _active(payload: dict) -> bool:
@@ -124,6 +146,7 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         'primary_conversation_id': str(payload.get('conversationId') or ''),
         'model': str(payload.get('modelName') or ''),
         'lean': _lean_invocation(payload.get('transcriptPath')),
+        'images_override': _images_invocation(payload.get('transcriptPath')),
     }
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

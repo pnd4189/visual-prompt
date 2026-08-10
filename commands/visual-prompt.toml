@@ -460,7 +460,8 @@ Chỉ thêm `--video` hoặc `--videos <M>` khi `video_enabled = true`.
 Parse stdout JSON → lưu `images_n`, `videos_m`, `mode`, `action_density`,
 `recommended_mix`. `mode` phải là `grounded`.
 
-Default auto path tạo khoảng 120–150 image prompts và `videos_m = 0`.
+Default auto path tạo khoảng 120–300 image prompts và `videos_m = 0`. Trần 300 ứng
+với truyện dài ~3h audio (~37k từ), giữ nguyên nhịp 1 ảnh / 120 từ.
 Nếu user truyền `--video` thì auto video dùng
 `min(images_n, max(20, round(images_n/6)))`; `--videos M` được tôn trọng đúng M
 nhưng phải `M <= images_n`, nếu không thì HALT. Không tự suy ra video từ chữ
@@ -489,8 +490,12 @@ Truyền vào context của planner: `images_n`, `videos_m`, `mode`, `action_den
 `source_anchor` là một đoạn trích nguyên văn 6–24 từ trong đúng chapter của row.
 Planner không được thêm map/đông nhân vật/combat/đấu pháp hay dramatize vượt text.
 
-Compute `plan_hash = sha1(file_bytes(scene-plan.md))[:12]` → ghi vào
-`.work/plan.hash`.
+Dòng tổng phải khai đúng sự thật: `Genre` lấy nguyên văn từ `.work/genre.txt`,
+`Chapters` là SỐ LƯỢNG chapter trong `.work/chapters_qa.json` (không phải số hiệu
+chapter lớn nhất), `Images` bằng `images_n`. Số row mỗi chapter phải bám tỷ lệ độ
+dài chapter đó — không dồn phần lớn cảnh vào một chapter.
+
+`.work/plan.hash` do STEP 5.5 ghi sau khi plan pass; không tự tính tay.
 
 Print: `Scene plan: <N> scenes, <M> flagged for video.`
 
@@ -503,11 +508,25 @@ nhân vật không xuất hiện trong chapter, scene/chapter/anchor bị đảo
 synopsis trùng, và lặp setting/camera/action/palette. Đây là cổng grounding,
 không phải quota ép thêm nhân vật hay combat.
 
+Gate cũng đối chiếu dòng tổng với nguồn sự thật, không tin lời khai của plan:
+- `scene_count_mismatch` — tự tính lại `images_n` từ `.work/chapters_qa.json`;
+  khai ít hơn số đã chốt ở STEP 4 là FAIL, plan phải đủ `images_n` dòng.
+- `declared_chapters_mismatch` — `Chapters` phải bằng số chapter thật.
+- `declared_genre_mismatch` — `Genre` phải khớp `.work/genre.txt`.
+- `chapter_coverage_imbalance` — số row của một chapter lệch quá 2x (hoặc dưới
+  0.5x) so với tỷ lệ độ dài chapter đó.
+
+Plan pass → gate ghi `.work/plan.hash` = `sha1(file_bytes(scene-plan.md))[:12]`.
+Plan fail thì không ghi.
+
 ```bash
 python3 scripts/validate_scene_plan.py \
   --plan .work/scene-plan.md \
   --chapters-json .work/chapters_qa.json
 ```
+
+Chỉ thêm `--expect-images <N>` khi chính dòng lệnh của user có `--images <N>`;
+guard từ chối lệnh dùng cờ này sai. Không có override thì để gate tự tính.
 
 Parse stdout JSON `{total, violations, ok}`. Exit 0 = ok; exit 2 hoặc 1 = HALT,
 không được proceed.
@@ -519,9 +538,8 @@ không được proceed.
     flag; giữ nguyên source facts. Với `ungrounded_source_anchor` hoặc
     `ungrounded_character`, đọc lại đúng chapter và thay bằng beat có thật —
     KHÔNG bịa chi tiết để “lấp” lỗi. Với lặp visual dimension, đổi cách dựng
-    hình nhưng không đổi setting/action đã được source khóa. Ghi đè scene-plan.md,
-    recompute `plan_hash`.
-  - Chạy lại validator.
+    hình nhưng không đổi setting/action đã được source khóa. Ghi đè scene-plan.md.
+  - Chạy lại validator (lượt pass sẽ ghi lại `.work/plan.hash` theo bytes mới).
 - Sau 2 lượt mà vẫn còn violations → HALT, liệt kê violations và scene IDs.
 
 Print: `Plan gate: <ok | N violations sau <r> revise>`.

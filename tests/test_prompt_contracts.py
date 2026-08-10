@@ -1710,5 +1710,236 @@ class LeanSimilarityTests(unittest.TestCase):
         self.assertFalse(fields.get('Action'))
 
 
+class SceneCountBandTests(unittest.TestCase):
+    """The auto band runs 120..300 — a 3h episode keeps one image per 120 words."""
+
+    @staticmethod
+    def _chapters(words: int) -> list[dict]:
+        return [{'id': 1, 'text': ' '.join(['từ'] * words)}]
+
+    def test_a_three_hour_source_reaches_the_three_hundred_ceiling(self):
+        # ~1.5h measured at 18.7k words, so a 3h episode sits near 37k.
+        self.assertEqual(300, calc_scene_count.deterministic_images(self._chapters(37_000)))
+
+    def test_the_ceiling_is_not_exceeded(self):
+        self.assertEqual(300, calc_scene_count.deterministic_images(self._chapters(90_000)))
+
+    def test_a_mid_length_source_is_no_longer_clamped_at_one_fifty(self):
+        # The old ceiling flattened everything past 18k words onto 150.
+        self.assertEqual(175, calc_scene_count.deterministic_images(self._chapters(21_000)))
+
+    def test_a_short_source_still_holds_the_grounding_floor(self):
+        self.assertEqual(60, calc_scene_count.deterministic_images(self._chapters(3_000)))
+
+
+class DeclaredSceneCountTests(unittest.TestCase):
+    """A plan is measured against the formula, not against its own header."""
+
+    @staticmethod
+    def _plan(images: int) -> str:
+        rows = ''.join(
+            f'| {index:03d} | 1 | Lan bước vào sân đá khi gió lay cành tùng | establishing | '
+            f'Lan | Lan enters courtyard {index}. | stone courtyard {index} | '
+            f'wide {index}mm | Lan crosses step {index} | cool daylight {index} | |\n'
+            for index in range(1, images + 1)
+        )
+        return (
+            f'Genre: tien-hiep · Images: {images} · Videos: 0 · Chapters: 1\n\n'
+            '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis '
+            '| setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+            '|---|---|---|---|---|---|---|---|---|---|---|\n'
+            + rows
+        )
+
+    def test_a_self_consistent_short_plan_is_caught(self):
+        """The 114-of-150 shape: header and rows agree with each other, not the count."""
+        result = scene_plan_validator.validate(self._plan(2), expected_images=5)
+        kinds = {item['type'] for item in result['violations']}
+
+        self.assertFalse(result['ok'])
+        self.assertIn('scene_count_mismatch', kinds)
+        self.assertIn('deterministic scene count 5', str(result['violations']))
+
+    def test_the_planned_count_raises_no_mismatch(self):
+        # The templated rows trip the monotony gates; only the count is at issue here.
+        result = scene_plan_validator.validate(self._plan(5), expected_images=5)
+        kinds = {item['type'] for item in result['violations']}
+
+        self.assertNotIn('scene_count_mismatch', kinds)
+
+    def test_the_count_check_reads_the_declared_total(self):
+        totals = {'images': 114, 'videos': 0, 'chapters': 4}
+
+        self.assertEqual([], scene_plan_validator.check_declared_total(totals, 114))
+        self.assertEqual([], scene_plan_validator.check_declared_total(None, 114))
+        mismatch = scene_plan_validator.check_declared_total(totals, 175)
+        self.assertEqual('scene_count_mismatch', mismatch[0]['type'])
+        self.assertIn('114', mismatch[0]['reason'])
+        self.assertIn('175', mismatch[0]['reason'])
+
+    def test_no_expectation_leaves_the_count_unchecked(self):
+        result = scene_plan_validator.validate(self._plan(2))
+        kinds = {item['type'] for item in result['violations']}
+
+        self.assertNotIn('scene_count_mismatch', kinds)
+
+    def test_declared_chapters_counts_chapters_not_the_highest_label(self):
+        chapters = [{'id': label, 'text': 'x'} for label in (5, 6, 7, 8)]
+        totals = {'genre': 'đô thị', 'images': 4, 'videos': 0, 'chapters': 8}
+
+        mismatch = scene_plan_validator.check_declared_chapters(totals, chapters)
+
+        self.assertEqual('declared_chapters_mismatch', mismatch[0]['type'])
+        self.assertIn('4 chapters', mismatch[0]['reason'])
+        self.assertEqual([], scene_plan_validator.check_declared_chapters(
+            {**totals, 'chapters': 4}, chapters))
+
+    def test_the_header_genre_may_not_drift_from_the_locked_run_genre(self):
+        totals = {'genre': 'Xianxia / Fantasy', 'images': 4, 'videos': 0, 'chapters': 4}
+
+        mismatch = scene_plan_validator.check_declared_genre(totals, 'đô thị')
+
+        self.assertEqual('declared_genre_mismatch', mismatch[0]['type'])
+        self.assertIn('đô thị', mismatch[0]['reason'])
+        self.assertEqual([], scene_plan_validator.check_declared_genre(
+            {**totals, 'genre': 'Đô Thị'}, 'đô thị'))
+        self.assertEqual([], scene_plan_validator.check_declared_genre(totals, None))
+
+
+class ChapterBalanceTests(unittest.TestCase):
+    """Coverage should track each chapter's share of the prose."""
+
+    @staticmethod
+    def _chapters(count: int, words: int = 5_000) -> list[dict]:
+        return [{'id': index, 'text': ' '.join(['từ'] * words)}
+                for index in range(1, count + 1)]
+
+    def test_the_collapsed_run_shape_is_caught(self):
+        # The 2026-08-10 plan: 12/18/25/59 across four near-equal chapters.
+        rows = []
+        for chapter, count in ((1, 12), (2, 18), (3, 25), (4, 59)):
+            rows += [{'chapter': str(chapter), 'scene_id': '001'}] * count
+
+        violations = scene_plan_validator.check_chapter_balance(rows, self._chapters(4))
+        flagged = {v['reason'].split()[1] for v in violations}
+        reasons = ' '.join(v['reason'] for v in violations)
+
+        self.assertEqual({'1', '4'}, flagged)
+        self.assertIn('chapter 4 is over-covered', reasons)
+        self.assertIn('chapter 1 is under-covered', reasons)
+
+    def test_proportional_coverage_passes(self):
+        rows = []
+        for chapter in (1, 2, 3, 4):
+            rows += [{'chapter': str(chapter), 'scene_id': '001'}] * 25
+
+        self.assertEqual(
+            [], scene_plan_validator.check_chapter_balance(rows, self._chapters(4)))
+
+    def test_an_uneven_but_not_collapsed_plan_passes(self):
+        # 1.6x / 0.6x stays inside the band — this gate catches collapse, not tilt.
+        rows = []
+        for chapter, count in ((1, 40), (2, 15), (3, 25), (4, 20)):
+            rows += [{'chapter': str(chapter), 'scene_id': '001'}] * count
+
+        self.assertEqual(
+            [], scene_plan_validator.check_chapter_balance(rows, self._chapters(4)))
+
+    def test_a_plan_too_small_to_measure_is_left_alone(self):
+        rows = [{'chapter': '1', 'scene_id': '001'}] * 8
+
+        self.assertEqual(
+            [], scene_plan_validator.check_chapter_balance(rows, self._chapters(4)))
+
+
+class PlanHashTests(unittest.TestCase):
+    """The gate persists the cache key the model kept skipping."""
+
+    CHAPTER = (
+        'Lan bước vào sân đá khi gió lay cành tùng rồi dừng lại. '
+        'Nàng nâng ngọc ấn lên trước cánh cửa khép kín rất lâu. '
+        'Minh quỳ xuống bên bậc thềm ướt mưa và cúi đầu thật thấp. '
+        'Hạc trắng đậu trên mái ngói cũ rồi vỗ cánh bay vào sương. '
+    ) + 'chữ ' * 160
+
+    PLAN = (
+        'Genre: tien-hiep · Images: 4 · Videos: 0 · Chapters: 1\n\n'
+        '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis '
+        '| setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+        '|---|---|---|---|---|---|---|---|---|---|---|\n'
+        '| 001 | 1 | Lan bước vào sân đá khi gió lay cành tùng rồi dừng lại | establishing '
+        '| Lan | Lan enters the windy stone courtyard. | pine wall and stone courtyard '
+        '| high wide 24mm | Lan crosses the threshold | cool daylight on grey stone | |\n'
+        '| 002 | 1 | Nàng nâng ngọc ấn lên trước cánh cửa khép kín rất lâu | reveal '
+        '| Lan | Lan lifts the jade seal at the door. | closed timber door and step '
+        '| tight low 85mm | Lan raises the seal slowly | warm jade against shadow | |\n'
+        '| 003 | 1 | Minh quỳ xuống bên bậc thềm ướt mưa và cúi đầu thật thấp | detail '
+        '| Minh | Minh kneels on the rain-slick step. | wet flagstones under eaves '
+        '| overhead 35mm | Minh bows his head down | muted grey and rain silver | |\n'
+        '| 004 | 1 | Hạc trắng đậu trên mái ngói cũ rồi vỗ cánh bay vào sương | transition '
+        '| Lan | A white crane leaves the old roof. | tiled roofline above mist '
+        '| distant long 200mm | the crane beats its wings | pale white over blue haze | |\n'
+    )
+
+    def _run(self, work: Path) -> subprocess.CompletedProcess:
+        (work / 'chapters_qa.json').write_text(
+            json.dumps([{'id': 1, 'text': self.CHAPTER}], ensure_ascii=False),
+            encoding='utf-8')
+        (work / 'genre.txt').write_text('tien-hiep\n', encoding='utf-8')
+        return subprocess.run(
+            [sys.executable, str(ROOT / 'scripts' / 'validate_scene_plan.py'),
+             '--plan', str(work / 'scene-plan.md'),
+             '--chapters-json', str(work / 'chapters_qa.json')],
+            capture_output=True, text=True,
+        )
+
+    def test_a_passing_plan_gets_its_hash_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / 'scene-plan.md').write_text(self.PLAN, encoding='utf-8')
+
+            completed = self._run(work)
+            recorded = (work / 'plan.hash').read_text(encoding='utf-8').strip()
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertRegex(recorded, r'^[0-9a-f]{12}$')
+
+    def test_a_rejected_plan_leaves_no_hash_behind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / 'scene-plan.md').write_text(
+                self.PLAN.replace('Genre: tien-hiep', 'Genre: đô thị'), encoding='utf-8')
+
+            completed = self._run(work)
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn('declared_genre_mismatch', completed.stdout)
+            self.assertFalse((work / 'plan.hash').exists())
+
+
+class SceneCountCliTests(unittest.TestCase):
+    @staticmethod
+    def _plan(images: int) -> str:
+        return DeclaredSceneCountTests._plan(images)
+
+    def test_the_cli_derives_the_expectation_from_the_chapter_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            chapters = [{'id': 1, 'text': ' '.join(['từ'] * 21_000)}]
+            (work / 'chapters_qa.json').write_text(
+                json.dumps(chapters, ensure_ascii=False), encoding='utf-8')
+            (work / 'scene-plan.md').write_text(self._plan(114), encoding='utf-8')
+
+            completed = subprocess.run(
+                [sys.executable, str(ROOT / 'scripts' / 'validate_scene_plan.py'),
+                 '--plan', str(work / 'scene-plan.md'),
+                 '--chapters-json', str(work / 'chapters_qa.json')],
+                capture_output=True, text=True,
+            )
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn('deterministic scene count 175', completed.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

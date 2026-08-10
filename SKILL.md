@@ -1,7 +1,7 @@
 ---
 name: visual-prompt
-version: 0.15.0
-description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow
+version: 0.16.0
+description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow; the auto scene band runs 120-300 images (a ~3h narration); the plan gate checks every declared total against its source — image and chapter counts recomputed from the chapter JSON, genre against genre.txt, per-chapter coverage against each chapter's share of the prose
 license: MIT
 contextFileName: SKILL.md
 ---
@@ -133,8 +133,13 @@ prompts. Video and music files are opt-in:
    `style_hash` into the scene cache key. Genre and style are decoupled — any of
    the 18 styles works for any genre.
 7. **Scene count** — `python3 scripts/calc_scene_count.py` →
-   default `images = clamp(round(wc/120), 120, 150)`, `videos = 0`; video count is
-   calculated only after an explicit `--video`/`--videos N`.
+   default `images = clamp(round(wc/120), 120, 300)`, `videos = 0`; video count is
+   calculated only after an explicit `--video`/`--videos N`. The ceiling covers a
+   ~3h narration (~37k words). `validate_scene_plan.py` checks the plan's declared
+   totals against their sources rather than against itself — image count and
+   chapter count recomputed from the chapter JSON, genre against `.work/genre.txt`,
+   and per-chapter coverage against each chapter's share of the prose. It writes
+   `.work/plan.hash` once the plan passes.
 8. **Scene plan + expand** — active parent model writes `.work/scene-plan.md` then
    per-scene `.work/scene-NNN.md` files in micro-batches of ≤3. Source-anchor,
    artifact, depth, and similarity gates fail closed.
