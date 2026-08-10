@@ -22,6 +22,12 @@ _MUSIC_FILE_RE = re.compile(r'^music-(\d{3,})\.md$')
 _SCENE_OUTPUT_RE = re.compile(r'^--- SCENE (\d+[a-zA-Z]?) ---\s*$', re.MULTILINE)
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
 _CACHE_KEY_RE = re.compile(r'^[0-9a-f]{16}$')
+# The deep-prompt contract in prompts/prompt-expander-image.md. The similarity
+# gate compares these fields, so a scene without them cannot be measured at all.
+IMAGE_SECTIONS = (
+    'Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
+    'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative',
+)
 _MUSIC_PLAN_COLUMNS = ('loop_index', 'chapter_start', 'chapter_end', 'mood')
 _MUSIC_MOODS = {
     'calm/intro', 'mystery/journey', 'tension/battle',
@@ -348,6 +354,19 @@ def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None
             errors.append(f'{path.name} source_anchor does not match scene plan')
         if '## Image Prompt' not in text:
             errors.append(f'{path.name} missing ## Image Prompt')
+        else:
+            # Catch a flattened prompt on the first micro-batch. check_run_legit
+            # spots the same thing, but only on the assembled output — by then a
+            # whole run has been written in the wrong shape (observed 2026-08-10:
+            # 120 scenes as single paragraphs, which also blinds the similarity
+            # gate because it has no fields to compare).
+            absent = [name for name in IMAGE_SECTIONS
+                      if not re.search(rf'^{re.escape(name)}:', text, re.MULTILINE)]
+            if absent:
+                errors.append(
+                    f'{path.name} image prompt is not the 10-section deep format — '
+                    f'missing: {absent}'
+                )
         if expected_has_video and '## Video Prompt' not in text:
             errors.append(f'{path.name} missing ## Video Prompt')
         if not expected_has_video and '## Video Prompt' in text:

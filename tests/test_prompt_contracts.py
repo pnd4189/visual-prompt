@@ -50,12 +50,22 @@ def music_body(name: str) -> str:
     return f'{music_paragraph(name)}\n\nTags: {tags}'
 
 
+def deep_image_prompt() -> str:
+    """The 10-section body validate_artifacts requires of every scene."""
+    return '## Image Prompt\n' + ''.join(
+        f'{section}: placeholder\n' for section in (
+            'Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
+            'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative',
+        )
+    )
+
+
 def scene_file_body(scene_id: str) -> str:
     return (
         f'---\nscene_id: {scene_id}\ncache_key: 0000000000000000\n'
         f'source_anchor: Cảnh thử nghiệm cho scene {scene_id}\n'
         'has_video: false\n---\n'
-        '## Image Prompt\nCamera: wide frame\n'
+        + deep_image_prompt()
     )
 
 
@@ -189,8 +199,7 @@ class PromptSimilarityTests(unittest.TestCase):
             input_path.write_text('Chương 1. Test\n', encoding='utf-8')
             (work / 'scene-001.md').write_text(
                 '---\nscene_id: 1\ncache_key: abc\nsource_anchor: test source\n'
-                'has_video: false\n---\n'
-                '## Image Prompt\nCamera: wide frame\n',
+                'has_video: false\n---\n' + deep_image_prompt(),
                 encoding='utf-8',
             )
             body = music_body('river dusk')
@@ -501,8 +510,7 @@ class ArtifactSceneIdTests(unittest.TestCase):
             (directory / 'scene-026b.md').write_text(
                 '---\nscene_id: 026b\ncache_key: 0000000000000000\n'
                 'source_anchor: Lan raises the jade seal slowly in silence\n'
-                'has_video: false\n---\n'
-                '## Image Prompt\nCamera: close frame\n',
+                'has_video: false\n---\n' + deep_image_prompt(),
                 encoding='utf-8',
             )
 
@@ -554,8 +562,7 @@ class ArtifactSceneIdTests(unittest.TestCase):
             (directory / 'scene-026a.md').write_text(
                 '---\nscene_id: 026a\ncache_key: 0000000000000000\n'
                 'source_anchor: Lan raises the bronze seal slowly in silence\n'
-                'has_video: false\n---\n'
-                '## Image Prompt\nCamera: close frame\n',
+                'has_video: false\n---\n' + deep_image_prompt(),
                 encoding='utf-8',
             )
 
@@ -607,8 +614,7 @@ class ArtifactSceneIdTests(unittest.TestCase):
             (directory / 'scene-001.md').write_text(
                 '---\nscene_id: 001\ncache_key: 0000000000000000\n'
                 'source_anchor: Lan raises the bronze seal slowly in silence\n'
-                'has_video: false\n---\n'
-                '## Image Prompt\nCamera: close frame\n',
+                'has_video: false\n---\n' + deep_image_prompt(),
                 encoding='utf-8',
             )
             input_path = directory / 'novel.txt'
@@ -739,8 +745,8 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
             (work / 'scene-001.md').write_text(
                 '---\nscene_id: 001\ncache_key: 0000000000000000\n'
                 'source_anchor: Chương một có một cảnh thử nghiệm ngắn\n'
-                'has_video: true\n---\n## Image Prompt\nCamera: wide\n'
-                '## Video Prompt\nCinematography: slow push\n',
+                'has_video: true\n---\n' + deep_image_prompt()
+                + '## Video Prompt\nCinematography: slow push\n',
                 encoding='utf-8',
             )
             (work / 'music-001.md').write_text(
@@ -1379,8 +1385,7 @@ class WorkerProtocolContractTests(unittest.TestCase):
             plan.write_text(plan_text, encoding='utf-8')
             (directory / 'scene-002.md').write_text(
                 '---\nscene_id: 002\ncache_key: 0000000000000000\n'
-                f'source_anchor: {anchors["002"]}\nhas_video: false\n---\n'
-                '## Image Prompt\nCamera: close frame\n',
+                f'source_anchor: {anchors["002"]}\nhas_video: false\n---\n' + deep_image_prompt(),
                 encoding='utf-8',
             )
 
