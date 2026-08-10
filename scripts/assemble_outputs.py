@@ -50,6 +50,11 @@ NEGATIVE_MIN = 20
 
 _IMAGE_HEADERS = ['Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
                   'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative']
+# --lean: who, where, what — plus the series style lock and the safety negatives.
+# The image model supplies camera, light and mood, so the word floor drops with it.
+_LEAN_IMAGE_HEADERS = ['Subject', 'Setting', 'Action', 'Style', 'Negative']
+LEAN_IMAGE_WORD_MIN = 60
+LEAN_IMAGE_WORD_MAX = 220
 _VIDEO_HEADERS = ['Cinematography', 'Subject', 'Action', 'Context', 'Style & Ambiance']
 _TIMESTAMP_RE = re.compile(r'(?:\[\d{2}:\d{2}|Beat\s*\d+)')
 _NEGATIVE_SECTION_RE = re.compile(r'(?ims)^Negative\s*:\s*(.*?)\Z')
@@ -84,16 +89,19 @@ def _body_word_count(block: str, headers: list[str]) -> int:
     return len(stripped.split())
 
 
-def check_image(block: str) -> list[str]:
+def check_image(block: str, lean: bool = False) -> list[str]:
     problems: list[str] = []
-    missing = _missing_headers(block, _IMAGE_HEADERS)
+    headers = _LEAN_IMAGE_HEADERS if lean else _IMAGE_HEADERS
+    word_min = LEAN_IMAGE_WORD_MIN if lean else IMAGE_WORD_MIN
+    word_max = LEAN_IMAGE_WORD_MAX if lean else IMAGE_WORD_MAX
+    missing = _missing_headers(block, headers)
     if missing:
         problems.append(f"missing image header(s): {', '.join(missing)}")
-    wc = _body_word_count(block, _IMAGE_HEADERS)
-    if wc < IMAGE_WORD_MIN:
-        problems.append(f"image body too short: {wc} words (<{IMAGE_WORD_MIN})")
-    elif wc > IMAGE_WORD_MAX:
-        problems.append(f"image body too long: {wc} words (>{IMAGE_WORD_MAX})")
+    wc = _body_word_count(block, headers)
+    if wc < word_min:
+        problems.append(f"image body too short: {wc} words (<{word_min})")
+    elif wc > word_max:
+        problems.append(f"image body too long: {wc} words (>{word_max})")
     # Clean up markdown formatting when checking negative list
     block_clean = re.sub(r'\*+', '', block)
     m = _NEGATIVE_SECTION_RE.search(block_clean)
@@ -173,7 +181,7 @@ def parse_scene(path: Path) -> dict:
 
 
 def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
-             no_music: bool = True) -> dict:
+             no_music: bool = True, lean: bool = False) -> dict:
     scenes_paths = discover_scenes(work_dir)
     if not scenes_paths:
         raise RuntimeError(f"No scene-*.md found in {work_dir}")
@@ -189,7 +197,7 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
             warnings.append(f"scene-{sc['scene_id']}.md missing '## Image Prompt' block — skipped")
             continue
         image_blocks.append((sc['scene_id'], sc['image']))
-        for detail in check_image(sc['image']):
+        for detail in check_image(sc['image'], lean):
             violations.append({'scene_id': sc['scene_id'], 'kind': 'image', 'detail': detail})
         if sc['video'] and not no_video:
             video_blocks.append((sc['scene_id'], sc['video']))
@@ -255,6 +263,8 @@ def main() -> int:
                    help='Skip video blocks (default; retained for explicit override)')
     p.add_argument('--music', dest='no_music', action='store_false',
                    help='Include music blocks and write _music_prompts.txt')
+    p.add_argument('--lean', action='store_true',
+                   help='assemble against the lean prompt spec')
     p.add_argument('--no-music', dest='no_music', action='store_true',
                    help='Skip music blocks (default; retained for explicit override)')
     args = p.parse_args()
@@ -267,6 +277,7 @@ def main() -> int:
             input_path, work_dir,
             no_video=args.no_video,
             no_music=args.no_music,
+            lean=args.lean,
         )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)

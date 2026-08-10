@@ -36,6 +36,9 @@ import tempfile
 from pathlib import Path
 
 IMAGE_WORD_MIN = 350
+# --lean trades depth for distinctness: the image model fills in camera,
+# light and mood, so a scene only carries who/where/what plus the locks.
+LEAN_IMAGE_WORD_MIN = 60
 SCENE_FILE_RE = re.compile(r'^scene-(\d{3}[a-zA-Z]?)\.md$')
 SCENE_ID_RE = re.compile(r'^\s*\|\s*(\d+[a-zA-Z]?)\s*\|', re.M)
 BLOCK_RE = re.compile(r'^--- SCENE (\d+[a-zA-Z]?) ---\s*$', re.M)
@@ -217,6 +220,7 @@ def main():
     worker_manifest_path = None
     authorship_log_path = None
     require_authorship = False
+    lean = False
     i = 0
     while i < len(args):
         a = args[i]
@@ -236,6 +240,8 @@ def main():
             authorship_log_path = Path(args[i + 1]); i += 2
         elif a == '--require-authorship':
             require_authorship = True; i += 1
+        elif a == '--lean':
+            lean = True; i += 1
         else:
             i += 1
     if work is None:
@@ -414,9 +420,11 @@ def main():
             # deep-but-concise scene still has all 10 headers (just shorter
             # content), so this catches shortcuts without false-failing concise
             # runs. Accept plain (`Camera:`) or bold (`**Camera:**`) labels.
-            _IMG_HDRS = ['Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
-                         'Action / Energy', 'Style', 'Lighting / Color',
-                         'Atmosphere', 'Negative']
+            _IMG_HDRS = (['Subject', 'Setting', 'Action', 'Style', 'Negative'] if lean
+                         else ['Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
+                               'Action / Energy', 'Style', 'Lighting / Color',
+                               'Atmosphere', 'Negative'])
+            _MIN_HDRS = len(_IMG_HDRS) - 1
             shallow = 0
             for k, m in enumerate(markers):
                 end = markers[k + 1].start() if k + 1 < len(markers) else len(text)
@@ -427,11 +435,11 @@ def main():
                     if re.search(r'^' + re.escape(h) + r'\s*:', body, re.M) or \
                        re.search(r'^\*\*' + re.escape(h) + r'\s*:\*\*', body, re.M):
                         present += 1
-                if present < 9:
+                if present < _MIN_HDRS:
                     shallow += 1
             if shallow > len(markers) * 0.5:
                 errors.append(
-                    f"{shallow}/{len(markers)} image scene block thiếu header structure (shortcut bypass, không phải 10-section deep format)"
+                    f"{shallow}/{len(markers)} image scene block thiếu header structure (shortcut bypass, không đúng {len(_IMG_HDRS)}-section format)"
                 )
 
     # 4. Video boilerplate bypass: the video expander must produce per-scene

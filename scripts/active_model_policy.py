@@ -60,6 +60,20 @@ def state_path(payload: dict) -> Path:
     return Path(configured) if configured else base / '.visual-prompt-primary.json'
 
 
+def lean_mode(payload: dict) -> bool:
+    """Whether the user asked for the lean prompt spec, per the guard state.
+
+    The mode has to come from the invocation the user typed, not from the flags
+    the model chooses: given the choice, the model takes the cheaper standard.
+    The guard records it when it claims the session, in a file it owns.
+    """
+    try:
+        state = json.loads(state_path(payload).read_text(encoding='utf-8'))
+        return bool(state.get('lean'))
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return False
+
+
 def _input_root_marker(payload: dict) -> Path:
     return state_path(payload).with_suffix('.root')
 

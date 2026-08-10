@@ -28,6 +28,9 @@ IMAGE_SECTIONS = (
     'Camera', 'Story DNA', 'Setting', 'Composition', 'Subject',
     'Action / Energy', 'Style', 'Lighting / Color', 'Atmosphere', 'Negative',
 )
+# --lean: only what the image model cannot infer — who, where, what they do —
+# plus the series style lock and the safety negatives.
+LEAN_IMAGE_SECTIONS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 _MUSIC_PLAN_COLUMNS = ('loop_index', 'chapter_start', 'chapter_end', 'mood')
 _MUSIC_MOODS = {
     'calm/intro', 'mystery/journey', 'tension/battle',
@@ -291,7 +294,8 @@ def _split_music_output(text: str) -> tuple[list[str], bool]:
     return blocks, not pending
 
 
-def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None = None) -> dict:
+def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None = None,
+                 lean: bool = False) -> dict:
     """Validate scene artifacts. With assigned_ids (bounded-parallel worker
     submode) only that disjoint subset is expected in work_dir; every assigned
     id must exist in the frozen scene plan (fail-closed)."""
@@ -360,12 +364,13 @@ def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None
             # whole run has been written in the wrong shape (observed 2026-08-10:
             # 120 scenes as single paragraphs, which also blinds the similarity
             # gate because it has no fields to compare).
-            absent = [name for name in IMAGE_SECTIONS
+            required = LEAN_IMAGE_SECTIONS if lean else IMAGE_SECTIONS
+            absent = [name for name in required
                       if not re.search(rf'^{re.escape(name)}:', text, re.MULTILINE)]
             if absent:
                 errors.append(
-                    f'{path.name} image prompt is not the 10-section deep format — '
-                    f'missing: {absent}'
+                    f'{path.name} image prompt is missing required section(s) '
+                    f'({"lean" if lean else "deep"} spec): {absent}'
                 )
         if expected_has_video and '## Video Prompt' not in text:
             errors.append(f'{path.name} missing ## Video Prompt')
@@ -584,6 +589,10 @@ def main() -> int:
         '--scene-ids', default=None,
         help='Comma-separated assigned scene ids (worker submode subset check)',
     )
+    parser.add_argument(
+        '--lean', action='store_true',
+        help='validate the lean prompt spec instead of the deep one',
+    )
     args = parser.parse_args()
 
     work_dir = Path(args.work_dir) if args.work_dir else None
@@ -597,7 +606,7 @@ def main() -> int:
             assigned_ids = [item.strip() for item in args.scene_ids.split(',') if item.strip()]
             if not assigned_ids:
                 raise SystemExit('--scene-ids requires at least one scene id')
-        results.append(check_scenes(work_dir, plan, assigned_ids))
+        results.append(check_scenes(work_dir, plan, assigned_ids, args.lean))
     if args.check in {'music', 'all'}:
         if work_dir is None:
             raise SystemExit('--work-dir is required for music validation')

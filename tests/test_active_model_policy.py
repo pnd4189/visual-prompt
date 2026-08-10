@@ -2,6 +2,7 @@
 """Unit tests for Agy write-root discovery."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -262,6 +263,35 @@ class CommandPolicyTests(unittest.TestCase):
             )
             self.assertIn('composition', self.denial(background, root))
             self.assertIn('expansion', self.denial(expanded_report, root))
+
+class LeanSpecTests(unittest.TestCase):
+    """--lean swaps the prompt contract; the model must not pick the mode."""
+
+    def _state(self, root: Path, lean: bool) -> dict:
+        (root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary', 'lean': lean,
+        }), encoding='utf-8')
+        return {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+
+    def test_the_model_cannot_choose_the_prompt_spec(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); (root / '.work').mkdir()
+            (root / 'novel.txt').write_text('x', encoding='utf-8')
+            command = (f'python3 {ROOT}/scripts/assemble_outputs.py '
+                       f'--input {root}/novel.txt')
+            with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                deep = self._state(root, lean=False)
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command, 'Cwd': str(root)}, deep))
+                self.assertIn('was not requested', policy.command_denial(
+                    {'CommandLine': command + ' --lean', 'Cwd': str(root)}, deep))
+
+                lean = self._state(root, lean=True)
+                self.assertIn('must be called with --lean', policy.command_denial(
+                    {'CommandLine': command, 'Cwd': str(root)}, lean))
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
 if __name__ == '__main__':

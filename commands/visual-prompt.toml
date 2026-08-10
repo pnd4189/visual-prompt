@@ -230,6 +230,7 @@ Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false
 16. `--faithful`                         → legacy alias; grounded mode remains enabled
 17. `--no-video`                         → video_enabled = false (takes precedence)
 18. `--no-music`                         → music_enabled = false (takes precedence)
+18b. `--lean`                            → lean = true (bộ prompt tinh gọn 5 mục)
 19. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Natural-language media requests after the command are also explicit opt-ins:
@@ -867,6 +868,24 @@ Chỉ chạy ở run trực tiếp. Batch (`--auto-repair`) BỎ QUA step này: 
 phải chạy tiếp gate riêng của nó trên `.work` sau khi phiên kết thúc.
 
 Print: `Cleanup: <N> scene file đã xoá (output giữ <M> block)`.
+
+---
+
+## LEAN MODE (`--lean`)
+
+Khi `lean = true`, bộ tiêu chuẩn prompt đổi sang **LEAN SPEC** ở cuối
+`@prompts/prompt-expander-image.md`: đúng 5 mục `Subject / Setting / Action /
+Style / Negative`, thân prompt 60-220 từ. Camera, ánh sáng, bố cục, không khí do
+model sinh ảnh tự quyết — KHÔNG viết các mục đó.
+
+Mục đích: prompt ngắn, sinh nhanh, và khác nhau thật giữa các cảnh. `Subject` +
+`Style` lặp lại là ĐÚNG (giữ nhân vật + phong cách nhất quán); `Setting` +
+`Action` phải khác nhau ở từng cảnh — đó là hai mục gate đo trùng lặp.
+
+Mọi helper nhận biết chế độ PHẢI được gọi kèm `--lean` trong run này:
+`assemble_outputs.py`, `validate_artifacts.py`, `check_prompt_similarity.py`,
+`check_run_legit.py`. Guard đọc chế độ từ chính dòng lệnh của user và sẽ TỪ CHỐI
+lệnh nào dùng sai cờ — không tự thêm/bớt `--lean` để gate dễ qua.
 
 ---
 

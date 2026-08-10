@@ -9,8 +9,8 @@ from glob import glob, has_magic
 from pathlib import Path
 
 from active_model_policy import (
-    FINAL_OUTPUT_RE, SKILL_ROOT, inside, remember_input_root, roots, state_path,
-    write_denial,
+    FINAL_OUTPUT_RE, SKILL_ROOT, inside, lean_mode, remember_input_root, roots,
+    state_path, write_denial,
 )
 
 # Helpers that receive the novel path the user named. The first one to resolve it
@@ -116,7 +116,32 @@ def _final_denial(target: Path, payload: dict, pattern=FINAL_OUTPUT_RE) -> str |
     return None
 
 
+LEAN_AWARE_HELPERS = {'assemble_outputs.py', 'validate_artifacts.py',
+                      'check_prompt_similarity.py', 'check_run_legit.py'}
+
+
+def _lean_flag_denial(name: str, tokens: list[str], payload: dict) -> str | None:
+    """The prompt spec is the user's choice, not the model's.
+
+    Every lean-aware gate must run in the mode the user asked for. Left free, the
+    model would simply pass --lean to whichever gate it wanted to satisfy cheaply.
+    """
+    if name not in LEAN_AWARE_HELPERS:
+        return None
+    wants_lean = lean_mode(payload)
+    passed_lean = '--lean' in tokens
+    if wants_lean and not passed_lean:
+        return f'this run uses the lean prompt spec — {name} must be called with --lean'
+    if passed_lean and not wants_lean:
+        return (f'--lean was not requested for this run; {name} must validate the '
+                'full deep spec')
+    return None
+
+
 def _helper_denial(name: str, tokens: list[str], cwd: Path, payload: dict) -> str | None:
+    denial = _lean_flag_denial(name, tokens, payload)
+    if denial:
+        return denial
     path_options = {
         '--authorship-log', '--bible', '--history', '--input', '--output',
         '--report-json', '--work-dir',

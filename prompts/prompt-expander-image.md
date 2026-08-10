@@ -317,3 +317,39 @@ Negative: ...
 ```
 Scene <NNN> image written: <wc> words, anchor verified for <N> chars
 ```
+
+---
+
+## LEAN SPEC (chỉ khi run có cờ `--lean`)
+
+Mục tiêu khác hẳn deep spec: **prompt ngắn, sinh nhanh, khác nhau thật**. Máy quay,
+ánh sáng, bố cục, không khí — để model sinh ảnh tự quyết. Bạn chỉ khoá 3 thứ nó
+không thể tự suy ra: **ai đang trên khung hình, ở đâu, đang làm gì**.
+
+Đúng 5 mục, không thêm mục nào:
+
+```markdown
+## Image Prompt
+
+Subject: <nhận dạng nhân vật NGUYÊN VĂN từ character bible — tên, tuổi, dáng,
+  trang phục, đặc điểm nhận dạng. Cảnh không người thì tả vật/công trình chính>
+
+Setting: <nơi chốn cụ thể của ĐÚNG khoảnh khắc này, 8-20 từ>
+
+Action: <điều đang xảy ra tại `source_anchor`, 8-20 từ, động từ cụ thể>
+
+Style: <style id của series, nguyên văn — giống nhau ở mọi cảnh>
+
+Negative: <danh sách an toàn — giống nhau ở mọi cảnh>
+```
+
+Tổng thân prompt 60-220 từ. Ngắn hơn không có nghĩa là mờ nhạt:
+
+- `Subject` và `Style` LẶP LẠI giữa các cảnh là đúng thiết kế — đó là thứ giữ nhân
+  vật và phong cách nhất quán. Gate không so trùng hai mục này.
+- `Setting` và `Action` PHẢI khác nhau ở từng cảnh — gate so trùng đúng hai mục
+  này. Chép lại từ cảnh trước là hỏng.
+- Mỗi `Action` bám vào `source_anchor` riêng của hàng scene-plan. Anchor đã khác
+  nhau 100% giữa các cảnh, nên nếu bạn viết đúng khoảnh khắc đó thì `Action` tự
+  khác nhau — không cần bịa thêm.
+- Cấm dựng sẵn vài biến thể rồi rải đều. Đó là dán khuôn, gate bắt được.

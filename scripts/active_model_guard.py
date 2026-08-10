@@ -17,7 +17,7 @@ except ImportError:  # Windows Agy has no fcntl; append-only records remain vali
 
 from active_model_policy import (
     FORBIDDEN_TOOLS, NEUTRAL_TOOLS, READ_TOOLS, SKILL_ROOT, WRITE_TOOLS,
-    command_denial, state_path, target_path, write_denial,
+    command_denial, lean_mode, state_path, target_path, write_denial,
 )
 
 # Measured on the wire: Agy sends the enum name with the TERMINATION_REASON_
@@ -81,6 +81,23 @@ def _transcript_armed(path: str | None) -> bool:
     return GUARD_MARKER in window or INVOCATION_RE.search(window) is not None
 
 
+def _lean_invocation(path: str | None) -> bool:
+    """Did the user's own /visual-prompt line carry --lean?"""
+    if not path:
+        return False
+    try:
+        with Path(path).open('rb') as stream:
+            window = stream.read(HEAD_BYTES)
+    except OSError:
+        return False
+    match = INVOCATION_RE.search(window)
+    if match is None:
+        return False
+    # Stay inside the invocation turn: the flag only counts where the user typed it.
+    turn = window[match.start():match.start() + 2_000]
+    return b'--lean' in turn.split(b'</USER_REQUEST>')[0]
+
+
 def _active(payload: dict) -> bool:
     if os.environ.get('VP_GUARD_ACTIVE') == '1' or _transcript_armed(payload.get('transcriptPath')):
         return True
@@ -106,6 +123,7 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         'schema': 1,
         'primary_conversation_id': str(payload.get('conversationId') or ''),
         'model': str(payload.get('modelName') or ''),
+        'lean': _lean_invocation(payload.get('transcriptPath')),
     }
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -261,7 +279,7 @@ def _post_tool(payload: dict) -> dict:
     return {}
 
 
-def _gate_failure(work: Path, log: Path) -> str | None:
+def _gate_failure(work: Path, log: Path, lean: bool = False) -> str | None:
     """Run the closing canonical gates; return the first failure text, or None."""
     images = sorted(work.parent.glob('*_image_prompts.txt'))
     if not images:
@@ -276,14 +294,16 @@ def _gate_failure(work: Path, log: Path) -> str | None:
     cleaned = (_scene_count(work) == 0
                and _assembled_scenes(work.parent) >= max(_planned_scenes(work), 1))
     if not cleaned:
-        gates.append([sys.executable, str(helpers / 'check_run_legit.py'),
-                      '--work', str(work), '--image', str(images[0]),
-                      '--require-authorship', '--authorship-log', str(log)])
+        legit = [sys.executable, str(helpers / 'check_run_legit.py'),
+                 '--work', str(work), '--image', str(images[0]),
+                 '--require-authorship', '--authorship-log', str(log)]
+        gates.append(legit + ['--lean'] if lean else legit)
     # Anti-repetition is part of "done": template-stamped scenes must not be
     # shippable just because every file has valid provenance. This one reads the
     # deliverable, so it still applies after cleanup.
-    gates.append([sys.executable, str(helpers / 'check_prompt_similarity.py'),
-                  '--image', str(images[0])])
+    similarity = [sys.executable, str(helpers / 'check_prompt_similarity.py'),
+                  '--image', str(images[0])]
+    gates.append(similarity + ['--lean'] if lean else similarity)
     for command in gates:
         try:
             # Both gates must finish inside the hook's own 120s budget.
@@ -369,7 +389,7 @@ def _stop(payload: dict) -> dict:
                    'next micro-batch now — do not stop to ask, do not summarise; '
                    'keep going until every scene file exists, then run the gates.')
     else:
-        failure = _gate_failure(work, Path(log_line.strip()))
+        failure = _gate_failure(work, Path(log_line.strip()), lean_mode(payload))
         if failure is None:
             if not scenes:
                 return {}

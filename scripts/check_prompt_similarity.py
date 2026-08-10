@@ -21,6 +21,11 @@ COMPARED_IMAGE_FIELDS = (
     'Camera', 'Story DNA', 'Setting', 'Composition',
     'Action / Energy', 'Lighting / Color', 'Atmosphere',
 )
+# --lean keeps only the fields the image model cannot infer: who is on screen,
+# where, and what they are doing. Subject/Style/Negative repeat by design, so the
+# two that must differ per scene are the ones worth comparing.
+LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
+LEAN_COMPARED_FIELDS = ('Setting', 'Action')
 HISTORY_SECTIONS = (
     'camera framings used', 'settings used', 'action motifs used',
     'palettes used',
@@ -196,7 +201,8 @@ def _warning(kind: str, field: str | None, left: int, right: int, score: float) 
 
 
 def check_image(scenes: list[dict], soft: float, near: float,
-                max_pair_copies: int, max_exact_per_field: int) -> dict:
+                max_pair_copies: int, max_exact_per_field: int,
+                compared: tuple[str, ...] = COMPARED_IMAGE_FIELDS) -> dict:
     warnings = []
     violations = []
     banned_phrases: list[str] = []
@@ -222,7 +228,7 @@ def check_image(scenes: list[dict], soft: float, near: float,
             })
             banned_phrases.extend(reasons)
 
-    for field in COMPARED_IMAGE_FIELDS:
+    for field in compared:
         documents = [scene['fields'].get(field, '') for scene in scenes]
         scores = []
         for left_index, right_index, score in _similarities(documents, soft):
@@ -443,9 +449,10 @@ def _require_blocks(label: str, text: str, blocks: list[dict]) -> list[dict]:
     return blocks
 
 
-def _require_image_fields(scenes: list[dict]) -> list[dict]:
+def _require_image_fields(scenes: list[dict],
+                          compared: tuple[str, ...] = COMPARED_IMAGE_FIELDS) -> list[dict]:
     for scene in scenes:
-        if not any(scene['fields'].get(field) for field in COMPARED_IMAGE_FIELDS):
+        if not any(scene['fields'].get(field) for field in compared):
             raise ValueError(f'image scene {scene["scene_id"]} has no comparable fields')
     return scenes
 
@@ -478,7 +485,10 @@ def main() -> int:
     parser.add_argument('--near', type=float, default=0.95)
     parser.add_argument('--max-pair-copies', type=int, default=0)
     parser.add_argument('--max-exact-per-field', type=int, default=4)
+    parser.add_argument('--lean', action='store_true',
+                        help='compare the lean spec fields (Setting, Action)')
     args = parser.parse_args()
+    compared = LEAN_COMPARED_FIELDS if args.lean else COMPARED_IMAGE_FIELDS
 
     try:
         image_text = _read(args.image, 'image')
@@ -487,7 +497,8 @@ def main() -> int:
         if args.extract_history:
             if image_text is None or not args.history:
                 parser.error('--extract-history requires --image and --history')
-            _require_image_fields(_require_blocks('image', image_text, parse_image(image_text)))
+            _require_image_fields(
+                _require_blocks('image', image_text, parse_image(image_text)), compared)
             if music_text is not None:
                 _require_music_content(
                     _require_blocks('music', music_text, parse_music(music_text))
@@ -501,11 +512,11 @@ def main() -> int:
         parts = []
         if image_text is not None:
             image_scenes = _require_image_fields(
-                _require_blocks('image', image_text, parse_image(image_text))
+                _require_blocks('image', image_text, parse_image(image_text)), compared,
             )
             parts.append(('image', check_image(
                 image_scenes, args.soft, args.near,
-                args.max_pair_copies, args.max_exact_per_field,
+                args.max_pair_copies, args.max_exact_per_field, compared,
             )))
         if music_text is not None:
             music_loops = _require_music_content(
