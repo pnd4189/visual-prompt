@@ -846,10 +846,14 @@ Print: `Content-safety: <PASS | WARN: <residual>>`.
 
 ---
 
-## STEP 9 — DỌN SCENE FILE (bắt buộc, sau khi STEP 8 PASS)
+## STEP 9 — DỌN SCENE FILE (bắt buộc, SAU KHI STEP 7.3 + STEP 8 ĐỀU PASS)
 
 Các file `.work/scene-NNN.md` là trung gian: sản phẩm giao cho user là
-`<stem>_image_prompts.txt`. Sau khi STEP 8 pass hết, gộp xong thì xoá chúng:
+`<stem>_image_prompts.txt`. Nhưng chúng là ĐƯỜNG DUY NHẤT để sửa một output bị
+trùng lặp — xoá khi similarity chưa pass là tự khoá mình vào ngõ cụt. Helper tự
+chạy lại `check_prompt_similarity.py` và từ chối nếu còn fail; đừng cố lách.
+
+Sau khi STEP 7.3 (similarity) và STEP 8 pass hết, gộp xong thì xoá chúng:
 
 ```bash
 python3 scripts/cleanup_work.py --work .work --image "<stem>_image_prompts.txt"

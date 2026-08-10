@@ -158,6 +158,25 @@ class CommandPolicyTests(unittest.TestCase):
                 f'> {work}/chapters.json', root,
             ))
 
+    def test_code_disguised_as_a_text_artifact_is_denied(self):
+        # Observed 2026-08-09: blocked from writing .py, the model wrote the same
+        # program into .work/fix.md and asked the user to run it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); work = root / '.work'; work.mkdir()
+            payload = {'workspacePaths': [str(root)]}
+            with patch.dict(os.environ, {'VP_ALLOWED_WRITE_ROOTS': str(work)}):
+                script = ('import re\n\npath = "/x"\nwith open(path) as handle:\n'
+                          '    pass\n')
+                self.assertIn('disguised', policy.write_denial(
+                    {'TargetFile': str(work / 'fix.md'), 'CodeContent': script}, payload,
+                ))
+                # Cinematography prose that merely uses those words stays writable.
+                prose = ('Setting: a courtyard where the rain imports nothing and the '
+                         'def of loyalty is tested, camera opening on a lone figure.\n')
+                self.assertIsNone(policy.write_denial(
+                    {'TargetFile': str(work / 'scene-001.md'), 'CodeContent': prose}, payload,
+                ))
+
     def test_canonical_helper_cannot_write_guard_config_or_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve(); (root / '.work').mkdir()

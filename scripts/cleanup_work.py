@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +40,18 @@ def _assembled_scenes(image: Path) -> int:
         return 0
 
 
+def _similarity_failure(image: Path) -> str | None:
+    """The scene files are the only way to fix a repetitive output, so they may
+    not be deleted until that output actually passes the anti-repetition gate."""
+    command = [sys.executable, str(Path(__file__).resolve().parent / 'check_prompt_similarity.py'),
+               '--image', str(image)]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f'similarity gate could not run ({type(exc).__name__})'
+    return None if done.returncode == 0 else (done.stdout + done.stderr).strip()[:600]
+
+
 def cleanup(work: Path, image: Path) -> tuple[int, dict]:
     if not work.is_dir():
         return 0, {'ok': True, 'removed': 0, 'reason': 'work dir already gone'}
@@ -55,6 +68,12 @@ def cleanup(work: Path, image: Path) -> tuple[int, dict]:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': 'assembled output has fewer scenes than the plan — '
                              'finish the run before cleaning up'}
+    failure = _similarity_failure(image)
+    if failure is not None:
+        return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
+                   'reason': 'similarity gate still fails — rewrite the flagged '
+                             'scenes and re-assemble before cleaning up',
+                   'similarity': failure}
     for scene in scenes:
         scene.unlink()
     return 0, {'ok': True, 'removed': len(scenes), 'planned': planned,

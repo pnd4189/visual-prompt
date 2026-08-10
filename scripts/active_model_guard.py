@@ -30,6 +30,7 @@ HOLDABLE_STOPS = frozenset({'', 'UNSPECIFIED', 'NO_TOOL_CALL',
 # these budgets are roughly double the number of real stops they allow.
 MAX_STALLED_HOLDS = 3   # ~2 consecutive stops with no new scene, then release
 MAX_TOTAL_HOLDS = 300   # ~150 stops; a 120-scene run needs about 40
+SYNC_WAIT_MS = 600_000  # keep helper commands in the foreground even on gdrive
 
 GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
 # Agy records the raw user turn, not the expanded slash-command prompt, so the
@@ -57,7 +58,8 @@ GUARD_RULES = (
     'pipes, $(...) or backticks, and quote any path containing spaces. '
     'check_run_legit.py must be called with --require-authorship '
     '--authorship-log <work>/active-model-authorship.jsonl. The run cannot end '
-    'while that gate fails.'
+    'while that gate fails. Never ask the user to run code on your behalf: if a '
+    'gate fails, rewrite the flagged scenes — do not dress the output up to pass.'
 )
 
 
@@ -190,6 +192,12 @@ def _pre_tool(payload: dict) -> dict:
             denial = 'unproven scene cannot be patched; rewrite its full content directly'
     elif tool == 'run_command':
         denial = command_denial(args, payload)
+        if denial is None:
+            # Agy backgrounds a command that outruns WaitMsBeforeAsync, and reading
+            # a background task needs manage_task — which this guard forbids. On a
+            # FUSE-backed run that dead-ends the model on its own helper output, so
+            # keep guarded commands synchronous instead.
+            return {'decision': 'allow', 'overwrite': {'WaitMsBeforeAsync': SYNC_WAIT_MS}}
     elif tool not in READ_TOOLS | NEUTRAL_TOOLS:
         denial = f'tool {tool!r} is outside the guarded visual-prompt capability set'
     return {'decision': 'deny', 'reason': denial} if denial else {'decision': 'allow'}

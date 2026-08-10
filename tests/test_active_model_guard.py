@@ -271,6 +271,22 @@ class InvocationArmingTests(unittest.TestCase):
         self.assertIn('--require-authorship', first['injectSteps'][0]['ephemeralMessage'])
         self.assertEqual({}, second)
 
+    def test_allowed_commands_are_forced_to_stay_synchronous(self):
+        # Backgrounded helpers can only be read through manage_task, which this
+        # guard forbids — on a slow mount that dead-ends the model on its own
+        # output, so the guard pins WaitMsBeforeAsync instead.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = self._armed_artifact(root, self.USER_TURN)
+            payload = {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'run_command', 'args': {
+                    'CommandLine': f'python3 {ROOT}/scripts/load_input.py {root}/n.txt',
+                    'Cwd': str(root), 'WaitMsBeforeAsync': 2000,
+                }}}
+            result = run_guard('pre-tool-use', payload, {'VP_GUARD_STATE': str(root / 'g.json')})
+        self.assertEqual('allow', result['decision'])
+        self.assertGreaterEqual(result['overwrite']['WaitMsBeforeAsync'], 60_000)
+
     def test_neutral_agy_tools_pass_while_unknown_capabilities_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

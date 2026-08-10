@@ -41,6 +41,14 @@ FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
 # looks finished to the model and fails the driver's output check, costing a full
 # retry. Deny the shortcut instead of paying for it.
 HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
+SOURCE_CODE_RE = re.compile(
+    r'^[ \t]*(?:import\s+[A-Za-z_][\w.]*'
+    r'|from\s+[A-Za-z_][\w.]*\s+import\s'
+    r'|def\s+\w+\s*\('
+    r'|with\s+open\s*\('
+    r'|subprocess\.(?:run|Popen|call)\s*\()',
+    re.MULTILINE,
+)
 
 
 def state_path(payload: dict) -> Path:
@@ -172,6 +180,12 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | 
         return 'runtime code creation is forbidden; write the creative artifact directly'
     if any(value.lstrip().startswith('#!') for value in _strings(args)):
         return 'runtime code shebangs are forbidden'
+    # A model blocked from writing .py will write the same program into a .md and
+    # ask a human to run it (observed 2026-08-09: .work/fix.md, a script that
+    # stamped scene ids into duplicate fields to fake its way past the similarity
+    # gate). Scene prose never opens files or imports modules.
+    if any(SOURCE_CODE_RE.search(value) for value in _strings(args)):
+        return 'runtime code disguised as a text artifact is forbidden'
     if target.suffix.casefold() not in CONTENT_SUFFIXES:
         return 'only direct text artifacts are writable in guarded mode'
     if FINAL_OUTPUT_RE.search(target.name):
