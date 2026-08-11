@@ -89,6 +89,11 @@ def lean_mode(payload: dict) -> bool:
     return bool(_guard_state(payload).get('lean'))
 
 
+def worker_mode(payload: dict) -> bool:
+    """A Pass-2 worker starts at scene expansion, off a frozen snapshot."""
+    return bool(_guard_state(payload).get('worker'))
+
+
 def images_override(payload: dict) -> int | None:
     """The image total the user pinned with --images, or None for the auto count."""
     value = _guard_state(payload).get('images_override')
@@ -297,6 +302,20 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
     if not in_scope:
         roots_hint = os.pathsep.join(str(root) for root in allowed_roots)
         return f'write target is outside the guarded artifact roots ({roots_hint})'
+
+    # The gate says HALT; the model keeps going. validate_scene_plan writes
+    # plan.hash only when the plan is clean, so its absence means every row a
+    # scene would expand was rejected — 77 scenes were written this way on a plan
+    # carrying 26 invented anchors and 42 invented characters (2026-08-11). The
+    # stop gate already refuses to end such a run, but only after the hour is
+    # spent. Refuse the first scene instead. A worker legitimately starts here,
+    # off a frozen snapshot that keeps its plan elsewhere.
+    if (SCENE_FILE_RE.fullmatch(target.name) and not worker_mode(payload)
+            and not (target.parent / 'plan.hash').is_file()):
+        return ('the plan gate has not passed: .work/plan.hash does not exist. '
+                'validate_scene_plan.py writes it only on a clean plan, so scenes '
+                'written now would expand rows the gate rejected. Fix the flagged '
+                'rows, re-run the gate, and expand only once it exits 0')
     return None
 
 

@@ -34,6 +34,8 @@ class WriteRootTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(policy, '_agy_launcher_cwd', return_value=Path(tmp).resolve()):
             root = Path(tmp).resolve()
+            (root / '.work').mkdir(parents=True, exist_ok=True)
+            (root / '.work' / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
             scene = root / '.work' / 'scene-001.md'
             source = root / 'novel.txt'
             self.assertIsNone(policy.write_denial(
@@ -61,6 +63,8 @@ class InputRootLearningTests(unittest.TestCase):
             (novel_dir / 'chuong.txt').write_text('x', encoding='utf-8')
             payload = {'workspacePaths': [str(workspace)],
                        'artifactDirectoryPath': str(workspace)}
+            (novel_dir / '.work').mkdir(exist_ok=True)
+            (novel_dir / '.work' / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
             scene = novel_dir / '.work' / 'scene-001.md'
             env = {'VP_GUARD_STATE': str(workspace / 'guard.json')}
             with patch.dict(os.environ, env), \
@@ -95,6 +99,8 @@ class InputRootLearningTests(unittest.TestCase):
                                        f'{folder}/{name}',
                         'Cwd': str(workspace),
                     }, payload)
+                (one / '.work').mkdir(exist_ok=True)
+                (one / '.work' / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
                 self.assertIsNone(policy.write_denial(
                     {'TargetFile': str(one / '.work' / 'scene-001.md')}, payload,
                 ))
@@ -172,6 +178,7 @@ class CommandPolicyTests(unittest.TestCase):
                     {'TargetFile': str(work / 'fix.md'), 'CodeContent': script}, payload,
                 ))
                 # Cinematography prose that merely uses those words stays writable.
+                (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
                 prose = ('Setting: a courtyard where the rain imports nothing and the '
                          'def of loyalty is tested, camera opening on a lone figure.\n')
                 self.assertIsNone(policy.write_denial(
@@ -294,6 +301,43 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class PlanGateMustPassFirstTests(unittest.TestCase):
+    """A failed gate means HALT; the model kept expanding anyway."""
+
+    def _denial(self, root: Path, worker: bool = False):
+        (root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary', 'worker': worker,
+        }), encoding='utf-8')
+        payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+        with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                patch.object(policy, '_agy_launcher_cwd', return_value=root):
+            return policy.write_denial(
+                {'TargetFile': str(root / '.work' / 'scene-001.md')}, payload)
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / '.work').mkdir()
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_scenes_are_refused_while_the_plan_gate_is_failing(self):
+        """Observed 2026-08-11: 77 scenes written on a plan with 26 invented
+        anchors and 42 invented characters, because exit 2 did not stop it."""
+        denial = self._denial(self.root)
+
+        self.assertIn('plan.hash', denial)
+        self.assertIn('exits 0', denial)
+
+    def test_scenes_flow_once_the_gate_has_passed(self):
+        (self.root / '.work' / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
+
+        self.assertIsNone(self._denial(self.root))
+
+    def test_a_worker_starts_at_expansion_by_design(self):
+        """Pass-2 workers skip STEP 1-5 and keep the plan in a frozen snapshot."""
+        self.assertIsNone(self._denial(self.root, worker=True))
+
+
 class LeanSceneShapeTests(unittest.TestCase):
     """A lean scene written as prose has no fields for the repetition gate."""
 
@@ -320,6 +364,7 @@ class LeanSceneShapeTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name).resolve()
         (self.root / '.work').mkdir()
+        (self.root / '.work' / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
         self.addCleanup(self._tmp.cleanup)
 
     def test_a_flattened_lean_scene_is_refused(self):
@@ -404,6 +449,7 @@ class PlanNeedsQaSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             work = root / '.work'; work.mkdir()
+            (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
             payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
             env = {'VP_GUARD_STATE': str(root / 'guard.json')}
 
