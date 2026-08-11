@@ -1742,10 +1742,19 @@ class StyleLockTests(unittest.TestCase):
         drifted = self._scenes([f'style {i}' for i in range(1, 15)])
 
         result = similarity.check_image(drifted, 0.60, 0.95, 0, 4,
-                                        similarity.LEAN_COMPARED_FIELDS)
+                                        similarity.LEAN_COMPARED_FIELDS, lean=True)
         kinds = {v['type'] for v in result['violations']}
 
         self.assertIn('style_not_locked', kinds)
+
+    def test_the_deep_spec_is_left_alone(self):
+        """No trustworthy deep sample exists to calibrate this against."""
+        drifted = self._scenes([f'style {i}' for i in range(1, 15)])
+
+        result = similarity.check_image(drifted, 0.60, 0.95, 0, 4)
+        kinds = {v['type'] for v in result['violations']}
+
+        self.assertNotIn('style_not_locked', kinds)
 
 
 class SceneCountBandTests(unittest.TestCase):

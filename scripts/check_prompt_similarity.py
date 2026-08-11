@@ -211,6 +211,11 @@ def check_style_lock(scenes: list[dict]) -> list[dict]:
     300 different Style lines, each smuggling its own camera and lighting, so no
     two images would have looked like the same series (2026-08-11). A neighbouring
     run on the same series held all 216 scenes to a single block.
+
+    Lean only. Deep output carries Style among ten sections and the samples on
+    hand vary it (7 distinct blocks across 124 scenes), but every one of those
+    samples is quarantined bypass output — no trustworthy deep run exists to
+    calibrate against, and a rule this absolute has no business being guessed.
     """
     seen: dict[str, int] = {}
     for scene in scenes:
@@ -231,9 +236,10 @@ def check_style_lock(scenes: list[dict]) -> list[dict]:
 
 def check_image(scenes: list[dict], soft: float, near: float,
                 max_pair_copies: int, max_exact_per_field: int,
-                compared: tuple[str, ...] = COMPARED_IMAGE_FIELDS) -> dict:
+                compared: tuple[str, ...] = COMPARED_IMAGE_FIELDS,
+                lean: bool = False) -> dict:
     warnings = []
-    violations = check_style_lock(scenes)
+    violations = check_style_lock(scenes) if lean else []
     banned_phrases: list[str] = []
     pair_fields: dict[tuple[int, int], list[tuple[str, float, str, str]]] = defaultdict(list)
     exact_pairs: dict[str, list[tuple[int, int, float, str, str]]] = defaultdict(list)
@@ -545,7 +551,7 @@ def main() -> int:
             )
             parts.append(('image', check_image(
                 image_scenes, args.soft, args.near,
-                args.max_pair_copies, args.max_exact_per_field, compared,
+                args.max_pair_copies, args.max_exact_per_field, compared, args.lean,
             )))
         if music_text is not None:
             music_loops = _require_music_content(
