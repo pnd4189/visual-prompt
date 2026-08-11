@@ -338,6 +338,28 @@ class LeanSceneShapeTests(unittest.TestCase):
             self._denial(self.root, 'Setting: a tent at dusk in the rain',
                          'replace_file_content', True))
 
+    def test_a_stub_field_is_refused_as_it_is_written(self):
+        """"living room" passed the shape check and only failed a gate later.
+
+        validate_artifacts measures the same range, but only when the model runs
+        it, and three runs in a row wrote hundreds of scenes without doing so.
+        """
+        stub = self.SHAPED.replace(
+            'Setting: inside the military tent at Luoshui, canvas dim at dusk',
+            'Setting: living room')
+
+        denial = self._denial(self.root, stub, 'write_to_file', True)
+
+        self.assertIn('lean Setting has 2 word(s)', denial)
+
+    def test_a_field_long_enough_to_eat_the_prompt_is_refused(self):
+        bloated = self.SHAPED.replace(
+            'Action: he glances at her once and keeps his silence',
+            'Action: ' + ' '.join(['từ'] * 45))
+
+        self.assertIn('45 word(s)',
+                      self._denial(self.root, bloated, 'write_to_file', True))
+
     def test_the_deep_spec_is_not_held_to_the_lean_fields(self):
         self.assertIsNone(self._denial(self.root, self.FLAT, 'write_to_file', False))
 

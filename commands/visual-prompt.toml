@@ -1,7 +1,7 @@
 description = "Generate grounded, non-repetitive image prompts by default; optionally add video/music prompts from Vietnamese xianxia/wuxia novel files"
 prompt = """
 VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1
-Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.16.9.
+Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.17.0.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 
@@ -907,8 +907,10 @@ Mục đích: prompt ngắn, sinh nhanh, và khác nhau thật giữa các cản
 `Style` lặp lại là ĐÚNG (giữ nhân vật + phong cách nhất quán); `Setting` +
 `Action` phải khác nhau ở từng cảnh — đó là hai mục gate đo trùng lặp.
 
-`validate_artifacts.py --lean` còn đo ĐỘ DÀI hai mục đó ngay từng micro-batch:
-dưới 8 từ là FAIL (trần 40 từ chỉ chặn một mục nuốt cả prompt). `Setting: living room` không hợp lệ — mục cụt
+Guard chặn NGAY LÚC GHI: một `scene-NNN.md` ghi toàn file mà thiếu header
+`## Image Prompt`, thiếu mục lean, hoặc có `Setting`/`Action` dưới 8 từ (trần 40)
+sẽ bị TỪ CHỐI — cảnh hỏng không bao giờ chạm đĩa. `validate_artifacts.py --lean`
+đo lại cùng khoảng đó như lưới thứ hai. `Setting: living room` không hợp lệ — mục cụt
 làm gate trùng lặp mất khả năng phân biệt, và cuối run sẽ vỡ thành `field_dup_flood`.
 
 Mọi helper nhận biết chế độ PHẢI được gọi kèm `--lean` trong run này:

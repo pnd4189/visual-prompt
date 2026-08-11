@@ -46,6 +46,15 @@ FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
 HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
 LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
+# The lean contract gives Setting and Action an 8-20 word range. Enforced here so
+# a stub is refused as it is written: validate_artifacts checks the same range,
+# but only when the model runs it, and three runs in a row did not run it per
+# batch. The ceiling sits far above the 18-word Vietnamese prose a healthy run
+# produced — assemble_outputs holds the whole lean body to 60-220 words, so this
+# only has to catch one field eating the prompt.
+LEAN_FIELD_MIN_WORDS = 8
+LEAN_FIELD_MAX_WORDS = 40
+LEAN_MEASURED_FIELDS = ('Setting', 'Action')
 SOURCE_CODE_RE = re.compile(
     r'^[ \t]*(?:import\s+[A-Za-z_][\w.]*'
     r'|from\s+[A-Za-z_][\w.]*\s+import\s'
@@ -255,6 +264,14 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
                         f'{absent}. Write them as separate "Field: value" lines, not as '
                         'one paragraph — the repetition gate compares those fields and '
                         'cannot read prose')
+            for field in LEAN_MEASURED_FIELDS:
+                match = re.search(rf'^{field}:[ \t]*(.+)$', body, re.MULTILINE)
+                words = len(match.group(1).split()) if match else 0
+                if not LEAN_FIELD_MIN_WORDS <= words <= LEAN_FIELD_MAX_WORDS:
+                    return (f'lean {field} has {words} word(s); the spec asks for '
+                            f'{LEAN_FIELD_MIN_WORDS}-20. A stub like "living room" '
+                            'tells the image model nothing and forces scenes to '
+                            'repeat — describe this moment\'s place and action')
     # The scene plan is the first creative artifact, and every row of it cites the
     # QA'd chapter text. Writing it before that text exists means the whole plan is
     # ungrounded — observed 2026-08-10, a run that jumped here from genre detection

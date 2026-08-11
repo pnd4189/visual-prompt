@@ -14,6 +14,9 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from _io_utils import read_text_checked  # type: ignore
+from active_model_policy import (  # type: ignore
+    LEAN_FIELD_MAX_WORDS, LEAN_FIELD_MIN_WORDS, LEAN_MEASURED_FIELDS,
+)
 from validate_scene_plan import parse_plan_contract  # type: ignore
 
 _ROW_RE = re.compile(r'^\s*\|(.+)\|\s*$')
@@ -31,20 +34,6 @@ IMAGE_SECTIONS = (
 # --lean: only what the image model cannot infer — who, where, what they do —
 # plus the series style lock and the safety negatives.
 LEAN_IMAGE_SECTIONS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
-# The lean contract gives Setting and Action an 8-20 word range, and nothing
-# measured it: a run wrote 176 of its 177 Settings under eight words ("living
-# room"), which only surfaced at the very end as a flood of exact duplicates in
-# the similarity gate — after three hours of expansion. These are also the two
-# fields that gate compares, so a stub here blinds it.
-#
-# The floor is the real check. The ceiling only catches one field eating the
-# prompt, and sits far above legitimate prose on purpose: assemble_outputs
-# already holds the lean body to 60-220 words, and a run that wrote these fields
-# in Vietnamese landed at 18 words each — a tight ceiling would fail good output
-# for being descriptive in a space-separated language.
-LEAN_FIELD_MIN_WORDS = 8
-LEAN_FIELD_MAX_WORDS = 40
-LEAN_MEASURED_FIELDS = ('Setting', 'Action')
 _MUSIC_PLAN_COLUMNS = ('loop_index', 'chapter_start', 'chapter_end', 'mood')
 _MUSIC_MOODS = {
     'calm/intro', 'mystery/journey', 'tension/battle',
