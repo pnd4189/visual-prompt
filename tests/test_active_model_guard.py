@@ -326,6 +326,27 @@ class InvocationArmingTests(unittest.TestCase):
             self.assertIsNotNone(
                 json.loads(state.read_text(encoding='utf-8')).get('finished_offset'))
 
+    def test_reading_the_skill_files_does_not_strand_a_session(self):
+        """The contract marker also arms, and it reaches a transcript by accident.
+
+        An Agy session that greps or cats the skill picks the marker up. Before
+        the finish offset covered it too, such a session stayed guarded forever
+        because it had no /visual-prompt turn to disarm against.
+        """
+        marker_only = 'agent read a file: VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), marker_only)
+            payload = {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            run_guard('pre-invocation', base_payload('primary', artifact), {})
+            self.assertEqual('deny', run_guard('pre-tool-use', payload, {})['decision'])
+
+            run_guard('stop', base_payload('primary', artifact), {})
+            run_guard('stop', base_payload('primary', artifact), {})
+
+            self.assertEqual('allow', run_guard('pre-tool-use', payload, {})['decision'])
+
     def test_mentioning_the_command_mid_sentence_does_not_arm_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = self._armed_artifact(Path(tmp), (

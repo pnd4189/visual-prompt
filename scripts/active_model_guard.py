@@ -127,7 +127,14 @@ def _images_invocation(path: str | None) -> int | None:
 
 
 def _last_invocation_offset(path: str | None) -> int | None:
-    """Byte offset of the most recent /visual-prompt turn in the transcript."""
+    """Byte offset of the newest thing that would arm the guard, or None.
+
+    Two signals arm a run: the user's /visual-prompt turn, and the contract marker
+    that a batch session receives as its whole prompt. Both have to be disarmable.
+    The marker also reaches a transcript by accident — an Agy session that merely
+    reads or greps the skill files picks it up, and armed the session for good
+    until this returned an offset for it too (observed 2026-08-11).
+    """
     if not path:
         return None
     try:
@@ -137,6 +144,9 @@ def _last_invocation_offset(path: str | None) -> int | None:
     last = None
     for match in INVOCATION_RE.finditer(raw):
         last = match.start()
+    marker = raw.rfind(GUARD_MARKER)
+    if marker != -1 and (last is None or marker > last):
+        last = marker
     return last
 
 
