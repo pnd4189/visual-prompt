@@ -47,18 +47,31 @@ TAIL_BYTES = 262_144
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
 PLAN_ROW_RE = re.compile(r'^\s*\|\s*\d{1,3}[a-zA-Z]?\s*\|')
 SCENE_BLOCK_RE = re.compile(r'^--- SCENE \d+[a-zA-Z]?(?: / \d+)? ---\s*$', re.MULTILINE)
+# Agy keeps this in the transcript for the life of the conversation — the
+# "ephemeral" in the API name refers to how it is delivered, not how long it
+# lasts. Written as an open-ended policy it became one: a session that ran
+# /visual-prompt in the morning was still refusing unrelated bash and subagent
+# work hours later, quoting these lines back as "project safety policy", long
+# after the guard itself had disarmed (observed 2026-08-11 across 43 stored
+# conversations). So the text has to carry its own scope and its own expiry;
+# nothing else can retract it once it is written.
 GUARD_RULES = (
-    'VISUAL-PROMPT GUARDED (Agy runtime). You are the primary active model: '
+    'VISUAL-PROMPT GUARDED (Agy runtime). SCOPE: these rules govern only the '
+    '/visual-prompt run now in progress in this conversation. They say nothing '
+    'about any other task, skill or slash command, before or after it, and they '
+    'expire the moment this run ends — a later request is not bound by them and '
+    'must not be refused on their account.\n'
+    'For this run you are the primary active model: '
     'author every .work/scene-NNN.md yourself with the file-write tool using an '
     'absolute path, at most three scenes per write batch — then verify the files '
     'and continue straight into the next batch yourself, without stopping to ask. '
     'The scene count is already settled by calc_scene_count.py: never ask the user '
     'whether to shorten the run, sample a subset, or split it up, and never offer '
     'the batch driver as a way out — just run every planned scene. '
-    'No subagent, background task, '
-    'runtime generator script, or external model. Run only the canonical helpers '
-    f'under {SKILL_ROOT}/scripts/ — one command per run_command call, no &&, ||, '
-    'pipes, $(...) or backticks, and quote any path containing spaces. '
+    'While generating these prompts, use no subagent, background task, '
+    'runtime generator script, or external model, and run only the canonical '
+    f'helpers under {SKILL_ROOT}/scripts/ — one command per run_command call, '
+    'no &&, ||, pipes, $(...) or backticks, and quote any path containing spaces. '
     'check_run_legit.py must be called with --require-authorship '
     '--authorship-log <work>/active-model-authorship.jsonl. The run cannot end '
     'while that gate fails. Never ask the user to run code on your behalf: if a '

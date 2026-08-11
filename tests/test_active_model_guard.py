@@ -320,6 +320,42 @@ class PlanGateHoldTests(unittest.TestCase):
             self.assertEqual({}, run_guard('stop', payload, {}))
 
 
+class InjectedRulesScopeTests(unittest.TestCase):
+    """Agy keeps the injected message forever, so it must bound itself."""
+
+    def _injected(self, root: Path) -> str:
+        artifact = root / 'artifact'; artifact.mkdir()
+        (artifact / 'transcript.jsonl').write_text(
+            '{"type":"USER_INPUT","content":"<USER_REQUEST>\\n'
+            '/visual-prompt:visual-prompt \'/x/novel.txt\'\\n</USER_REQUEST>"}\n',
+            encoding='utf-8')
+        claimed = run_guard('pre-invocation', base_payload('primary', artifact), {})
+        return claimed['injectSteps'][0]['ephemeralMessage']
+
+    def test_the_rules_say_what_they_do_not_cover(self):
+        """Observed 2026-08-11: a session that ran /visual-prompt in the morning
+        refused unrelated bash and subagent work hours later, quoting these lines
+        back as project policy — the guard had long since disarmed, but the text
+        cannot be retracted once Agy has written it into the transcript."""
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._injected(Path(tmp).resolve())
+
+        self.assertIn('SCOPE:', message)
+        self.assertIn('only the', message)
+        self.assertIn('expire', message)
+        # the prohibitions must read as run-scoped, not as standing policy
+        self.assertIn('While generating these prompts, use no subagent', message)
+
+    def test_the_run_instructions_survive_the_scoping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._injected(Path(tmp).resolve())
+
+        for required in ('--require-authorship', 'three scenes per write batch',
+                         'calc_scene_count.py', 'run_command'):
+            with self.subTest(required=required):
+                self.assertIn(required, message)
+
+
 class InvocationArmingTests(unittest.TestCase):
     """Agy stores the raw user turn, not the expanded slash-command prompt."""
 
