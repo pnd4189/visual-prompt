@@ -1872,19 +1872,33 @@ class ChapterBalanceTests(unittest.TestCase):
         return [{'id': index, 'text': ' '.join(['từ'] * words)}
                 for index in range(1, count + 1)]
 
-    def test_the_collapsed_run_shape_is_caught(self):
-        # The 2026-08-10 plan: 12/18/25/59 across four near-equal chapters.
+    def test_an_unmistakable_collapse_is_caught(self):
+        """One chapter swallowing the plan while others are left with scraps."""
+        rows = [{'chapter': '1', 'scene_id': '001'}] * 6
+        rows += [{'chapter': '2', 'scene_id': '001'}] * 6
+        rows += [{'chapter': '3', 'scene_id': '001'}] * 6
+        rows += [{'chapter': '4', 'scene_id': '001'}] * 82
+
+        violations = scene_plan_validator.check_chapter_balance(rows, self._chapters(4))
+        reasons = ' '.join(v['reason'] for v in violations)
+
+        self.assertIn('chapter 4 is over-covered', reasons)
+
+    def test_a_long_quiet_chapter_is_left_to_the_totals_gates(self):
+        """The 2026-08-10 shape, 12/18/25/59 — deliberately no longer flagged here.
+
+        A healthy 15-chapter plan put its quietest chapter at 0.52x, and that bad
+        plan starved one at 0.39x: 0.13 apart. No ratio separates a collapsed plan
+        from a long chapter that is mostly dialogue, so this gate stays wide and
+        the declared-totals checks do the detecting — all three of them fired on
+        that plan.
+        """
         rows = []
         for chapter, count in ((1, 12), (2, 18), (3, 25), (4, 59)):
             rows += [{'chapter': str(chapter), 'scene_id': '001'}] * count
 
-        violations = scene_plan_validator.check_chapter_balance(rows, self._chapters(4))
-        flagged = {v['reason'].split()[1] for v in violations}
-        reasons = ' '.join(v['reason'] for v in violations)
-
-        self.assertEqual({'1', '4'}, flagged)
-        self.assertIn('chapter 4 is over-covered', reasons)
-        self.assertIn('chapter 1 is under-covered', reasons)
+        self.assertEqual(
+            [], scene_plan_validator.check_chapter_balance(rows, self._chapters(4)))
 
     def test_proportional_coverage_passes(self):
         rows = []

@@ -36,12 +36,16 @@ _TOTALS_RE = re.compile(
     r'\s+·\s+Videos:\s*(?P<videos>\d+)\s+·\s+Chapters:\s*(?P<chapters>\d+)\s*$',
     re.MULTILINE,
 )
-# Row share may run this far from a chapter's share of the words before the plan
-# counts as lopsided. Wide on purpose: a chapter can genuinely carry more visible
-# action. The run that shipped 52% of its scenes from one of four chapters sat at
-# 2.11x, and the chapter it starved at 0.39x.
-CHAPTER_SHARE_MAX = 2.0
-CHAPTER_SHARE_MIN = 0.5
+# How far a chapter's row share may sit from its share of the words. Calibrated
+# once against a single collapsed plan (0.39x starved, 2.11x hogging) and set at
+# 0.5-2.0, which then passed a healthy 15-chapter plan by 0.02: its quietest
+# chapter came in at 0.52x. The two runs are only 0.13 apart at the low end, so
+# this ratio cannot separate "collapsed" from "a long chapter that is mostly
+# dialogue" — a talky chapter earns fewer visual beats than its word count says.
+# Widened to catch only unmistakable collapse. The plan's declared totals are the
+# real detectors: every gate fired on that bad plan, this one merely fourth.
+CHAPTER_SHARE_MAX = 3.0
+CHAPTER_SHARE_MIN = 0.34
 # Below this, one row moves the share too much for the ratio to mean anything.
 MIN_ROWS_FOR_BALANCE = 12
 MIN_ROWS_OFF_BALANCE = 5
