@@ -20,6 +20,7 @@ import check_prompt_similarity as similarity  # type: ignore  # noqa: E402
 import check_anchor_consistency as anchors  # type: ignore  # noqa: E402
 import assemble_outputs  # type: ignore  # noqa: E402
 import calc_scene_count  # type: ignore  # noqa: E402
+import assemble_qa  # type: ignore  # noqa: E402
 import validate_artifacts as artifacts  # type: ignore  # noqa: E402
 import validate_scene_plan as scene_plan_validator  # type: ignore  # noqa: E402
 
@@ -1708,6 +1709,51 @@ class LeanSimilarityTests(unittest.TestCase):
         fields = sim.parse_image(deep)[0]['fields']
         self.assertEqual('standing still', fields.get('Action / Energy'))
         self.assertFalse(fields.get('Action'))
+
+
+class QaRetentionTests(unittest.TestCase):
+    """Proofreading trims residue; it does not shorten the story."""
+
+    @staticmethod
+    def _run(tmp: str, keep: float) -> tuple[Path, Path]:
+        root = Path(tmp)
+        chapter = ' '.join(f'tu{i}' for i in range(1000))
+        source = root / 'novel.txt'
+        source.write_text('\n\n'.join(
+            f'Chương {i}\n{chapter}' for i in range(1, 6)), encoding='utf-8')
+        work = root / '.work'; work.mkdir()
+        kept = ' '.join(chapter.split()[:int(1000 * keep)])
+        for i in range(1, 6):
+            (work / f'qa-chapter-{i:03d}.md').write_text(
+                f'---\nid: {i}\ntitle: "Chương {i}"\n---\n{kept}\n', encoding='utf-8')
+        return source, work
+
+    def test_a_truncated_proofread_is_refused_before_anything_is_written(self):
+        """The 2026-08-11 shape: later chapters collapsed, 36% of words survived.
+
+        chapters_qa.json is what every later gate measures against, so a short
+        one is agreed with rather than caught — and <stem>_qa.txt is the text
+        that becomes the audio.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, keep=0.36)
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('36%', str(caught.exception))
+            self.assertFalse((source.parent / 'novel_qa.txt').exists())
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_a_real_proofread_still_passes(self):
+        """The tightest healthy run on record kept 96.8% of its words."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, keep=0.968)
+
+            summary = assemble_qa.assemble(source, work)
+
+            self.assertEqual(5, summary['chapter_count'])
+            self.assertTrue((source.parent / 'novel_qa.txt').exists())
 
 
 class StyleLockTests(unittest.TestCase):

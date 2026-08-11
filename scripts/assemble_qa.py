@@ -80,6 +80,19 @@ def _render_heading(title: str) -> str:
     return heading
 
 
+# A proofread trims residue and splits sentences; it does not shorten the story.
+# Measured on three healthy runs: 99.9%, 96.8% and 99.7% of the source words
+# survived. A run that kept 36% had quietly truncated its later chapters — the
+# first seven were near full length and the last eight collapsed to a fifth —
+# and every downstream gate then agreed with the shortened text, because
+# chapters_qa.json is what they all measure against (observed 2026-08-11).
+MIN_QA_WORD_RETENTION = 0.85
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
 def assemble(input_path: Path, work_dir: Path) -> dict:
     qa_paths = discover_qa(work_dir)
     if not qa_paths:
@@ -107,6 +120,23 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
         missing = sorted(expected - seen_ids)
         if missing:
             warnings.append(f"missing chapter ids: {missing}")
+
+    # Refuse before writing: chapters_qa.json is the source every later gate
+    # checks against, so a truncated one is agreed with rather than caught, and
+    # <stem>_qa.txt is the text that becomes the audio.
+    source_words = _word_count(read_text_checked(input_path))
+    kept_words = sum(_word_count(chapter['text']) for chapter in chapters)
+    if source_words and kept_words < source_words * MIN_QA_WORD_RETENTION:
+        short = sorted(
+            ((chapter['id'], _word_count(chapter['text'])) for chapter in chapters),
+            key=lambda pair: pair[1],
+        )[:5]
+        raise RuntimeError(
+            f'QA kept {kept_words} of {source_words} source words '
+            f'({kept_words / source_words:.0%}); proofreading does not shorten the '
+            f'story. Shortest chapters: {short}. Re-run the QA loop for those '
+            f'chapters before assembling.'
+        )
 
     work_dir.mkdir(parents=True, exist_ok=True)
     qa_json_path = work_dir / 'chapters_qa.json'
