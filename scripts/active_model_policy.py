@@ -44,6 +44,8 @@ FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
 # looks finished to the model and fails the driver's output check, costing a full
 # retry. Deny the shortcut instead of paying for it.
 HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
+SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
+LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 SOURCE_CODE_RE = re.compile(
     r'^[ \t]*(?:import\s+[A-Za-z_][\w.]*'
     r'|from\s+[A-Za-z_][\w.]*\s+import\s'
@@ -186,8 +188,13 @@ def _strings(value):
             yield from _strings(nested)
 
 
-def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | None:
-    """Vet a write target. `from_helper` marks a canonical helper's own output."""
+def write_denial(args: dict, payload: dict, from_helper: bool = False,
+                 tool: str | None = None) -> str | None:
+    """Vet a write target. `from_helper` marks a canonical helper's own output.
+
+    `tool` names the write tool, so a whole-file write can be held to a shape a
+    partial edit cannot be judged on.
+    """
     target = target_path(args)
     if target is None:
         return 'absolute TargetFile is required for guarded creative writes'
@@ -225,6 +232,29 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False) -> str | 
     if not from_helper and target.name in HELPER_OWNED_SCRATCH:
         return (f'{target.name} is produced by a canonical helper '
                 '(load_input.py / assemble_qa.py) — run it instead of writing the file')
+    # A scene file the artifact gate can bind to its plan row: frontmatter, then a
+    # "## Image Prompt" heading, then — in lean mode — five labelled fields. Runs
+    # have shipped both halves broken (2026-08-10: heading with prose and no
+    # fields; 2026-08-11: fields with no heading at all, 300 of them), and each
+    # time the gate only objected at the end and every scene had to be rewritten.
+    # Judge a whole-file write only: a partial edit carries a fragment, so holding
+    # it to the full shape would block the repair itself.
+    if tool == 'write_to_file' and SCENE_FILE_RE.fullmatch(target.name):
+        body = '\n'.join(_strings(args))
+        if '## Image Prompt' not in body:
+            return ('a scene file needs its frontmatter (scene_id, cache_key, '
+                    'source_anchor, has_video) followed by a "## Image Prompt" '
+                    'heading — without them the artifact gate cannot bind the scene '
+                    'to its plan row, and every scene has to be rewritten at the end')
+        if lean_mode(payload):
+            absent = [f for f in LEAN_IMAGE_FIELDS
+                      if not re.search(rf'^{f}:', body, re.MULTILINE)]
+            if absent:
+                return ('this run uses the lean prompt spec: every scene needs the '
+                        f'labelled fields {LEAN_IMAGE_FIELDS}, and this one is missing '
+                        f'{absent}. Write them as separate "Field: value" lines, not as '
+                        'one paragraph — the repetition gate compares those fields and '
+                        'cannot read prose')
     # The scene plan is the first creative artifact, and every row of it cites the
     # QA'd chapter text. Writing it before that text exists means the whole plan is
     # ungrounded — observed 2026-08-10, a run that jumped here from genre detection

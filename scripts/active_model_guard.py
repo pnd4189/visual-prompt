@@ -235,7 +235,7 @@ def _pre_tool(payload: dict) -> dict:
         return {'decision': 'deny', 'reason': reason}
     denial = None
     if tool in WRITE_TOOLS:
-        denial = write_denial(args, payload)
+        denial = write_denial(args, payload, tool=tool)
         target = target_path(args)
         if (not denial and tool != 'write_to_file' and target is not None
                 and target.name.startswith('scene-') and target.is_file()

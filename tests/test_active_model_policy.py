@@ -294,6 +294,67 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class LeanSceneShapeTests(unittest.TestCase):
+    """A lean scene written as prose has no fields for the repetition gate."""
+
+    FLAT = ('---\nscene_id: "001"\n---\n## Image Prompt\n'
+            'high-end donghua render, inside a military tent at dusk, '
+            'he glances at her and says nothing.\n')
+    SHAPED = ('---\nscene_id: "001"\n---\n## Image Prompt\n\n'
+              'Subject: Phac Minh, tall, dark robes\n'
+              'Setting: inside the military tent at Luoshui, canvas dim at dusk\n'
+              'Action: he glances at her once and keeps his silence\n'
+              'Style: donghua-xianxia\nNegative: no logo, no watermark\n')
+
+    def _denial(self, root, body, tool, lean):
+        (root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary', 'lean': lean,
+        }), encoding='utf-8')
+        payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+        args = {'TargetFile': str(root / '.work' / 'scene-001.md'), 'CodeContent': body}
+        with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                patch.object(policy, '_agy_launcher_cwd', return_value=root):
+            return policy.write_denial(args, payload, tool=tool)
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / '.work').mkdir()
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_a_flattened_lean_scene_is_refused(self):
+        denial = self._denial(self.root, self.FLAT, 'write_to_file', True)
+
+        self.assertIn('lean prompt spec', denial)
+        self.assertIn('Setting', denial)
+
+    def test_a_properly_fielded_lean_scene_passes(self):
+        self.assertIsNone(
+            self._denial(self.root, self.SHAPED, 'write_to_file', True))
+
+    def test_a_partial_edit_is_never_judged_on_shape(self):
+        """The repair itself arrives as a fragment; blocking it would deadlock."""
+        self.assertIsNone(
+            self._denial(self.root, 'Setting: a tent at dusk in the rain',
+                         'replace_file_content', True))
+
+    def test_the_deep_spec_is_not_held_to_the_lean_fields(self):
+        self.assertIsNone(self._denial(self.root, self.FLAT, 'write_to_file', False))
+
+    def test_fields_without_the_heading_are_refused(self):
+        """Observed 2026-08-11: 300 scenes, all five fields, no frontmatter at all.
+
+        The gate could not bind any of them to a plan row, so all 300 needed
+        rewriting after the fact.
+        """
+        headless = self.SHAPED.split('## Image Prompt', 1)[1].lstrip()
+
+        denial = self._denial(self.root, headless, 'write_to_file', True)
+
+        self.assertIn('## Image Prompt', denial)
+        self.assertIn('cache_key', denial)
+
+
 class PlanNeedsQaSourceTests(unittest.TestCase):
     """The plan cites QA'd chapters, so it cannot be written before they exist."""
 
