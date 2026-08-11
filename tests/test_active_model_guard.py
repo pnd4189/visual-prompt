@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / 'scripts' / 'active_model_guard.py'
 LEGIT = ROOT / 'scripts' / 'check_run_legit.py'
+MAX_HOLDS_PROBE = 6  # comfortably past MAX_STALLED_HOLDS
 
 
 def run_guard(event: str, payload: dict, env: dict[str, str]) -> dict:
@@ -222,6 +223,101 @@ class AuthorshipGateTests(unittest.TestCase):
                 '--image', str(image),
             ], text=True, capture_output=True, check=False)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+
+class PlanGateHoldTests(unittest.TestCase):
+    """A rejected plan used to end the turn, which is what forced a re-prompt."""
+
+    PLAN = (
+        'Genre: tien-hiep · Images: 2 · Videos: 0 · Chapters: 1\n\n'
+        '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis '
+        '| setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+        '|---|---|---|---|---|---|---|---|---|---|---|\n'
+        '| 001 | 1 | Minh trieu hoi mot dao quan giua con bao lon roi di | action '
+        '| Minh | Minh calls an army in the storm. | a wide plain | high wide 24mm '
+        '| he raises a hand | cold grey | |\n'
+        '| 002 | 1 | Lan buoc vao san da khi gio lay canh tung roi dung | reveal '
+        '| Lan | Lan enters the stone courtyard. | a wide plain | high wide 24mm '
+        '| he raises a hand | cold grey | |\n'
+    )
+
+    CLEAN_CHAPTER = (
+        'Lan bước vào sân đá khi gió lay cành tùng rồi dừng lại. '
+        'Nàng nâng ngọc ấn lên trước cánh cửa khép kín rất lâu. '
+        'Minh quỳ xuống bên bậc thềm ướt mưa và cúi đầu thật thấp. '
+        'Hạc trắng đậu trên mái ngói cũ rồi vỗ cánh bay vào sương. '
+    ) + 'chữ ' * 160
+
+    CLEAN_PLAN = (
+        'Genre: tien-hiep · Images: 4 · Videos: 0 · Chapters: 1\n\n'
+        '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis '
+        '| setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+        '|---|---|---|---|---|---|---|---|---|---|---|\n'
+        '| 001 | 1 | Lan bước vào sân đá khi gió lay cành tùng rồi dừng lại | establishing '
+        '| Lan | Lan enters the windy stone courtyard. | pine wall and stone courtyard '
+        '| high wide 24mm | Lan crosses the threshold | cool daylight on grey stone | |\n'
+        '| 002 | 1 | Nàng nâng ngọc ấn lên trước cánh cửa khép kín rất lâu | reveal '
+        '| Lan | Lan lifts the jade seal at the door. | closed timber door and step '
+        '| tight low 85mm | Lan raises the seal slowly | warm jade against shadow | |\n'
+        '| 003 | 1 | Minh quỳ xuống bên bậc thềm ướt mưa và cúi đầu thật thấp | detail '
+        '| Minh | Minh kneels on the rain-slick step. | wet flagstones under eaves '
+        '| overhead 35mm | Minh bows his head down | muted grey and rain silver | |\n'
+        '| 004 | 1 | Hạc trắng đậu trên mái ngói cũ rồi vỗ cánh bay vào sương | transition '
+        '| Lan | A white crane leaves the old roof. | tiled roofline above mist '
+        '| distant long 200mm | the crane beats its wings | pale white over blue haze | |\n'
+    )
+
+    def _armed_run(self, root: Path) -> dict:
+        artifact = root / 'artifact'; artifact.mkdir()
+        (artifact / 'transcript.jsonl').write_text(
+            '{"type":"USER_INPUT","content":"<USER_REQUEST>\\n'
+            '/visual-prompt:visual-prompt \'/x/novel.txt\'\\n</USER_REQUEST>"}\n',
+            encoding='utf-8')
+        work = root / '.work'; work.mkdir()
+        (work / 'chapters_qa.json').write_text(json.dumps(
+            [{'id': 1, 'text': 'Lan buoc vao san da khi gio lay canh tung roi dung lai.'}],
+            ensure_ascii=False), encoding='utf-8')
+        (work / 'scene-plan.md').write_text(self.PLAN, encoding='utf-8')
+        payload = base_payload('primary', artifact)
+        run_guard('pre-invocation', payload, {})
+        # the root marker is what tells the guard which .work this run owns
+        (artifact / '.visual-prompt-primary.root').write_text(
+            f'{root}\n', encoding='utf-8')
+        return payload
+
+    def test_a_rejected_plan_holds_the_run_and_names_the_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._armed_run(root)
+
+            held = run_guard('stop', payload, {})
+
+        self.assertEqual('continue', held['decision'])
+        self.assertIn('does not pass its gate', held['reason'])
+        # the gate's own verdict rides along, so the retry is not a re-guess
+        self.assertIn('ungrounded_source_anchor', held['reason'])
+
+    def test_a_clean_plan_lets_the_turn_end(self):
+        """The same fixture the plan gate accepts in test_prompt_contracts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._armed_run(root)
+            work = root / '.work'
+            work.joinpath('chapters_qa.json').write_text(
+                json.dumps([{'id': 1, 'text': self.CLEAN_CHAPTER}], ensure_ascii=False),
+                encoding='utf-8')
+            work.joinpath('scene-plan.md').write_text(self.CLEAN_PLAN, encoding='utf-8')
+
+            self.assertEqual({}, run_guard('stop', payload, {}))
+
+    def test_the_hold_is_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._armed_run(root)
+            for _ in range(MAX_HOLDS_PROBE):
+                run_guard('stop', payload, {})
+
+            self.assertEqual({}, run_guard('stop', payload, {}))
 
 
 class InvocationArmingTests(unittest.TestCase):

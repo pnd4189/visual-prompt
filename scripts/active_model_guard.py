@@ -16,7 +16,7 @@ except ImportError:  # Windows Agy has no fcntl; append-only records remain vali
     fcntl = None
 
 from active_model_policy import (
-    FORBIDDEN_TOOLS, NEUTRAL_TOOLS, READ_TOOLS, SKILL_ROOT, WRITE_TOOLS,
+    FORBIDDEN_TOOLS, input_root, NEUTRAL_TOOLS, READ_TOOLS, SKILL_ROOT, WRITE_TOOLS,
     command_denial, lean_mode, state_path, target_path, write_denial,
 )
 
@@ -487,6 +487,25 @@ def _input_root_marker_exists(payload: dict) -> bool:
     return state_path(payload).with_suffix('.root').is_file()
 
 
+def _plan_gate_failure(work: Path) -> str | None:
+    """The plan gate's own verdict, so a hold can name the rows to fix.
+
+    Re-running it here costs a second and replaces guesswork: the two revise
+    attempts on 2026-08-11 went 262 rows/5 invented anchors -> 204 rows/68,
+    because the model was re-deriving what was wrong instead of being told.
+    """
+    plan, chapters = work / 'scene-plan.md', work / 'chapters_qa.json'
+    if not plan.is_file() or not chapters.is_file():
+        return None
+    command = [sys.executable, str(SKILL_ROOT / 'scripts' / 'validate_scene_plan.py'),
+               '--plan', str(plan), '--chapters-json', str(chapters)]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return None if done.returncode == 0 else (done.stdout + done.stderr).strip()[:1200]
+
+
 def _stop(payload: dict) -> dict:
     """Drive a guarded run to completion instead of letting it pause or ship broken.
 
@@ -502,6 +521,27 @@ def _stop(payload: dict) -> dict:
         return {}
     marker = _work_marker(payload)
     if not marker.is_file():
+        # No scene has been authored yet. If the pipeline got as far as a plan
+        # that the gate still rejects, the run is not finished — it is stuck at
+        # the cheapest step, and stopping here is what forces the user to
+        # re-prompt by hand. Hold it, and hand over the gate's own verdict so the
+        # next attempt fixes named rows instead of re-deriving the problem.
+        state, _ = _claim_primary(payload)
+        if state.get('primary_conversation_id') == str(payload.get('conversationId') or ''):
+            root = input_root(payload)
+            work = root / '.work' if root else None
+            failure = _plan_gate_failure(work) if work else None
+            if failure is not None:
+                record = _load_counter(payload)
+                if record['holds'] < MAX_STALLED_HOLDS:
+                    _stop_counter(payload).write_text(json.dumps({
+                        'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
+                    }), encoding='utf-8')
+                    return {'decision': 'continue', 'reason': (
+                        'the scene plan does not pass its gate yet, so no scene may '
+                        'be written. Fix exactly the rows named below, rewrite '
+                        '.work/scene-plan.md, then run validate_scene_plan.py again '
+                        'and only expand once it exits 0.\n' + failure)}
         # Nothing was ever authored and no helper resolved an input, so this
         # invocation never became a run. Two quiet stops is enough to say so and
         # hand the conversation back — otherwise the user is stuck with a guarded
