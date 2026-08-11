@@ -269,6 +269,63 @@ class InvocationArmingTests(unittest.TestCase):
 
         self.assertIsNone(state['images_override'])
 
+    def test_a_finished_run_hands_the_conversation_back(self):
+        """The invocation stays in the transcript forever; the guard must not.
+
+        Observed 2026-08-11: a user ran /visual-prompt, moved on to unrelated
+        work in the same conversation, and had every delegation and background
+        task refused for the rest of the session.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), self.USER_TURN)
+            run_guard('pre-invocation', base_payload('primary', artifact), {})
+            payload = {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            self.assertEqual('deny', run_guard('pre-tool-use', payload, {})['decision'])
+
+            state = artifact / '.visual-prompt-primary.json'
+            loaded = json.loads(state.read_text(encoding='utf-8'))
+            loaded['finished_offset'] = 10_000_000  # past every invocation
+            state.write_text(json.dumps(loaded), encoding='utf-8')
+
+            self.assertEqual('allow', run_guard('pre-tool-use', payload, {})['decision'])
+
+    def test_a_later_invocation_arms_the_guard_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), self.USER_TURN)
+            run_guard('pre-invocation', base_payload('primary', artifact), {})
+            payload = {**base_payload('primary', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            state = artifact / '.visual-prompt-primary.json'
+            loaded = json.loads(state.read_text(encoding='utf-8'))
+            loaded['finished_offset'] = 0  # the first invocation is done with
+            state.write_text(json.dumps(loaded), encoding='utf-8')
+
+            # The user starts a second run further down the same transcript.
+            transcript = artifact / 'transcript.jsonl'
+            transcript.write_text(transcript.read_text(encoding='utf-8') * 2,
+                                  encoding='utf-8')
+
+            self.assertEqual('deny', run_guard('pre-tool-use', payload, {})['decision'])
+
+    def test_stop_hands_back_an_invocation_that_never_became_a_run(self):
+        """No work marker and no resolved input: nothing ever started."""
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = self._armed_artifact(Path(tmp), self.USER_TURN)
+            payload = base_payload('primary', artifact)
+            run_guard('pre-invocation', payload, {})
+
+            run_guard('stop', payload, {})   # first quiet stop: just counts
+            state = artifact / '.visual-prompt-primary.json'
+            self.assertIsNone(
+                json.loads(state.read_text(encoding='utf-8')).get('finished_offset'))
+
+            run_guard('stop', payload, {})   # second: hand the session back
+            self.assertIsNotNone(
+                json.loads(state.read_text(encoding='utf-8')).get('finished_offset'))
+
     def test_mentioning_the_command_mid_sentence_does_not_arm_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = self._armed_artifact(Path(tmp), (

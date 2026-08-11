@@ -126,15 +126,60 @@ def _images_invocation(path: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _last_invocation_offset(path: str | None) -> int | None:
+    """Byte offset of the most recent /visual-prompt turn in the transcript."""
+    if not path:
+        return None
+    try:
+        raw = Path(path).read_bytes()
+    except OSError:
+        return None
+    last = None
+    for match in INVOCATION_RE.finditer(raw):
+        last = match.start()
+    return last
+
+
+def _mark_finished(payload: dict) -> None:
+    """Record that the run this conversation armed for is over.
+
+    The transcript keeps the invocation forever, so without this the guard stays
+    armed for the life of the conversation — a user who ran /visual-prompt and
+    then moved on to unrelated work found every delegation and background task
+    refused (observed 2026-08-11). Storing the offset rather than a flag means a
+    later /visual-prompt, further down the same transcript, arms the guard again.
+    """
+    offset = _last_invocation_offset(payload.get('transcriptPath'))
+    if offset is None:
+        return
+    path = state_path(payload)
+    try:
+        state = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(state, dict):
+            return
+        state['finished_offset'] = offset
+        path.write_text(json.dumps(state, ensure_ascii=False) + '\n', encoding='utf-8')
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+
+
 def _active(payload: dict) -> bool:
-    if os.environ.get('VP_GUARD_ACTIVE') == '1' or _transcript_armed(payload.get('transcriptPath')):
+    if os.environ.get('VP_GUARD_ACTIVE') == '1':
         return True
     path = state_path(payload)
+    armed = _transcript_armed(payload.get('transcriptPath'))
     if not path.exists():
-        return False
+        return armed
     try:
         state = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, UnicodeError, json.JSONDecodeError):
+        return True
+    finished = isinstance(state, dict) and state.get('finished_offset')
+    if finished is not None and finished is not False:
+        latest = _last_invocation_offset(payload.get('transcriptPath'))
+        if latest is None or latest <= finished:
+            return False
+    if armed:
         return True
     return (
         isinstance(state, dict)
@@ -427,6 +472,11 @@ def _load_counter(payload: dict) -> dict:
         return {'holds': 0, 'scenes': 0, 'stalls': 0}
 
 
+def _input_root_marker_exists(payload: dict) -> bool:
+    """Did any canonical helper ever resolve this run's input?"""
+    return state_path(payload).with_suffix('.root').is_file()
+
+
 def _stop(payload: dict) -> dict:
     """Drive a guarded run to completion instead of letting it pause or ship broken.
 
@@ -442,6 +492,18 @@ def _stop(payload: dict) -> dict:
         return {}
     marker = _work_marker(payload)
     if not marker.is_file():
+        # Nothing was ever authored and no helper resolved an input, so this
+        # invocation never became a run. Two quiet stops is enough to say so and
+        # hand the conversation back — otherwise the user is stuck with a guarded
+        # session for whatever they do next.
+        if not _input_root_marker_exists(payload):
+            record = _load_counter(payload)
+            if record['holds'] >= 1:
+                _mark_finished(payload)
+            else:
+                _stop_counter(payload).write_text(json.dumps({
+                    'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
+                }), encoding='utf-8')
         return {}
     state, _ = _claim_primary(payload)
     if state.get('primary_conversation_id') != str(payload.get('conversationId') or ''):
@@ -460,6 +522,7 @@ def _stop(payload: dict) -> dict:
                                 bool(state.get('worker')))
         if failure is None:
             if not scenes:
+                _mark_finished(payload)
                 return {}
             message = (f'the gates pass — now merge and tidy up: run '
                        f'{SKILL_ROOT}/scripts/cleanup_work.py --work "{work}" '
@@ -474,6 +537,7 @@ def _stop(payload: dict) -> dict:
     record = _load_counter(payload)
     stalls = record['stalls'] + 1 if scenes <= record['scenes'] else 0
     if stalls > MAX_STALLED_HOLDS or record['holds'] >= MAX_TOTAL_HOLDS:
+        _mark_finished(payload)
         return {}
     _stop_counter(payload).write_text(json.dumps({
         'holds': record['holds'] + 1, 'scenes': scenes, 'stalls': stalls,
