@@ -1710,6 +1710,44 @@ class LeanSimilarityTests(unittest.TestCase):
         self.assertFalse(fields.get('Action'))
 
 
+class StyleLockTests(unittest.TestCase):
+    """Style is the one field that must repeat, so nothing was measuring it."""
+
+    @staticmethod
+    def _scenes(styles: list[str]) -> list[dict]:
+        return [{'scene_id': i, 'fields': {
+            'Subject': f'a cultivator {i}', 'Setting': f'a courtyard {i}',
+            'Action': f'he steps forward {i}', 'Style': s,
+            'Negative': 'no logo'}} for i, s in enumerate(styles, 1)]
+
+    def test_one_block_repeated_verbatim_passes(self):
+        locked = 'donghua-xianxia, cel-shaded, volumetric qi mist'
+
+        self.assertEqual([], similarity.check_style_lock(self._scenes([locked] * 20)))
+
+    def test_whitespace_alone_is_not_a_different_style(self):
+        self.assertEqual([], similarity.check_style_lock(
+            self._scenes(['donghua-xianxia,  cel-shaded', 'donghua-xianxia, cel-shaded'])))
+
+    def test_a_style_invented_per_scene_is_caught(self):
+        """The 2026-08-11 shape: 300 scenes, 300 different Style lines."""
+        drifted = self._scenes([f'Xianxia painting, shot {i}' for i in range(1, 21)])
+
+        violations = similarity.check_style_lock(drifted)
+
+        self.assertEqual('style_not_locked', violations[0]['type'])
+        self.assertIn('20 different Style blocks', violations[0]['reason'])
+
+    def test_the_gate_reports_it_alongside_the_repetition_checks(self):
+        drifted = self._scenes([f'style {i}' for i in range(1, 15)])
+
+        result = similarity.check_image(drifted, 0.60, 0.95, 0, 4,
+                                        similarity.LEAN_COMPARED_FIELDS)
+        kinds = {v['type'] for v in result['violations']}
+
+        self.assertIn('style_not_locked', kinds)
+
+
 class SceneCountBandTests(unittest.TestCase):
     """The auto band runs 120..300 — a 3h episode keeps one image per 120 words."""
 

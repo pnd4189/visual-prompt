@@ -203,11 +203,37 @@ def _warning(kind: str, field: str | None, left: int, right: int, score: float) 
     return result
 
 
+def check_style_lock(scenes: list[dict]) -> list[dict]:
+    """Style is the series lock: one block, repeated verbatim in every scene.
+
+    The comparison fields deliberately exclude Style because it is *supposed* to
+    repeat — which leaves a Style that varies completely unmeasured. One run wrote
+    300 different Style lines, each smuggling its own camera and lighting, so no
+    two images would have looked like the same series (2026-08-11). A neighbouring
+    run on the same series held all 216 scenes to a single block.
+    """
+    seen: dict[str, int] = {}
+    for scene in scenes:
+        value = ' '.join((scene['fields'].get('Style') or '').split())
+        if value:
+            seen.setdefault(value, scene['scene_id'])
+    if len(seen) < 2:
+        return []
+    return [{
+        'type': 'style_not_locked', 'scene_a': min(seen.values()),
+        'sim': 0.0,
+        'reason': (f'{len(seen)} different Style blocks across the run — Style is '
+                   'the series lock and must be the chosen style id, repeated '
+                   'verbatim in every scene. Camera, lighting and mood belong to '
+                   'the image model, not to Style.'),
+    }]
+
+
 def check_image(scenes: list[dict], soft: float, near: float,
                 max_pair_copies: int, max_exact_per_field: int,
                 compared: tuple[str, ...] = COMPARED_IMAGE_FIELDS) -> dict:
     warnings = []
-    violations = []
+    violations = check_style_lock(scenes)
     banned_phrases: list[str] = []
     pair_fields: dict[tuple[int, int], list[tuple[str, float, str, str]]] = defaultdict(list)
     exact_pairs: dict[str, list[tuple[int, int, float, str, str]]] = defaultdict(list)
