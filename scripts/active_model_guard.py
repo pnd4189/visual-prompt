@@ -126,6 +126,17 @@ def _worker_invocation(path: str | None) -> bool:
     return turn is not None and b'--worker-manifest' in turn
 
 
+def _plan_only_invocation(path: str | None) -> bool:
+    """Is this a Pass-2 head session, which hands expansion to the workers?
+
+    The driver already exempts it with VP_GUARD_STOP_GATE=0, but a direct
+    `--plan-only` line carries no such env, and stopping right after the plan is
+    the whole point of that mode.
+    """
+    turn = _invocation_turn(path)
+    return turn is not None and b'--plan-only' in turn
+
+
 def _images_invocation(path: str | None) -> int | None:
     """The image total the user's own /visual-prompt line overrode, if any.
 
@@ -222,6 +233,7 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         'lean': _lean_invocation(payload.get('transcriptPath')),
         'images_override': _images_invocation(payload.get('transcriptPath')),
         'worker': _worker_invocation(payload.get('transcriptPath')),
+        'plan_only': _plan_only_invocation(payload.get('transcriptPath')),
     }
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -519,6 +531,39 @@ def _plan_gate_failure(work: Path) -> str | None:
     return None if done.returncode == 0 else (done.stdout + done.stderr).strip()[:1200]
 
 
+def _pre_scene_hold_reason(work: Path, plan_only: bool) -> str | None:
+    """Why a run that has authored no scene yet must not stop here, or None.
+
+    A run is unfinished before its first scene in two ways, and only the first
+    was ever caught: the plan gate rejects the plan, or it has already accepted
+    one and nothing started expanding. The second fell straight through — a run
+    that had just passed the gate parked itself at 0 of 180 scenes, and only a
+    human re-prompt moved it (observed 2026-08-12).
+
+    plan.hash cannot tell an accepted plan from an unchecked one, because the
+    verdict below runs the gate, and the gate writes that file itself. What the
+    two artifacts do prove is that there is something to expand at all.
+    """
+    if not (work / 'scene-plan.md').is_file() or not (work / 'chapters_qa.json').is_file():
+        return None
+    failure = _plan_gate_failure(work)
+    if failure is not None:
+        return ('the scene plan does not pass its gate yet, so no scene may '
+                'be written. Fix exactly the rows named below, rewrite '
+                '.work/scene-plan.md, then run validate_scene_plan.py again '
+                'and only expand once it exits 0.\n' + failure)
+    # A Pass-2 head hands expansion to the workers, and a cleaned run already
+    # shipped: its scene files are gone on purpose, the deliverable is the proof.
+    if plan_only or _deliverable(work.parent) is not None:
+        return None
+    planned = _planned_scenes(work)
+    total = f'all {planned}' if planned else 'every planned'
+    return (f'the plan gate passes, so expansion is the only step left: write '
+            f'.work/scene-001.md onward in micro-batches of 3 until {total} '
+            f'scene files exist, then run the closing gates. Do not stop to '
+            f'report the plan — it is already accepted.')
+
+
 def _stop(payload: dict) -> dict:
     """Drive a guarded run to completion instead of letting it pause or ship broken.
 
@@ -543,18 +588,15 @@ def _stop(payload: dict) -> dict:
         if state.get('primary_conversation_id') == str(payload.get('conversationId') or ''):
             root = input_root(payload)
             work = root / '.work' if root else None
-            failure = _plan_gate_failure(work) if work else None
-            if failure is not None:
+            reason = (_pre_scene_hold_reason(work, bool(state.get('plan_only')))
+                      if work else None)
+            if reason is not None:
                 record = _load_counter(payload)
                 if record['holds'] < MAX_STALLED_HOLDS:
                     _stop_counter(payload).write_text(json.dumps({
                         'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
                     }), encoding='utf-8')
-                    return {'decision': 'continue', 'reason': (
-                        'the scene plan does not pass its gate yet, so no scene may '
-                        'be written. Fix exactly the rows named below, rewrite '
-                        '.work/scene-plan.md, then run validate_scene_plan.py again '
-                        'and only expand once it exits 0.\n' + failure)}
+                    return {'decision': 'continue', 'reason': reason}
         # Nothing was ever authored and no helper resolved an input, so this
         # invocation never became a run. Two quiet stops is enough to say so and
         # hand the conversation back — otherwise the user is stuck with a guarded

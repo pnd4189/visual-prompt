@@ -267,11 +267,12 @@ class PlanGateHoldTests(unittest.TestCase):
         '| distant long 200mm | the crane beats its wings | pale white over blue haze | |\n'
     )
 
-    def _armed_run(self, root: Path) -> dict:
+    def _armed_run(self, root: Path, flags: str = '') -> dict:
         artifact = root / 'artifact'; artifact.mkdir()
         (artifact / 'transcript.jsonl').write_text(
             '{"type":"USER_INPUT","content":"<USER_REQUEST>\\n'
-            '/visual-prompt:visual-prompt \'/x/novel.txt\'\\n</USER_REQUEST>"}\n',
+            f'/visual-prompt:visual-prompt \'/x/novel.txt\'{flags}'
+            '\\n</USER_REQUEST>"}\n',
             encoding='utf-8')
         work = root / '.work'; work.mkdir()
         (work / 'chapters_qa.json').write_text(json.dumps(
@@ -297,8 +298,13 @@ class PlanGateHoldTests(unittest.TestCase):
         # the gate's own verdict rides along, so the retry is not a re-guess
         self.assertIn('ungrounded_source_anchor', held['reason'])
 
-    def test_a_clean_plan_lets_the_turn_end(self):
-        """The same fixture the plan gate accepts in test_prompt_contracts."""
+    def test_a_clean_plan_is_never_accused_of_failing_its_gate(self):
+        """The same fixture the plan gate accepts in test_prompt_contracts.
+
+        This used to assert the turn may end here. It may not: a plan nothing
+        expanded is an unfinished run, so the hold now drives it on instead —
+        what must not happen is blaming a plan the gate accepts.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             payload = self._armed_run(root)
@@ -307,6 +313,53 @@ class PlanGateHoldTests(unittest.TestCase):
                 json.dumps([{'id': 1, 'text': self.CLEAN_CHAPTER}], ensure_ascii=False),
                 encoding='utf-8')
             work.joinpath('scene-plan.md').write_text(self.CLEAN_PLAN, encoding='utf-8')
+
+            held = run_guard('stop', payload, {})
+
+        self.assertNotIn('does not pass its gate', held.get('reason', ''))
+
+    def _accepted_plan(self, root: Path, flags: str = '') -> dict:
+        """An armed run whose plan the gate has already accepted, with 0 scenes."""
+        payload = self._armed_run(root, flags)
+        work = root / '.work'
+        work.joinpath('chapters_qa.json').write_text(
+            json.dumps([{'id': 1, 'text': self.CLEAN_CHAPTER}], ensure_ascii=False),
+            encoding='utf-8')
+        work.joinpath('scene-plan.md').write_text(self.CLEAN_PLAN, encoding='utf-8')
+        work.joinpath('plan.hash').write_text('39cd56065d9d\n', encoding='utf-8')
+        return payload
+
+    def test_an_accepted_plan_with_no_scene_yet_is_driven_into_expansion(self):
+        """The 2026-08-12 park: plan.hash written, 0/180 scenes, turn ended anyway.
+
+        The plan-fail hold does not fire once the plan passes, and the scene-count
+        hold needs a scene to exist first, so this state had no branch at all.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._accepted_plan(root)
+
+            held = run_guard('stop', payload, {})
+
+        self.assertEqual('continue', held['decision'])
+        self.assertIn('expansion is the only step left', held['reason'])
+        self.assertIn('scene-001.md', held['reason'])
+
+    def test_a_plan_only_head_still_stops_after_its_accepted_plan(self):
+        """Pass-2 hands expansion to the workers; the head has no scenes to write."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._accepted_plan(root, flags=' --plan-only')
+
+            self.assertEqual({}, run_guard('stop', payload, {}))
+
+    def test_an_assembled_run_is_not_driven_back_into_expansion(self):
+        """cleanup_work.py removes the scene files; the deliverable proves the run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            payload = self._accepted_plan(root)
+            (root / 'novel_image_prompts.txt').write_text(
+                '--- SCENE 001 ---\n', encoding='utf-8')
 
             self.assertEqual({}, run_guard('stop', payload, {}))
 
