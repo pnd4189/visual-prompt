@@ -88,9 +88,61 @@ def _render_heading(title: str) -> str:
 # chapters_qa.json is what they all measure against (observed 2026-08-11).
 MIN_QA_WORD_RETENTION = 0.85
 
+# The total above stays healthy when a single chapter is gutted: one run kept 96%
+# of the words overall while chapter 387 kept 54% — the second half of the chapter
+# was gone and a fabricated closing line hid the seam (observed 2026-08-12). Length
+# is therefore checked per chapter against chapters.json as well.
+MIN_QA_CHAPTER_WORD_RETENTION = 0.85
+
+# A chapter can also stop a few paragraphs early without losing enough words to
+# trip either ratio: chapter 383 kept 96% of its words yet dropped the closing
+# reveal, and the model wrote a fabricated line over the seam so the text still
+# read as finished. So the last source paragraph has to survive somewhere in the
+# last few QA paragraphs. Measured on this run: healthy chapters scored 0.97-1.00,
+# the two truncated ones 0.27 and 0.31.
+MIN_QA_ENDING_COVERAGE = 0.6
+
+_TOKEN_RE = re.compile(r'\w+', re.UNICODE)
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
+
+
+def _paragraphs(text: str) -> list[str]:
+    return [p for p in text.split('\n') if p.strip()]
+
+
+def _source_chapters(work_dir: Path) -> dict[int, str]:
+    """Per-chapter source text from chapters.json; empty when it is unreadable."""
+    path = work_dir / 'chapters.json'
+    if not path.exists():
+        return {}
+    try:
+        rows = json.loads(read_text_checked(path))
+    except (json.JSONDecodeError, OSError, RuntimeError, ValueError):
+        return {}
+    if not isinstance(rows, list):
+        return {}
+    return {int(row['id']): row.get('text', '')
+            for row in rows if isinstance(row, dict) and 'id' in row}
+
+
+def _ending_coverage(source_text: str, qa_text: str) -> float:
+    """Share of the last source paragraph's words still present in the QA ending.
+
+    Compares against the last three QA paragraphs, so a proofread that merges or
+    splits the closing paragraphs still scores full coverage; only text that is
+    gone scores low.
+    """
+    src_paras, qa_paras = _paragraphs(source_text), _paragraphs(qa_text)
+    if not src_paras or not qa_paras:
+        return 0.0
+    wanted = set(_TOKEN_RE.findall(src_paras[-1].lower()))
+    if not wanted:
+        return 1.0
+    tail = set(_TOKEN_RE.findall(' '.join(qa_paras[-3:]).lower()))
+    return len(wanted & tail) / len(wanted)
 
 
 def assemble(input_path: Path, work_dir: Path) -> dict:
@@ -124,6 +176,33 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     # Refuse before writing: chapters_qa.json is the source every later gate
     # checks against, so a truncated one is agreed with rather than caught, and
     # <stem>_qa.txt is the text that becomes the audio.
+    source_texts = _source_chapters(work_dir)
+    if source_texts:
+        gutted, truncated = [], []
+        for chapter in chapters:
+            source_text = source_texts.get(chapter['id'])
+            if source_text is None:
+                continue
+            kept, src_words = _word_count(chapter['text']), _word_count(source_text)
+            if kept < src_words * MIN_QA_CHAPTER_WORD_RETENTION:
+                gutted.append(f"{chapter['id']} kept {kept}/{src_words} words")
+            elif _ending_coverage(source_text, chapter['text']) < MIN_QA_ENDING_COVERAGE:
+                truncated.append(str(chapter['id']))
+        if gutted or truncated:
+            detail = '; '.join(
+                part for part in (
+                    f"short chapters: {', '.join(gutted)}" if gutted else '',
+                    f"chapters missing their ending: {', '.join(truncated)}" if truncated else '',
+                ) if part
+            )
+            raise RuntimeError(
+                f'QA dropped text inside {len(gutted) + len(truncated)} chapter(s) '
+                f'({detail}). Proofreading does not shorten the story. Re-run the QA '
+                f'loop for those chapters before assembling.'
+            )
+    else:
+        warnings.append('chapters.json unreadable — per-chapter length check skipped')
+
     source_words = _word_count(read_text_checked(input_path))
     kept_words = sum(_word_count(chapter['text']) for chapter in chapters)
     if source_words and kept_words < source_words * MIN_QA_WORD_RETENTION:

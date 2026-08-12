@@ -1755,6 +1755,61 @@ class QaRetentionTests(unittest.TestCase):
             self.assertEqual(5, summary['chapter_count'])
             self.assertTrue((source.parent / 'novel_qa.txt').exists())
 
+    @staticmethod
+    def _per_chapter(tmp: str, edit) -> tuple[Path, Path]:
+        """5 chapters of 10 paragraphs; `edit(chapter_id, paragraphs)` shapes each QA body."""
+        root = Path(tmp)
+        paras = [' '.join(f'tu{i}w{j}' for j in range(40)) for i in range(10)]
+        body = '\n\n'.join(paras)
+        source = root / 'novel.txt'
+        source.write_text('\n\n'.join(
+            f'Chương {i}\n\n{body}' for i in range(1, 6)), encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': i, 'title': f'Chương {i}', 'text': body} for i in range(1, 6)],
+            ensure_ascii=False), encoding='utf-8')
+        for i in range(1, 6):
+            kept = '\n\n'.join(edit(i, paras))
+            (work / f'qa-chapter-{i:03d}.md').write_text(
+                f'---\nid: {i}\ntitle: "Chương {i}"\n---\n{kept}\n', encoding='utf-8')
+        return source, work
+
+    def test_one_gutted_chapter_is_caught_behind_a_healthy_total(self):
+        """The 2026-08-12 shape: 96% of the words survived, one chapter kept 54%."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._per_chapter(
+                tmp, lambda i, paras: paras[:5] if i == 3 else paras)
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('3 kept 200/400 words', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_a_chapter_that_stops_early_is_caught_while_still_long_enough(self):
+        """Chapter 383 kept 96% of its words and still lost its closing reveal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._per_chapter(
+                tmp, lambda i, paras: paras[:-1] if i == 4 else paras)
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('missing their ending: 4', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_a_proofread_that_merges_the_closing_paragraphs_still_passes(self):
+        """Merging or splitting paragraphs keeps the words, so it is not truncation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._per_chapter(
+                tmp, lambda i, paras: paras[:-2] + [f'{paras[-2]} {paras[-1]}'])
+
+            summary = assemble_qa.assemble(source, work)
+
+            self.assertEqual(5, summary['chapter_count'])
+            self.assertEqual([], summary['warnings'])
+
 
 class StyleLockTests(unittest.TestCase):
     """Style is the one field that must repeat, so nothing was measuring it."""
