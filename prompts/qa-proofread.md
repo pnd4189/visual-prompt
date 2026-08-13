@@ -19,6 +19,11 @@ sạch, trôi chảy, sẵn sàng đọc TTS — KHÔNG viết lại truyện, K
    hành động, hay lore để làm câu “hợp lý”.
 2. **Chính tả, ngữ pháp, dấu câu** — sửa lỗi gõ, thiếu/thừa dấu, sai dấu câu,
    viết hoa đầu câu, khoảng trắng thừa.
+2b. **Tục ngữ nhà (áp cho MỌI truyện)** — `đéo` và `đách` → `éo`, giữ nguyên
+   viết hoa nếu đầu câu. CHỈ hai từ này. `đếch`, `chó nó`, `toang mẹ` và mọi
+   tiếng chửi khác GIỮ NGUYÊN — làm nhạt hết thì mất giọng truyện, đó là thứ
+   người nghe ở lại vì nó. `assemble_qa.py` cũng tự chuẩn hóa lại, nên bỏ sót
+   không làm hỏng output, nhưng làm đúng từ đây thì bản QA đọc mượt hơn.
 3. **Câu dịch máy lủng củng** — viết lại cho mượt, đúng văn phong tiếng Việt,
    nhưng GIỮ nguyên ý và giọng văn của tác giả. Mức vừa phải, không "sáng tác".
 4. **Câu quá dài (> ~200 ký tự)** — tách thành 2-3 câu ngắn hơn ở ranh giới mệnh

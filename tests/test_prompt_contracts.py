@@ -1894,6 +1894,45 @@ class QaRetentionTests(unittest.TestCase):
             self.assertEqual([], summary['warnings'])
 
 
+class HouseSlangTests(unittest.TestCase):
+    """Two words are softened for every novel; the rest of the swearing stays."""
+
+    def test_only_the_two_named_words_are_softened(self):
+        text = 'Làm đéo gì có, đách biết, Đéo ai ngờ, đếch cần, chó nó tin.'
+
+        softened, count = assemble_qa._soften_slang(text)
+
+        self.assertEqual('Làm éo gì có, éo biết, Éo ai ngờ, đếch cần, chó nó tin.', softened)
+        self.assertEqual(3, count)
+
+    def test_a_word_that_merely_contains_them_is_left_alone(self):
+        for intact in ('đéos', 'xđéo', 'đáchy'):
+            self.assertEqual(intact, assemble_qa._soften_slang(intact)[0])
+
+    def test_the_assembler_applies_it_even_when_the_qa_step_did_not(self):
+        """One run shipped 34 "đéo" + 7 "đách" straight through (2026-08-13)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chapter = 'Hắn đéo tin. ' + 'chữ ' * 200
+            source = root / 'novel.txt'
+            source.write_text(f'Chương 1\n{chapter}', encoding='utf-8')
+            work = root / '.work'
+            work.mkdir()
+            (work / 'chapters.json').write_text(json.dumps(
+                [{'id': 1, 'title': 'Chương 1', 'text': chapter}], ensure_ascii=False),
+                encoding='utf-8')
+            (work / 'qa-chapter-001.md').write_text(
+                f'---\nid: 1\ntitle: "Chương 1"\n---\n{chapter}\n', encoding='utf-8')
+
+            summary = assemble_qa.assemble(source, work)
+
+            written = (source.parent / 'novel_qa.txt').read_text(encoding='utf-8')
+
+        self.assertEqual(1, summary['slang_softened'])
+        self.assertIn('Hắn éo tin.', written)
+        self.assertNotIn('đéo', written)
+
+
 class StyleLockTests(unittest.TestCase):
     """Style is the one field that must repeat, so nothing was measuring it."""
 

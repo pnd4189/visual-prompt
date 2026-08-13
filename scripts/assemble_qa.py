@@ -104,6 +104,19 @@ MIN_QA_ENDING_COVERAGE = 0.6
 
 _TOKEN_RE = re.compile(r'\w+', re.UNICODE)
 
+# House style softens exactly two words and leaves the rest of the swearing alone:
+# "đéo"/"đách" become "éo", while "đếch", "chó nó" and the like stay (decided
+# 2026-08-12 — blanket softening drains the voice these novels are read for). The
+# QA prompt asks for it, and one run shipped 34 + 7 of them untouched, so the
+# assembler applies it too rather than trusting the step to have done it.
+_SOFTENED_SLANG_RE = re.compile(r'(?<!\w)[Đđ](?:éo|ách)(?!\w)')
+
+
+def _soften_slang(text: str) -> tuple[str, int]:
+    """House slang rule; returns the rewritten text and how many words changed."""
+    return _SOFTENED_SLANG_RE.subn(
+        lambda m: 'Éo' if m.group(0)[0] == 'Đ' else 'éo', text)
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
@@ -154,6 +167,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     txt_parts: list[str] = []
     warnings: list[str] = []
     seen_ids: set[int] = set()
+    slang_softened = 0
 
     for qp in qa_paths:
         ch = parse_qa_chapter(qp)
@@ -162,8 +176,10 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
         seen_ids.add(ch['id'])
         if not ch['text']:
             warnings.append(f"{qp.name} has empty body after frontmatter")
-        chapters.append({'id': ch['id'], 'title': ch['title'], 'text': ch['text']})
-        txt_parts.append(f"{_render_heading(ch['title'])}\n\n{ch['text']}")
+        text, softened = _soften_slang(ch['text'])
+        slang_softened += softened
+        chapters.append({'id': ch['id'], 'title': ch['title'], 'text': text})
+        txt_parts.append(f"{_render_heading(ch['title'])}\n\n{text}")
 
     # Gap detection: contiguous ids starting at the smallest seen id.
     ids = sorted(seen_ids)
@@ -226,6 +242,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
 
     return {
         'chapter_count': len(chapters),
+        'slang_softened': slang_softened,
         'chapters_qa_json': str(qa_json_path),
         'qa_txt_path': str(qa_txt_path),
         'warnings': warnings,
