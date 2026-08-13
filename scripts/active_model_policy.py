@@ -45,7 +45,7 @@ FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
 # retry. Deny the shortcut instead of paying for it.
 HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
-QA_CHAPTER_FILE_RE = re.compile(r'^qa-chapter-\d+\.md$')
+QA_CHAPTER_FILE_RE = re.compile(r'^qa-chapter-(\d+)\.md$')
 LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 # The lean contract gives Setting and Action an 8-20 word range. Enforced here so
 # a stub is refused as it is written: validate_artifacts checks the same range,
@@ -203,6 +203,18 @@ def _strings(value):
             yield from _strings(nested)
 
 
+def _loaded_chapter_ids(source: Path) -> set[int]:
+    """Chapter ids load_input.py put in chapters.json; empty when unreadable."""
+    try:
+        rows = json.loads(source.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return set()
+    if not isinstance(rows, list):
+        return set()
+    return {int(row['id']) for row in rows
+            if isinstance(row, dict) and str(row.get('id', '')).isdigit()}
+
+
 def write_denial(args: dict, payload: dict, from_helper: bool = False,
                  tool: str | None = None) -> str | None:
     """Vet a write target. `from_helper` marks a canonical helper's own output.
@@ -288,11 +300,27 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
     # chapters of a different novel from memory before anything objected — the
     # assembler catches it now, but only after the whole QA pass is spent
     # (observed 2026-08-13).
-    if QA_CHAPTER_FILE_RE.fullmatch(target.name) and not (target.parent / 'chapters.json').exists():
-        return ('qa-chapter files cannot be written before .work/chapters.json exists '
-                '— it is the loaded text this pass is supposed to be proofreading. '
-                'Run STEP 1 (load_input.py) on the input file first; proofreading '
-                'from memory produces chapters that were never in the novel')
+    qa_match = QA_CHAPTER_FILE_RE.fullmatch(target.name)
+    if qa_match:
+        source = target.parent / 'chapters.json'
+        if not source.exists():
+            return ('qa-chapter files cannot be written before .work/chapters.json '
+                    'exists — it is the loaded text this pass is supposed to be '
+                    'proofreading. Run STEP 1 (load_input.py) on the input file '
+                    'first; proofreading from memory produces chapters that were '
+                    'never in the novel')
+        # Loading the right file is not the same as proofreading it. Twice in one
+        # afternoon a run loaded chapters 17-20 and then wrote chapters 321-330 of
+        # a different novel from memory, once with the correct source sitting in
+        # .work the whole time (observed 2026-08-13). The id is the cheapest place
+        # to notice, and the first file is the cheapest moment.
+        loaded = _loaded_chapter_ids(source)
+        chapter_id = int(qa_match.group(1))
+        if loaded and chapter_id not in loaded:
+            return (f'chapter {chapter_id} is not in .work/chapters.json, which holds '
+                    f'{sorted(loaded)[:6]}. Proofread the chapters that were loaded '
+                    f'from the input file — a chapter that was never loaded is one '
+                    f'you are writing from memory, not proofreading')
     if target.name == 'scene-plan.md' and not (target.parent / 'chapters_qa.json').exists():
         return ('scene-plan.md cannot be written before .work/chapters_qa.json '
                 'exists — it is the text every source_anchor is checked against. '

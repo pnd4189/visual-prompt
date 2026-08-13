@@ -313,6 +313,11 @@ class QaNeedsItsSourceTests(unittest.TestCase):
         }), encoding='utf-8')
         self.addCleanup(self._tmp.cleanup)
 
+    def _load(self, ids):
+        (self.root / '.work' / 'chapters.json').write_text(json.dumps(
+            [{'id': i, 'title': f'Chương {i}', 'text': 'chữ ' * 50} for i in ids],
+            ensure_ascii=False), encoding='utf-8')
+
     def _denial(self, name: str):
         payload = {'workspacePaths': [str(self.root)],
                    'artifactDirectoryPath': str(self.root)}
@@ -331,7 +336,27 @@ class QaNeedsItsSourceTests(unittest.TestCase):
         self.assertIn('chapters.json', denial)
 
     def test_a_qa_chapter_passes_once_the_source_is_loaded(self):
-        (self.root / '.work' / 'chapters.json').write_text('[]', encoding='utf-8')
+        self._load([17, 18])
+
+        self.assertIsNone(self._denial('qa-chapter-017.md'))
+
+    def test_a_chapter_that_was_never_loaded_is_refused(self):
+        """Observed 2026-08-13, twice: chapters 17-20 loaded, 321-330 written.
+
+        The second time the correct source sat in .work the whole run — loading
+        the right file is not the same as proofreading it.
+        """
+        self._load([17, 18, 19, 20])
+
+        denial = self._denial('qa-chapter-321.md')
+
+        self.assertIsNotNone(denial)
+        self.assertIn('321', denial)
+        self.assertIn('from memory', denial)
+
+    def test_an_unreadable_source_does_not_block_the_pass(self):
+        """A corrupt chapters.json is the assembler's problem, not a write refusal."""
+        (self.root / '.work' / 'chapters.json').write_text('{oops', encoding='utf-8')
 
         self.assertIsNone(self._denial('qa-chapter-017.md'))
 
