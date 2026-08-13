@@ -210,7 +210,28 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
             f'this text. Fix those chapters and assemble again.'
         )
 
+    # chapters.json is the proof that STEP 1 read the file the user named. Without
+    # it every measurement below compares the proofread against itself: one run
+    # skipped load and continuity outright, wrote ten chapters of a different novel
+    # from memory, and sailed through — the per-chapter check had quietly stepped
+    # aside, and the total happened to land within 6% of the real word count
+    # (observed 2026-08-13). Refuse instead of degrading.
     source_texts = _source_chapters(work_dir)
+    if not source_texts:
+        raise RuntimeError(
+            'no readable .work/chapters.json, so there is nothing to check this '
+            'proofread against. Run STEP 1 (load_input.py) on the input file first; '
+            'a QA pass with no source behind it cannot be verified at all.'
+        )
+    qa_ids, source_ids = {c['id'] for c in chapters}, set(source_texts)
+    if qa_ids != source_ids:
+        extra, missing = sorted(qa_ids - source_ids), sorted(source_ids - qa_ids)
+        raise RuntimeError(
+            f'the proofread chapters are not the ones that were loaded — '
+            f'{len(extra)} not in chapters.json ({extra[:5]}), '
+            f'{len(missing)} loaded but never proofread ({missing[:5]}). '
+            f'The QA step must work through .work/chapters.json, not from memory.'
+        )
     if source_texts:
         gutted, truncated = [], []
         for chapter in chapters:
@@ -234,8 +255,6 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
                 f'({detail}). Proofreading does not shorten the story. Re-run the QA '
                 f'loop for those chapters before assembling.'
             )
-    else:
-        warnings.append('chapters.json unreadable — per-chapter length check skipped')
 
     source_words = _word_count(read_text_checked(input_path))
     kept_words = sum(_word_count(chapter['text']) for chapter in chapters)

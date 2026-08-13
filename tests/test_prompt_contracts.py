@@ -1807,6 +1807,9 @@ class QaRetentionTests(unittest.TestCase):
         source.write_text('\n\n'.join(
             f'Chương {i}\n{chapter}' for i in range(1, 6)), encoding='utf-8')
         work = root / '.work'; work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': i, 'title': f'Chương {i}', 'text': chapter} for i in range(1, 6)],
+            ensure_ascii=False), encoding='utf-8')
         kept = ' '.join(chapter.split()[:int(1000 * keep)])
         for i in range(1, 6):
             (work / f'qa-chapter-{i:03d}.md').write_text(
@@ -1826,7 +1829,8 @@ class QaRetentionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 assemble_qa.assemble(source, work)
 
-            self.assertIn('36%', str(caught.exception))
+            # the per-chapter gate now names the chapters instead of the total
+            self.assertIn('short chapters', str(caught.exception))
             self.assertFalse((source.parent / 'novel_qa.txt').exists())
             self.assertFalse((work / 'chapters_qa.json').exists())
 
@@ -2085,6 +2089,61 @@ class SeriesBibleSyncTests(unittest.TestCase):
 
             self.assertEqual({'series': 'testseries', 'added': 0, 'upgraded': 0}, result)
             self.assertIn('| Lan | 25 | slender |', target.read_text(encoding='utf-8'))
+
+
+class QaGroundingTests(unittest.TestCase):
+    """A proofread with no loaded source behind it cannot be checked at all."""
+
+    CHAPTER = 'Lan bước vào sân đá rồi dừng lại. ' + 'chữ ' * 200
+
+    def _fixture(self, tmp: str, *, source_ids, qa_ids, with_source=True):
+        root = Path(tmp)
+        (root / 'novel.txt').write_text('Chương 1\n' + self.CHAPTER, encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        if with_source:
+            (work / 'chapters.json').write_text(json.dumps(
+                [{'id': i, 'title': f'Chương {i}', 'text': self.CHAPTER} for i in source_ids],
+                ensure_ascii=False), encoding='utf-8')
+        for i in qa_ids:
+            (work / f'qa-chapter-{i:03d}.md').write_text(
+                f'---\nid: {i}\ntitle: "Chương {i}"\n---\n{self.CHAPTER}\n',
+                encoding='utf-8')
+        return root / 'novel.txt', work
+
+    def test_a_proofread_without_a_loaded_source_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._fixture(
+                tmp, source_ids=[1], qa_ids=[1], with_source=False)
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('chapters.json', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_chapters_that_were_never_loaded_are_refused(self):
+        """The 2026-08-13 shape: ten chapters of another novel, written from memory.
+
+        The word total landed within 6% of the real file, so the retention gate
+        agreed; only the chapter ids gave it away.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._fixture(tmp, source_ids=[17, 18], qa_ids=[321, 322])
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            message = str(caught.exception)
+            self.assertIn('not the ones that were loaded', message)
+            self.assertIn('321', message)
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_the_loaded_chapters_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._fixture(tmp, source_ids=[17, 18], qa_ids=[17, 18])
+
+            self.assertEqual(2, assemble_qa.assemble(source, work)['chapter_count'])
 
 
 class HouseSlangTests(unittest.TestCase):
