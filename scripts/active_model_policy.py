@@ -56,6 +56,14 @@ LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 LEAN_FIELD_MIN_WORDS = 8
 LEAN_FIELD_MAX_WORDS = 40
 LEAN_MEASURED_FIELDS = ('Setting', 'Action')
+# Subject carries the identity anchor, so it is the one field a bare name ruins:
+# three runs in a row named characters and described none of them, and the last
+# averaged 3.6 words with scenes reading just "Gã bán thịt bò" (observed
+# 2026-08-13). Neither gate downstream looks — the repetition gate compares only
+# Setting and Action under --lean, and the anchor gate checks consistency with
+# the bible, not presence. The floor is lower than the other two: a scene with one
+# character needs less than a place and an action do.
+LEAN_SUBJECT_MIN_WORDS = 6
 SOURCE_CODE_RE = re.compile(
     r'^[ \t]*(?:import\s+[A-Za-z_][\w.]*'
     r'|from\s+[A-Za-z_][\w.]*\s+import\s'
@@ -282,6 +290,14 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
                         f'{absent}. Write them as separate "Field: value" lines, not as '
                         'one paragraph — the repetition gate compares those fields and '
                         'cannot read prose')
+            subject = re.search(r'^Subject:[ \t]*(.+)$', body, re.MULTILINE)
+            subject_words = len(subject.group(1).split()) if subject else 0
+            if subject_words < LEAN_SUBJECT_MIN_WORDS:
+                return (f'lean Subject has {subject_words} word(s). Name each character '
+                        f'AND paste their Identity Anchor from .work/character-bible.md '
+                        f'— age, build, hair, face, signature mark, attire. A bare name '
+                        f'gives the image model nothing to hold a face to, and the same '
+                        f'character comes out different in every one of these scenes')
             for field in LEAN_MEASURED_FIELDS:
                 match = re.search(rf'^{field}:[ \t]*(.+)$', body, re.MULTILINE)
                 words = len(match.group(1).split()) if match else 0

@@ -398,6 +398,45 @@ class PlanGateMustPassFirstTests(unittest.TestCase):
         self.assertIsNone(self._denial(self.root, worker=True))
 
 
+class LeanSubjectAnchorTests(unittest.TestCase):
+    """Subject carries the identity anchor; a bare name loses the character."""
+
+    BASE = ('---\nscene_id: "001"\n---\n## Image Prompt\n\n'
+            'Subject: {subject}\n'
+            'Setting: the traditional market stall under a faded awning at noon\n'
+            'Action: he leans over the counter and argues about the price of beef\n'
+            'Style: donghua-xianxia\nNegative: no logo, no watermark\n')
+
+    def _denial(self, subject: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / '.work').mkdir()
+            (root / '.work' / 'plan.hash').write_text('deadbeef', encoding='utf-8')
+            (root / 'guard.json').write_text(json.dumps({
+                'schema': 1, 'primary_conversation_id': 'primary', 'lean': True,
+            }), encoding='utf-8')
+            payload = {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+            with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                return policy.write_denial(
+                    {'TargetFile': str(root / '.work' / 'scene-001.md'),
+                     'CodeContent': self.BASE.format(subject=subject)},
+                    payload, tool='write_to_file')
+
+    def test_a_bare_name_is_refused(self):
+        """Observed 2026-08-13: Subject averaged 3.6 words, one read "Gã bán thịt bò"."""
+        denial = self._denial('Gã bán thịt bò')
+
+        self.assertIsNotNone(denial)
+        self.assertIn('Identity Anchor', denial)
+
+    def test_a_pasted_identity_anchor_passes(self):
+        anchor = ('Lý Bá Thông — trung niên, tóc rối bù, râu lởm chởm, cười gian, '
+                  'đạo bào cũ lấm vảy cá. Lão chống nạnh cãi giá thịt bò.')
+
+        self.assertIsNone(self._denial(anchor))
+
+
 class LeanSceneShapeTests(unittest.TestCase):
     """A lean scene written as prose has no fields for the repetition gate."""
 
@@ -405,7 +444,7 @@ class LeanSceneShapeTests(unittest.TestCase):
             'high-end donghua render, inside a military tent at dusk, '
             'he glances at her and says nothing.\n')
     SHAPED = ('---\nscene_id: "001"\n---\n## Image Prompt\n\n'
-              'Subject: Phac Minh, tall, dark robes\n'
+              'Subject: Phac Minh, tall, dark robes, scarred jaw\n'
               'Setting: inside the military tent at Luoshui, canvas dim at dusk\n'
               'Action: he glances at her once and keeps his silence\n'
               'Style: donghua-xianxia\nNegative: no logo, no watermark\n')
