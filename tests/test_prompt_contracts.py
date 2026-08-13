@@ -2174,6 +2174,26 @@ class QaGroundingTests(unittest.TestCase):
             self.assertEqual(2, assemble_qa.assemble(source, work)['chapter_count'])
 
 
+class SlangInvariantAnchorTests(unittest.TestCase):
+    """The gate must not punish the model for the pipeline's own rewrite."""
+
+    def test_an_anchor_quoting_the_novel_matches_the_softened_qa_text(self):
+        """assemble_qa turns "đéo" into "éo"; an anchor quoted from the novel
+        then read as ungrounded (observed 2026-08-13)."""
+        import validate_scene_plan as validator  # type: ignore  # noqa: E402
+
+        novel = validator._normalize('Bố mày đéo quan tâm thiện ý')
+        softened = validator._normalize('Bố mày éo quan tâm thiện ý')
+
+        self.assertEqual(novel, softened)
+
+    def test_other_swearing_is_still_compared_as_written(self):
+        import validate_scene_plan as validator  # type: ignore  # noqa: E402
+
+        self.assertNotEqual(validator._normalize('đếch cần'),
+                            validator._normalize('éo cần'))
+
+
 class HouseSlangTests(unittest.TestCase):
     """Two words are softened for every novel; the rest of the swearing stays."""
 

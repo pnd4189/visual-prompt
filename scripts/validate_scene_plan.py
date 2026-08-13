@@ -251,8 +251,15 @@ def check_synopsis_duplicates(rows: list[dict]) -> list[dict]:
     return violations
 
 
+# assemble_qa softens two words on the way out, so the QA'd text says "éo" where
+# the novel says "đéo". An anchor quoted from the novel then reads as ungrounded —
+# the gate punishing the model for a rewrite the pipeline itself performed
+# (observed 2026-08-13). Fold both spellings so the comparison is blind to it.
+_SOFTENED_SLANG_RE = re.compile(r'(?<!\w)[Đđ](?:éo|ách)(?!\w)')
+
+
 def _normalize(value: str) -> str:
-    return ' '.join(value.casefold().split())
+    return ' '.join(_SOFTENED_SLANG_RE.sub('éo', value).casefold().split())
 
 
 def check_grounding(rows: list[dict], chapters: list[dict]) -> list[dict]:
