@@ -214,7 +214,7 @@ class AuthorshipGateTests(unittest.TestCase):
             image.write_text(
                 '--- SCENE 001 ---\nCamera: close frame\nStory DNA: grounded beat\n'
                 'Setting: quiet room\nComposition: layered depth\nSubject: lone traveler\n'
-                'Action / Energy: opens a letter\nStyle: painted realism\n'
+                'Action / Energy: opens a letter\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: cool window light\nAtmosphere: restrained concern\n'
                 'Negative: no logos, no text\n', encoding='utf-8',
             )
@@ -590,7 +590,7 @@ class StopGateTests(unittest.TestCase):
     IMAGE_PROMPT = (
         '--- SCENE 001 ---\nCamera: close frame\nStory DNA: grounded beat\n'
         'Setting: quiet room\nComposition: layered depth\nSubject: lone traveler\n'
-        'Action / Energy: opens a letter\nStyle: painted realism\n'
+        'Action / Energy: opens a letter\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
         'Lighting / Color: cool window light\nAtmosphere: restrained concern\n'
         'Negative: no logos, no text\n'
     )

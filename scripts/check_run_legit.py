@@ -98,6 +98,62 @@ def _sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+STYLE_LINE_RE = re.compile(r'^Style:[ \t]*(.+?)\s*$', re.M)
+_CATALOG_HEADING_RE = re.compile(r'^###\s+([a-z0-9-]+)\s+—')
+_CATALOG_BLOCK_RE = re.compile(r'^-\s*Style block \(EN, paste-ready\):\s*(.*)$')
+
+
+def _normalize_style(value):
+    return ' '.join(value.casefold().split()).rstrip('.')
+
+
+def catalog_style_blocks(catalog_path):
+    """{style id: normalized paste-ready block} from references/style-catalog.md."""
+    blocks = {}
+    try:
+        lines = catalog_path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return blocks
+    style_id = None
+    for index, line in enumerate(lines):
+        heading = _CATALOG_HEADING_RE.match(line)
+        if heading:
+            style_id = heading.group(1)
+            continue
+        opening = _CATALOG_BLOCK_RE.match(line)
+        if not (opening and style_id):
+            continue
+        parts = [opening.group(1)]
+        for follow in lines[index + 1:]:
+            if not follow.strip() or follow.lstrip().startswith(('-', '#')):
+                break
+            parts.append(follow.strip())
+        blocks[style_id] = _normalize_style(' '.join(parts))
+    return blocks
+
+
+def _style_errors(text, catalog_path):
+    """The Style block is the series lock, so it must be a catalog block verbatim.
+
+    Nothing compared it to the catalog, and the repetition gate deliberately never
+    reads Style at all — so any string passed as long as it repeated. Three runs in
+    a row shipped something else: one wrote just the style id, one invented a
+    plausible-sounding block, and both looked perfect to every gate (2026-08-13).
+    """
+    styles = {_normalize_style(m) for m in STYLE_LINE_RE.findall(text)}
+    if not styles:
+        return []
+    known = set(catalog_style_blocks(catalog_path).values())
+    if not known:
+        return []
+    stray = sorted(s for s in styles if s not in known)
+    return [
+        f'Style block không khớp references/style-catalog.md: "{value[:70]}…" '
+        f'(dùng đúng "Style block (EN, paste-ready)" của style đã chọn)'
+        for value in stray
+    ]
+
+
 def _assembled_scene_ids(image_path):
     """Scene ids already merged into the deliverable, casefolded like plan ids."""
     if image_path is None or not image_path.exists():
@@ -429,6 +485,8 @@ def main():
         errors.append("output _image_prompts.txt thiếu/rỗng")
     elif not worker_run:
         text = image_path.read_text(errors='ignore')
+        errors.extend(_style_errors(
+            text, Path(__file__).resolve().parents[1] / 'references' / 'style-catalog.md'))
         markers = list(BLOCK_RE.finditer(text))
         if not markers:
             errors.append("output không có '--- SCENE N ---' block")

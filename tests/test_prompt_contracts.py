@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -783,7 +784,7 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
                 '--- SCENE 001 ---\n'
                 'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
                 'Composition: foreground and background\nSubject: Lan\n'
-                'Action / Energy: walking\nStyle: painted\n'
+                'Action / Energy: walking\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n',
                 encoding='utf-8',
             )
@@ -812,7 +813,7 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
                 '--- SCENE 001 ---\n'
                 'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
                 'Composition: foreground and background\nSubject: Lan\n'
-                'Action / Energy: walking\nStyle: painted\n'
+                'Action / Energy: walking\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n',
                 encoding='utf-8',
             )
@@ -841,7 +842,7 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
                 '--- SCENE 001 ---\n'
                 'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
                 'Composition: foreground and background\nSubject: Lan\n'
-                'Action / Energy: walking\nStyle: painted\n'
+                'Action / Energy: walking\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n',
                 encoding='utf-8',
             )
@@ -869,7 +870,7 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
                 '--- SCENE 001 ---\n'
                 'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
                 'Composition: foreground and background\nSubject: Lan\n'
-                'Action / Energy: walking\nStyle: painted\n'
+                'Action / Energy: walking\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n'
                 + '\n'.join([repeated] * 6),
                 encoding='utf-8',
@@ -904,7 +905,7 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
                 '--- SCENE 001 ---\n'
                 'Camera: wide\nStory DNA: grounded\nSetting: courtyard\n'
                 'Composition: foreground and background\nSubject: Lan\n'
-                'Action / Energy: walking\nStyle: painted\n'
+                'Action / Energy: walking\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Lighting / Color: daylight\nAtmosphere: quiet\nNegative: logo\n'
                 + '\n'.join([repeated] * 6),
                 encoding='utf-8',
@@ -932,7 +933,7 @@ class CleanedRunTests(unittest.TestCase):
             '| 002 | 1 | Minh quỳ xuống bên bậc thềm ướt mưa |\n')
     SCENE = ('--- SCENE {i:03d} ---\nSubject: Lan {i}\nSetting: a stone courtyard '
              'under pine branches {i}\nAction: she crosses the wet threshold '
-             'slowly {i}\nStyle: painted\nNegative: no logo\n')
+             'slowly {i}\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\nNegative: no logo\n')
 
     def _cleaned(self, directory: Path, proven: set[int]):
         """A run whose scene files are gone but whose deliverable holds them all."""
@@ -993,7 +994,7 @@ class ContentSafetyNegationTests(unittest.TestCase):
             image = Path(temp_dir) / 'image.txt'
             image.write_text(
                 '--- SCENE 001 ---\nSubject: Lan\nSetting: a courtyard\n'
-                'Action: she walks\nStyle: painted\n'
+                'Action: she walks\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
                 'Negative: blurry, bad anatomy, ugly, morbid, mutilated, disfigured\n',
                 encoding='utf-8')
 
@@ -1892,6 +1893,127 @@ class QaRetentionTests(unittest.TestCase):
 
             self.assertEqual(5, summary['chapter_count'])
             self.assertEqual([], summary['warnings'])
+
+
+class QaTranslationGateTests(unittest.TestCase):
+    """Leftover Chinese in the prose is the one defect no later gate reads."""
+
+    def _run(self, tmp: str, chapter: str):
+        root = Path(tmp)
+        source = root / 'novel.txt'
+        source.write_text(f'Chương 1\n{chapter}', encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': 1, 'title': 'Chương 1', 'text': chapter}], ensure_ascii=False),
+            encoding='utf-8')
+        (work / 'qa-chapter-001.md').write_text(
+            f'---\nid: 1\ntitle: "Chương 1"\n---\n{chapter}\n', encoding='utf-8')
+        return source, work
+
+    def test_untranslated_chinese_stops_the_assemble(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, 'Hắn nói 修真 rồi bỏ đi. ' + 'chữ ' * 200)
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('Chinese characters', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_clean_vietnamese_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, 'Hắn nói tu chân rồi bỏ đi. ' + 'chữ ' * 200)
+
+            self.assertEqual(1, assemble_qa.assemble(source, work)['chapter_count'])
+
+
+class StyleCatalogTests(unittest.TestCase):
+    """Style is the series lock, and nothing ever compared it to the catalog."""
+
+    CATALOG = ROOT / 'references' / 'style-catalog.md'
+
+    def setUp(self):
+        import check_run_legit  # type: ignore  # noqa: E402
+        self.legit = check_run_legit
+        self.blocks = check_run_legit.catalog_style_blocks(self.CATALOG)
+
+    def _scene(self, style: str) -> str:
+        return (f'--- SCENE 001 ---\nSubject: Lan\nSetting: a courtyard\n'
+                f'Action: she walks\nStyle: {style}\nNegative: no logo\n')
+
+    def test_every_catalogued_style_is_parsed(self):
+        self.assertEqual(18, len(self.blocks))
+
+    def test_a_catalog_block_passes_verbatim(self):
+        block = self.blocks['semi-realistic-digital-painting']
+
+        self.assertEqual([], self.legit._style_errors(self._scene(block), self.CATALOG))
+
+    def test_an_invented_block_is_caught(self):
+        """The 2026-08-13 shape: plausible wording, no catalog entry behind it."""
+        invented = ('semi-realistic digital painting, polished character renders, '
+                    'realistic lighting and material textures')
+
+        errors = self.legit._style_errors(self._scene(invented), self.CATALOG)
+
+        self.assertEqual(1, len(errors))
+        self.assertIn('style-catalog.md', errors[0])
+
+    def test_the_bare_style_id_is_caught(self):
+        """One run wrote the id where the block belongs; every gate still passed."""
+        errors = self.legit._style_errors(
+            self._scene('semi-realistic-digital-painting'), self.CATALOG)
+
+        self.assertEqual(1, len(errors))
+
+
+class SeriesBibleSyncTests(unittest.TestCase):
+    """What a run learns about the cast has to outlive the run."""
+
+    HEADER = '# Character Bible — testseries\n\n| name | age | build |\n|---|---|---|\n'
+
+    def _sync(self, tmp: str, local_rows: str, stored: str | None, home: Path):
+        work = Path(tmp) / '.work'
+        work.mkdir(parents=True)
+        (work / 'character-bible.md').write_text(self.HEADER + local_rows, encoding='utf-8')
+        target = home / '.gemini' / 'bibles' / 'testseries.md'
+        if stored is not None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(self.HEADER + stored, encoding='utf-8')
+        with unittest.mock.patch.object(Path, 'home', staticmethod(lambda: home)):
+            return assemble_outputs.sync_series_bible(work), target
+
+    def test_a_new_character_is_carried_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / 'home'
+            result, target = self._sync(
+                tmp, '| Lan | 25 | slender |\n| Minh | 30 | tall |\n',
+                '| Lan | 25 | slender |\n', home)
+
+            self.assertEqual(1, result['added'])
+            self.assertIn('| Minh | 30 | tall |', target.read_text(encoding='utf-8'))
+
+    def test_a_richer_row_replaces_a_vague_one(self):
+        """The Chap 23 shape: a later run knew less and the series kept the less."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / 'home'
+            result, target = self._sync(
+                tmp, '| Lan | 25 | slender |\n',
+                '| Lan | not stated | not stated |\n', home)
+
+            self.assertEqual(1, result['upgraded'])
+            self.assertIn('| Lan | 25 | slender |', target.read_text(encoding='utf-8'))
+
+    def test_a_vaguer_row_never_overwrites_what_is_known(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / 'home'
+            result, target = self._sync(
+                tmp, '| Lan | not stated | not stated |\n',
+                '| Lan | 25 | slender |\n', home)
+
+            self.assertEqual({'series': 'testseries', 'added': 0, 'upgraded': 0}, result)
+            self.assertIn('| Lan | 25 | slender |', target.read_text(encoding='utf-8'))
 
 
 class HouseSlangTests(unittest.TestCase):

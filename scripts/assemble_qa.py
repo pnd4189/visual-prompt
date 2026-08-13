@@ -111,6 +111,12 @@ _TOKEN_RE = re.compile(r'\w+', re.UNICODE)
 # assembler applies it too rather than trusting the step to have done it.
 _SOFTENED_SLANG_RE = re.compile(r'(?<!\w)[Đđ](?:éo|ách)(?!\w)')
 
+# Translating leftover Chinese is the QA step's first job, and nothing downstream
+# ever looked: the later gates all read the scene prompts, never the prose that
+# becomes the audio. A proofread that quietly did nothing scores a perfect 100%
+# on the retention gate above, so that one cannot catch it either.
+_CJK_RE = re.compile(r'[\u4e00-\u9fff]')
+
 
 def _soften_slang(text: str) -> tuple[str, int]:
     """House slang rule; returns the rewritten text and how many words changed."""
@@ -192,6 +198,18 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     # Refuse before writing: chapters_qa.json is the source every later gate
     # checks against, so a truncated one is agreed with rather than caught, and
     # <stem>_qa.txt is the text that becomes the audio.
+    untranslated = [
+        (chapter['id'], ''.join(_CJK_RE.findall(chapter['text'])[:8]))
+        for chapter in chapters if _CJK_RE.search(chapter['text'])
+    ]
+    if untranslated:
+        detail = '; '.join(f'{cid}: {sample}' for cid, sample in untranslated)
+        raise RuntimeError(
+            f'QA left Chinese characters in {len(untranslated)} chapter(s) ({detail}). '
+            f'Translating them is STEP 1 of the QA prompt, and no later gate reads '
+            f'this text. Fix those chapters and assemble again.'
+        )
+
     source_texts = _source_chapters(work_dir)
     if source_texts:
         gutted, truncated = [], []

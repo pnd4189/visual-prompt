@@ -124,6 +124,77 @@ def check_video(block: str) -> list[str]:
     return problems
 
 
+_BIBLE_SERIES_RE = re.compile(r'^#\s*Character Bible\s*[—-]\s*(.+?)\s*$', re.M)
+_BIBLE_ROW_RE = re.compile(r'^\|\s*([^|]+?)\s*\|')
+_VAGUE_CELL = {'', 'not stated', 'unknown', 'age not stated', 'n/a', '-'}
+
+
+def _row_name(line: str) -> str | None:
+    """Character name of a bible table row, or None for headers and separators."""
+    match = _BIBLE_ROW_RE.match(line)
+    if not match or line.startswith('|---'):
+        return None
+    name = match.group(1)
+    return None if name.casefold() == 'name' else name
+
+
+def _row_detail(line: str) -> int:
+    """How many cells actually say something — the tie-breaker when merging."""
+    cells = [cell.strip().casefold() for cell in line.split('|')[2:-1]]
+    return sum(1 for cell in cells if cell not in _VAGUE_CELL)
+
+
+def sync_series_bible(work_dir: Path) -> dict:
+    """Carry this run's character rows back into ~/.gemini/bibles/<series>.md.
+
+    The augment step enriches .work/character-bible.md and nothing ever carried it
+    back, so every file re-derived its cast from scratch — which is how one chapter
+    shipped with the protagonist described as "Tôi", generic and nameless, while
+    the file before it had him in a lion-jade pendant (observed 2026-08-12).
+    Append-only in spirit: a character the series bible does not know is added, and
+    one it already knows is replaced only by a row that states strictly more.
+    """
+    local = work_dir / 'character-bible.md'
+    if not local.is_file():
+        return {}
+    text = local.read_text(encoding='utf-8')
+    series_match = _BIBLE_SERIES_RE.search(text)
+    if not series_match:
+        return {}
+    series = series_match.group(1).strip()
+    target = Path.home() / '.gemini' / 'bibles' / f'{series}.md'
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, text)
+        return {'series': series, 'created': True, 'added': 0, 'upgraded': 0}
+
+    stored = target.read_text(encoding='utf-8').splitlines()
+    index = {}
+    last_row = -1
+    for position, line in enumerate(stored):
+        name = _row_name(line)
+        if name is not None:
+            index[name] = position
+            last_row = position
+    added, upgraded = [], []
+    for line in text.splitlines():
+        name = _row_name(line)
+        if name is None:
+            continue
+        if name not in index:
+            added.append(line)
+        elif _row_detail(line) > _row_detail(stored[index[name]]):
+            stored[index[name]] = line
+            upgraded.append(name)
+    if not added and not upgraded:
+        return {'series': series, 'added': 0, 'upgraded': 0}
+    if added:
+        cut = last_row + 1 if last_row >= 0 else len(stored)
+        stored[cut:cut] = added
+    atomic_write_text(target, '\n'.join(stored) + '\n')
+    return {'series': series, 'added': len(added), 'upgraded': len(upgraded)}
+
+
 def _scene_num(path: Path) -> str:
     m = _SCENE_NUM_RE.search(path.name)
     return m.group(1) if m else '0'
@@ -235,8 +306,15 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
         music_path = output_dir / f"{stem}_music_prompts.txt"
         atomic_write_text(music_path, '\n\n'.join(music_blocks) + '\n')
 
+    try:
+        bible_sync = sync_series_bible(work_dir)
+    except (OSError, UnicodeError) as exc:
+        bible_sync = {}
+        warnings.append(f'series bible not synced: {type(exc).__name__}')
+
     return {
         'image_count': len(image_blocks),
+        'bible_sync': bible_sync,
         'video_count': len(video_blocks),
         'video_indices': [sid for sid, _ in video_blocks],
         'image_path': str(img_path),
