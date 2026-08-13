@@ -301,6 +301,41 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class QaNeedsItsSourceTests(unittest.TestCase):
+    """A proofread is a rewrite OF something; with no source it is invention."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / '.work').mkdir()
+        (self.root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary',
+        }), encoding='utf-8')
+        self.addCleanup(self._tmp.cleanup)
+
+    def _denial(self, name: str):
+        payload = {'workspacePaths': [str(self.root)],
+                   'artifactDirectoryPath': str(self.root)}
+        with patch.dict(os.environ, {'VP_GUARD_STATE': str(self.root / 'guard.json')}), \
+                patch.object(policy, '_agy_launcher_cwd', return_value=self.root):
+            return policy.write_denial(
+                {'TargetFile': str(self.root / '.work' / name),
+                 'CodeContent': 'Lan bước vào sân đá rồi dừng lại.'}, payload)
+
+    def test_a_qa_chapter_before_load_is_refused(self):
+        """Observed 2026-08-13: nine chapters of another novel, written from memory,
+        with no chapters.json anywhere — nothing objected until assemble time."""
+        denial = self._denial('qa-chapter-321.md')
+
+        self.assertIsNotNone(denial)
+        self.assertIn('chapters.json', denial)
+
+    def test_a_qa_chapter_passes_once_the_source_is_loaded(self):
+        (self.root / '.work' / 'chapters.json').write_text('[]', encoding='utf-8')
+
+        self.assertIsNone(self._denial('qa-chapter-017.md'))
+
+
 class PlanGateMustPassFirstTests(unittest.TestCase):
     """A failed gate means HALT; the model kept expanding anyway."""
 

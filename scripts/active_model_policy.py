@@ -45,6 +45,7 @@ FINAL_OUTPUT_RE = re.compile(r'_(?:image|video|music)_prompts\.txt$|_qa\.txt$')
 # retry. Deny the shortcut instead of paying for it.
 HELPER_OWNED_SCRATCH = {'chapters.json', 'chapters_qa.json'}
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
+QA_CHAPTER_FILE_RE = re.compile(r'^qa-chapter-\d+\.md$')
 LEAN_IMAGE_FIELDS = ('Subject', 'Setting', 'Action', 'Style', 'Negative')
 # The lean contract gives Setting and Action an 8-20 word range. Enforced here so
 # a stub is refused as it is written: validate_artifacts checks the same range,
@@ -282,6 +283,16 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
     # ungrounded — observed 2026-08-10, a run that jumped here from genre detection
     # and wrote 100 scenes no gate could check. The stop gate catches this too, but
     # only after the scenes are written; refuse at the point the shortcut is taken.
+    # Same reasoning one step earlier. A proofread is a rewrite OF something: with
+    # no chapters.json there is nothing to rewrite, and the model wrote nine
+    # chapters of a different novel from memory before anything objected — the
+    # assembler catches it now, but only after the whole QA pass is spent
+    # (observed 2026-08-13).
+    if QA_CHAPTER_FILE_RE.fullmatch(target.name) and not (target.parent / 'chapters.json').exists():
+        return ('qa-chapter files cannot be written before .work/chapters.json exists '
+                '— it is the loaded text this pass is supposed to be proofreading. '
+                'Run STEP 1 (load_input.py) on the input file first; proofreading '
+                'from memory produces chapters that were never in the novel')
     if target.name == 'scene-plan.md' and not (target.parent / 'chapters_qa.json').exists():
         return ('scene-plan.md cannot be written before .work/chapters_qa.json '
                 'exists — it is the text every source_anchor is checked against. '
