@@ -137,14 +137,22 @@ contains ANY of these, STOP and rewrite the offending section:
 
 ## INLINE STRUCTURE EXAMPLE (syntax only — never reuse its content or pattern)
 
+> Placeholders are deliberately un-novel-like. This example used to name a
+> real series' protagonist and a chapter in the 300s, and two runs in one
+> afternoon proofread that series instead of the file they were given —
+> chapters 321-330, with the correct source loaded in .work the whole time
+> (observed 2026-08-13). "Never reuse its content" does not survive contact
+> with content this concrete.
+ (syntax only — never reuse its content or pattern)
+
 ```
 Camera: extreme wide shot, 24mm lens, slow push-in framing, 16:9 frame, deep
 focus keeping both the foreground cauldron smoke and the far chamber walls
 razor-sharp.
 
-Story DNA: opening beat of chapter 301 — Lâm Ý has begun his forbidden
+Story DNA: opening beat of chapter N — NHÂN-VẬT-A has begun his forbidden
 body-tempering experiment with ancient cinnabar-mercury dan medicine inside a
-sealed underground chamber. Tề Châu Cơ lingers at the doorway, torn between
+sealed underground chamber. NHÂN-VẬT-B lingers at the doorway, torn between
 curiosity and concern for his friend. The tension is alchemical — one wrong
 pulse of qi and the cauldron explodes.
 
@@ -157,23 +165,23 @@ oil lamp.
 
 Composition: foreground — wisps of crimson medicinal vapor curling upward from
 the cauldron's mouth, brass ladle resting on the rim catching the glow;
-midground — Lâm Ý seated cross-legged on a stone platform directly behind the
-cauldron, Tề Châu Cơ's silhouette visible in the doorway arch to the right;
+midground — NHÂN-VẬT-A seated cross-legged on a stone platform directly behind the
+cauldron, NHÂN-VẬT-B's silhouette visible in the doorway arch to the right;
 background — chamber recedes into shadow with rough tool marks on the walls, a
 wooden rack of ceramic herb jars barely visible, iron chains hanging from
 ceiling hooks.
 
-Subject: Lâm Ý — 16-17 years old, tall, muscular, powerful frame, short
+Subject: NHÂN-VẬT-A — 16-17 years old, tall, muscular, powerful frame, short
 cropped black hair slightly unruly, sharp angular jaw, deep-set intense dark
-eyes with cunning glint, wears Thiên Tích Bảo Y inner armor beneath his
-ash-grey hemp training robe with sleeves rolled to forearms, Hồng Long Ngân Sa
+eyes with cunning glint, wears TÊN-GIÁP-A inner armor beneath his
+ash-grey hemp training robe with sleeves rolled to forearms, TÊN-PHÁP-BẢO-A
 jade-red bracelets on both wrists. Currently seated in lotus position, eyes
 closed, veins at his temples darkening as cinnabar particles circulate, fists
 clenched on his knees, a thin sheen of sweat on his forehead.
 
 Action / Energy: static ritual tension — no visible motion except the slow curl
 of crimson vapor, but the chamber stones vibrate subtly (visible as fine dust
-motes trembling in the air), Lâm Ý's wrist bracelets emit a faint jade-red
+motes trembling in the air), NHÂN-VẬT-A's wrist bracelets emit a faint jade-red
 pulse synchronized with his heartbeat, the talisman chalk lines on the floor
 glow intermittently.
 
@@ -183,9 +191,9 @@ volumetric qi mist, saturated cinematic key light, clean rim lighting, original
 character faces, 16:9 aspect ratio.
 
 Lighting / Color: deep warm amber key light from the cauldron's crimson glow
-reflecting upward onto Lâm Ý's face and the ceiling, cool blue-grey fill from
-the corridor behind Tề Châu Cơ creating a temperature split, jade-red rim light
-on Lâm Ý's bracelets, lifted shadows in the chamber corners with no pure black,
+reflecting upward onto NHÂN-VẬT-A's face and the ceiling, cool blue-grey fill from
+the corridor behind NHÂN-VẬT-B creating a temperature split, jade-red rim light
+on NHÂN-VẬT-A's bracelets, lifted shadows in the chamber corners with no pure black,
 overall palette: crimson-amber core fading to indigo-grey edges.
 
 Atmosphere: thick medicinal vapor with visible particulate density near the

@@ -1900,6 +1900,26 @@ class QaRetentionTests(unittest.TestCase):
             self.assertEqual([], summary['warnings'])
 
 
+class PromptExampleTests(unittest.TestCase):
+    """A worked example naming a real series is content the model will reuse."""
+
+    REAL_SERIES_NAMES = ('Lâm Ý', 'Tề Châu Cơ', 'Bạch Nguyệt Lộ', 'Mã Lực Thuật',
+                         'Nghê Vân San', 'Thiết Sách')
+
+    def test_no_prompt_ships_a_real_novels_characters(self):
+        """Observed 2026-08-13: the expander example named a real protagonist and
+        a chapter in the 300s, and two runs proofread that novel instead of the
+        file they were handed — chapters 321-330, source loaded and ignored."""
+        offenders = []
+        for path in sorted((ROOT / 'prompts').glob('*.md')):
+            text = path.read_text(encoding='utf-8')
+            hits = [name for name in self.REAL_SERIES_NAMES if name in text]
+            if hits:
+                offenders.append(f'{path.name}: {hits}')
+
+        self.assertEqual([], offenders)
+
+
 class ManifestTests(unittest.TestCase):
     """agy reads SKILL.md as YAML front matter; a broken one un-registers the skill."""
 
