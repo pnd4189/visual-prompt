@@ -98,6 +98,16 @@ def _sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _assembled_scene_ids(image_path):
+    """Scene ids already merged into the deliverable, casefolded like plan ids."""
+    if image_path is None or not image_path.exists():
+        return set()
+    try:
+        return {m.casefold() for m in BLOCK_RE.findall(image_path.read_text(errors='ignore'))}
+    except OSError:
+        return set()
+
+
 def _template_junk(body):
     """Return explicit non-prose padding/template fingerprints."""
     reasons = []
@@ -111,9 +121,13 @@ def _template_junk(body):
     return reasons
 
 
-def _authorship_errors(scene_files, log_path):
+def _proven_writes(log_path):
+    """{(basename, sha256)} the primary active model is recorded as having written.
+
+    Returns (writes, errors); a non-empty errors list means the log is unusable.
+    """
     if log_path is None or not log_path.is_file():
-        return ['active-model authorship log thiếu']
+        return set(), ['active-model authorship log thiếu']
     records = []
     try:
         for line_number, raw in enumerate(log_path.read_text(encoding='utf-8').splitlines(), 1):
@@ -124,7 +138,7 @@ def _authorship_errors(scene_files, log_path):
                 raise ValueError(f'line {line_number} không phải object')
             records.append(record)
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
-        return [f'active-model authorship log không hợp lệ: {exc}']
+        return set(), [f'active-model authorship log không hợp lệ: {exc}']
     proven = {
         (record.get('basename'), record.get('sha256'))
         for record in records
@@ -137,13 +151,39 @@ def _authorship_errors(scene_files, log_path):
         and Path(str(record.get('target', ''))).name == record.get('basename')
         and record.get('tool') in {'write_to_file', 'replace_file_content', 'multi_replace_file_content'}
     }
-    errors = []
+    return proven, []
+
+
+def _authorship_errors(scene_files, log_path):
+    proven, errors = _proven_writes(log_path)
+    if errors:
+        return errors
     for scene in sorted(scene_files):
         digest = _sha256(scene)
         if (scene.name, digest) not in proven:
             errors.append(
                 f'{scene.name} thiếu provenance khớp SHA-256 từ primary active model'
             )
+    return errors
+
+
+def _authorship_from_log(expected_scene_files, log_path):
+    """Provenance for a run whose scene files were already merged and cleaned.
+
+    The files themselves are gone by then, so the SHA-256 comparison above has
+    nothing to read. What survives is the log: it must still name every scene
+    the plan declared, written by the primary active model.
+    """
+    proven, errors = _proven_writes(log_path)
+    if errors:
+        return errors
+    written = {basename for basename, _ in proven}
+    missing = sorted(set(expected_scene_files) - written)
+    if missing:
+        errors.append(
+            f'{len(missing)} scene không có provenance trong authorship log '
+            f'(vd {", ".join(missing[:3])})'
+        )
     return errors
 
 
@@ -323,15 +363,40 @@ def main():
         for name in sorted(expected - set(actual)):
             errors.append(f"worker workdir thiếu scene file được giao: {name}")
 
+    # cleanup_work.py deletes merged scene files, and on a gdrive mount that takes
+    # minutes — every file it removes moves the count further from the plan while
+    # scene-plan.md is still sitting there. A run checked inside that window failed
+    # as bypass twice over: "scene-*.md count (1) != scene-plan ids (156)", then
+    # "không có scene artifact" once cleanup finished, and the model was told to
+    # rebuild files it had deleted on purpose (observed 2026-08-13). Once the
+    # deliverable carries a block for every planned id the expander demonstrably
+    # ran, so both checks fall back to evidence that survives cleanup.
+    plan = work / 'scene-plan.md'
+    parsed_plan_ids: list[str] = []
+    plan_ids: set[str] = set()
+    expected_scene_files: set[str] = set()
+    if not worker_run and plan.exists():
+        parsed_plan_ids = [m.casefold() for m in SCENE_ID_RE.findall(plan.read_text(errors='ignore'))]
+        plan_ids = set(parsed_plan_ids)
+        for scene_id in plan_ids:
+            match = re.fullmatch(r'(\d+)([a-z]?)', scene_id)
+            if match:
+                expected_scene_files.add(
+                    f'scene-{int(match.group(1)):03d}{match.group(2)}.md'
+                )
+    merged = bool(plan_ids) and plan_ids <= _assembled_scene_ids(image_path)
+
     scene_artifacts = [
         path for path in work.rglob('*')
         if path.is_file() and SCENE_FILE_RE.fullmatch(path.name)
     ]
     if require_authorship:
-        if not scene_artifacts:
-            errors.append('không có scene artifact để kiểm tra active-model authorship')
-        else:
+        if scene_artifacts:
             errors.extend(_authorship_errors(scene_artifacts, authorship_log_path))
+        elif merged:
+            errors.extend(_authorship_from_log(expected_scene_files, authorship_log_path))
+        else:
+            errors.append('không có scene artifact để kiểm tra active-model authorship')
 
     # 2. scene-plan.md + scene-NNN.md count matches plan — ONLY when .work still
     # holds the artifacts. The skill sometimes cleans .work after assemble (its
@@ -341,21 +406,13 @@ def main():
     # was cleaned (no scene-plan.md), skip these checks rather than false-fail.
     # Worker runs keep their frozen scene-plan in the read-only snapshot dir, so
     # this block applies only to full-pipeline runs.
-    plan = work / 'scene-plan.md'
     if not worker_run and plan.exists():
-        parsed_plan_ids = [m.casefold() for m in SCENE_ID_RE.findall(plan.read_text(errors='ignore'))]
-        plan_ids = set(parsed_plan_ids)
         scene_files = {f.name for f in work.iterdir() if SCENE_FILE_RE.match(f.name)}
-        expected_scene_files = set()
-        for scene_id in plan_ids:
-            match = re.fullmatch(r'(\d+)([a-z]?)', scene_id)
-            if match:
-                expected_scene_files.add(
-                    f'scene-{int(match.group(1)):03d}{match.group(2)}.md'
-                )
         if len(parsed_plan_ids) != len(plan_ids):
             errors.append('scene-plan.md chứa scene id trùng nhau')
-        if not scene_files:
+        if merged:
+            pass
+        elif not scene_files:
             errors.append("có scene-plan.md nhưng không có .work/scene-NNN.md (LLM expander bị bỏ qua)")
         elif plan_ids and len(scene_files) != len(plan_ids):
             errors.append(

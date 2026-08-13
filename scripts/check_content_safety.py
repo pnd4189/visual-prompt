@@ -42,12 +42,23 @@ WARN_ONLY = {'RELIGION_HIGH_RISK'}
 # gate never mangles its own safety line. Brand/IP/likeness/religion are NOT
 # guarded (a named brand/person is a hit regardless of phrasing).
 NEGATION_GUARDED = {'GORE', 'SEXUAL', 'PHOTOREAL_VIDEO'}
+_NEGATIVE_FIELD_RE = re.compile(r'[ \t]*Negative[ \t]*:', re.IGNORECASE)
 _NEGATOR_BEFORE = re.compile(
     r'(?i)\b(?:no|not|avoid(?:ing)?|without|never|ban(?:ned)?)\b[\w\s/,-]{0,30}$')
 
 
 def _is_negated(text: str, start: int) -> bool:
-    """True if the match at `start` sits in a 'no/avoid/without …' instruction."""
+    """True if the match at `start` sits in an instruction telling the model to avoid it.
+
+    Two shapes count. A per-item negator ("no gore", "avoiding blood") is caught
+    by looking back a short way. A bare `Negative:` list is not — one run wrote
+    "…ugly, duplicate, morbid, mutilated, disfigured" with no "no" on any item,
+    and every one of its 156 scenes was reported as a GORE hit (observed
+    2026-08-13). The whole line is the avoid-list, so anything on it is negated.
+    """
+    line_start = text.rfind('\n', 0, start) + 1
+    if _NEGATIVE_FIELD_RE.match(text, line_start):
+        return True
     return bool(_NEGATOR_BEFORE.search(text[max(0, start - 40):start]))
 
 

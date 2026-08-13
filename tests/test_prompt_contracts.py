@@ -924,6 +924,89 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
         self.assertFalse(payload['only_boilerplate'])
 
 
+class CleanedRunTests(unittest.TestCase):
+    """cleanup_work.py removes merged scene files; that is not a bypass."""
+
+    PLAN = ('| scene_id | chapter | source_anchor |\n|---|---|---|\n'
+            '| 001 | 1 | Lan bước vào sân đá khi gió lay cành tùng |\n'
+            '| 002 | 1 | Minh quỳ xuống bên bậc thềm ướt mưa |\n')
+    SCENE = ('--- SCENE {i:03d} ---\nSubject: Lan {i}\nSetting: a stone courtyard '
+             'under pine branches {i}\nAction: she crosses the wet threshold '
+             'slowly {i}\nStyle: painted\nNegative: no logo\n')
+
+    def _cleaned(self, directory: Path, proven: set[int]):
+        """A run whose scene files are gone but whose deliverable holds them all."""
+        work = directory / '.work'
+        work.mkdir()
+        (work / 'scene-plan.md').write_text(self.PLAN, encoding='utf-8')
+        image = directory / 'image.txt'
+        image.write_text(''.join(self.SCENE.format(i=i) for i in (1, 2)), encoding='utf-8')
+        log = work / 'authorship.jsonl'
+        log.write_text('\n'.join(json.dumps({
+            'schema': 1, 'event': 'creative_write', 'conversation_id': 'c1',
+            'primary_conversation_id': 'c1', 'model': 'test-model',
+            'tool': 'write_to_file', 'target': str(work / f'scene-{i:03d}.md'),
+            'basename': f'scene-{i:03d}.md', 'sha256': 'x' * 64, 'size': 500,
+        }) for i in sorted(proven)) + '\n', encoding='utf-8')
+        return work, image, log
+
+    def _run(self, work, image, log):
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / 'check_run_legit.py'),
+             '--work', str(work), '--image', str(image), '--lean',
+             '--require-authorship', '--authorship-log', str(log)],
+            cwd=ROOT, capture_output=True, text=True, check=False)
+
+    def test_a_cleaned_run_is_not_called_bypass(self):
+        """The 2026-08-13 shape: cleanup on gdrive took minutes and the gate fired.
+
+        It failed twice over — first the count against the plan, then the absent
+        scene artifacts — and the model was told to rebuild deleted files.
+        """
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            work, image, log = self._cleaned(Path(temp_dir), proven={1, 2})
+
+            result = self._run(work, image, log)
+
+        self.assertEqual(0, result.returncode, result.stdout)
+
+    def test_a_cleaned_run_still_needs_provenance_for_every_scene(self):
+        """Falling back to the log must not become a way to skip the expander."""
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            work, image, log = self._cleaned(Path(temp_dir), proven={1})
+
+            result = self._run(work, image, log)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn('scene-002.md', result.stdout)
+
+
+class ContentSafetyNegationTests(unittest.TestCase):
+    """A Negative: list is an avoid-list, whatever words it contains."""
+
+    def test_a_bare_negative_list_is_not_a_gore_hit(self):
+        """One run listed "morbid, mutilated, disfigured" with no per-item "no".
+
+        All 156 of its scenes were reported as GORE (observed 2026-08-13).
+        """
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            image = Path(temp_dir) / 'image.txt'
+            image.write_text(
+                '--- SCENE 001 ---\nSubject: Lan\nSetting: a courtyard\n'
+                'Action: she walks\nStyle: painted\n'
+                'Negative: blurry, bad anatomy, ugly, morbid, mutilated, disfigured\n',
+                encoding='utf-8')
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / 'check_content_safety.py'),
+                 '--output', str(image),
+                 '--blocklist', str(ROOT / 'references/blocklist-content-safety.md')],
+                cwd=ROOT, capture_output=True, text=True, check=False)
+
+        self.assertNotIn('GORE', result.stdout)
+        self.assertIn('content-safe', result.stdout)
+
+
 class CrossCliContractTests(unittest.TestCase):
     def test_command_and_adapters_lock_parent_only_image_default(self):
         command = (ROOT / 'commands' / 'visual-prompt.toml').read_text(encoding='utf-8')
