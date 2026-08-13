@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1893,6 +1894,39 @@ class QaRetentionTests(unittest.TestCase):
 
             self.assertEqual(5, summary['chapter_count'])
             self.assertEqual([], summary['warnings'])
+
+
+class ManifestTests(unittest.TestCase):
+    """agy reads SKILL.md as YAML front matter; a broken one un-registers the skill."""
+
+    def _front_matter(self, path: Path) -> str:
+        match = re.match(r'^---\n(.*?)\n---\n', path.read_text(encoding='utf-8'), re.S)
+        self.assertIsNotNone(match, f'{path.name} has no front matter')
+        return match.group(1)
+
+    def test_skill_front_matter_parses(self):
+        """A ": " inside the unquoted description reads as a nested mapping.
+
+        One release described "a bare Negative: list" and the slash command
+        vanished from the CLI — the extension could not be loaded at all
+        (observed 2026-08-13).
+        """
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(self._front_matter(ROOT / 'SKILL.md'))
+
+        self.assertEqual('visual-prompt', data['name'])
+        self.assertEqual('SKILL.md', data['contextFileName'])
+        self.assertTrue(data['description'])
+
+    def test_the_two_manifests_agree_on_the_version(self):
+        """Agy reads the json, the skill loader reads the md; a drift ships twice."""
+        import yaml  # type: ignore
+
+        skill = yaml.safe_load(self._front_matter(ROOT / 'SKILL.md'))
+        extension = json.loads((ROOT / 'gemini-extension.json').read_text(encoding='utf-8'))
+
+        self.assertEqual(str(skill['version']), extension['version'])
 
 
 class CloudReadRetryTests(unittest.TestCase):
