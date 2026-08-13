@@ -2035,6 +2035,14 @@ class StyleCatalogTests(unittest.TestCase):
         self.assertEqual(1, len(errors))
         self.assertIn('style-catalog.md', errors[0])
 
+    def test_an_unreadable_catalog_is_reported_not_ignored(self):
+        """A check that steps aside on missing input is a check that is not there."""
+        errors = self.legit._style_errors(
+            self._scene('anything at all'), ROOT / 'references' / 'no-such-catalog.md')
+
+        self.assertEqual(1, len(errors))
+        self.assertIn('không đọc được', errors[0])
+
     def test_the_bare_style_id_is_caught(self):
         """One run wrote the id where the block belongs; every gate still passed."""
         errors = self.legit._style_errors(

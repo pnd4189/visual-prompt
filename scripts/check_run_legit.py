@@ -145,7 +145,10 @@ def _style_errors(text, catalog_path):
         return []
     known = set(catalog_style_blocks(catalog_path).values())
     if not known:
-        return []
+        # Written to skip when the catalog could not be read — which is the exact
+        # shape that let a whole run through this morning: a check that steps
+        # aside on missing input is a check that is not there. Say so instead.
+        return [f'không đọc được {catalog_path} nên không thể kiểm Style block']
     stray = sorted(s for s in styles if s not in known)
     return [
         f'Style block không khớp references/style-catalog.md: "{value[:70]}…" '
