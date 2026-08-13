@@ -603,6 +603,10 @@ class StopGateTests(unittest.TestCase):
         # to grade a run that never produced them.
         (work / 'chapters_qa.json').write_text('[]', encoding='utf-8')
         (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
+        (work / 'continuity-check.md').write_text('status: PASS\n', encoding='utf-8')
+        (work / 'bible.hash').write_text('0123456789ab\n', encoding='utf-8')
+        (work / 'style.hash').write_text('0123456789ab\n', encoding='utf-8')
+        (work / 'scene-counts.json').write_text('{"images": 1}', encoding='utf-8')
         scene = work / 'scene-001.md'
         scene.write_text('scene body', encoding='utf-8')
         env = {'VP_GUARD_ACTIVE': '1', 'VP_GUARD_STATE': str(root / 'guard.json'),
@@ -651,6 +655,28 @@ class StopGateTests(unittest.TestCase):
                 self.assertEqual('continue', held['decision'])
                 self.assertIn(absent, held['reason'])
                 self.assertIn('STEP 1', held['reason'])
+
+    def test_the_quieter_steps_are_receipts_too(self):
+        """Across three runs only the one that was told to go back produced these.
+
+        Skipping them costs the cross-file continuity audit outright and leaves the
+        scene cache_key uncomputable, so runs invented one (observed 2026-08-13).
+        """
+        for absent in ('continuity-check.md', 'bible.hash', 'style.hash',
+                       'scene-counts.json'):
+            with self.subTest(missing=absent), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                payload, env = self._authored_run(root)
+                (root / '.work' / absent).unlink()
+                (root / 'novel_image_prompts.txt').write_text(
+                    self.IMAGE_PROMPT, encoding='utf-8')
+
+                held = run_guard('stop', payload, env)
+
+                self.assertEqual('continue', held['decision'])
+                self.assertIn(absent, held['reason'])
+                # not a start-over: the scenes are fine, the paperwork is not
+                self.assertNotIn('STEP 1', held['reason'])
 
     def _stop_without_pipeline_artifacts(self, root: Path, worker: bool) -> dict:
         payload, env = self._authored_run(root)

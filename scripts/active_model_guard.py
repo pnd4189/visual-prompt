@@ -393,7 +393,15 @@ def _post_tool(payload: dict) -> dict:
 # is the QA'd source every scene anchor is checked against; plan.hash is written
 # by the plan gate itself, so its absence means that gate never ran. Neither is
 # removed by cleanup_work, so both survive to the end of a healthy run.
-REQUIRED_PIPELINE_ARTIFACTS = ('chapters_qa.json', 'plan.hash')
+# Two artifacts were enough to prove a run had a source and a checked plan, and
+# everything else became optional in practice: across three runs only the one that
+# was told to go back produced them. Skipping them costs the cross-file continuity
+# audit entirely, and leaves the scene cache_key uncomputable — so runs invented
+# it, one emitting md5 of the scene number (observed 2026-08-13). scene-count.hash
+# is deliberately absent from this list: nothing in the skill writes or reads it,
+# so requiring it would hold every run forever.
+REQUIRED_PIPELINE_ARTIFACTS = ('chapters_qa.json', 'plan.hash', 'continuity-check.md',
+                               'bible.hash', 'style.hash', 'scene-counts.json')
 
 
 def _missing_pipeline_artifacts(work: Path) -> list[str]:
@@ -427,11 +435,19 @@ def _gate_failure(work: Path, log: Path, lean: bool = False,
     # A Pass-2 worker is different: it is meant to skip STEP 1-5.
     missing = [] if worker else _missing_pipeline_artifacts(work)
     if missing:
+        detail = (
+            'chapters_qa.json is the source scene anchors are checked against, and '
+            'plan.hash is written by the plan gate, so a run without them was never '
+            'validated at all. Start again from STEP 1; do not assemble on top of '
+            'this.'
+            if {'chapters_qa.json', 'plan.hash'} & set(missing) else
+            'continuity-check.md is the cross-file audit, bible.hash and style.hash '
+            'feed the scene cache_key, and scene-counts.json is the count the plan '
+            'is measured against. Run those steps and write their artifacts — the '
+            'scenes themselves are fine, this is the paperwork they were graded on.'
+        )
         return ('the run skipped the steps that ground it — .work has no '
-                f'{" and no ".join(missing)}. chapters_qa.json is the only source '
-                'scene anchors are ever checked against, and plan.hash is written '
-                'by the plan gate, so a run without them was never validated at '
-                'all. Start again from STEP 1; do not assemble on top of this.')
+                f'{" and no ".join(missing)}. {detail}')
     helpers = SKILL_ROOT / 'scripts'
     gates = []
     # cleanup_work.py removes the scene files only after they are merged, and the
