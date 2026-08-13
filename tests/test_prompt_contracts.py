@@ -1895,6 +1895,43 @@ class QaRetentionTests(unittest.TestCase):
             self.assertEqual([], summary['warnings'])
 
 
+class CloudReadRetryTests(unittest.TestCase):
+    """A latency spike on a Drive mount is not a hung file."""
+
+    def _read(self, returncodes):
+        import _io_utils  # type: ignore  # noqa: E402
+        calls = []
+
+        class _Result:
+            def __init__(self, code):
+                self.returncode, self.stdout, self.stderr = code, b'noi dung', b''
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return _Result(returncodes[min(len(calls) - 1, len(returncodes) - 1)])
+
+        with unittest.mock.patch.object(_io_utils, '_is_cloud_mount_path', lambda p: True), \
+             unittest.mock.patch.object(_io_utils.shutil, 'which', lambda name: '/bin/' + name), \
+             unittest.mock.patch.object(_io_utils.subprocess, 'run', fake_run):
+            try:
+                return _io_utils.read_text_checked(Path('/x/f.md')), len(calls)
+            except RuntimeError as exc:
+                return exc, len(calls)
+
+    def test_one_slow_read_is_retried_instead_of_failing_the_step(self):
+        text, calls = self._read([124, 0])
+
+        self.assertEqual('noi dung', text)
+        self.assertEqual(2, calls)
+
+    def test_a_file_that_never_answers_still_fails(self):
+        error, calls = self._read([124])
+
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(3, calls)
+        self.assertIn('3 attempts', str(error))
+
+
 class QaTranslationGateTests(unittest.TestCase):
     """Leftover Chinese in the prose is the one defect no later gate reads."""
 

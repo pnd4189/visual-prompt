@@ -24,22 +24,36 @@ def _fsync_if_safe(file_obj, path: Path) -> None:
         os.fsync(file_obj.fileno())
 
 
+# A cold read on a Drive mount costs a network round-trip — measured at 0.5-0.9s
+# for the files this pipeline handles, against 0.001s once the mount has them
+# cached. The timeout is there for a genuinely hung stale file, but a single
+# latency spike past it used to kill the whole step: one re-assemble died on a
+# chapter that read back in 0.52s a minute later (observed 2026-08-13). Retrying
+# tells a spike apart from a hang without giving up the fast failure.
+_CLOUD_READ_ATTEMPTS = 3
+
+
 def read_text_checked(path: Path, *, timeout_seconds: int = 3) -> str:
     """Read UTF-8 text, failing fast on cloud mounts that hang on stale files."""
     path = Path(path)
     if not _is_cloud_mount_path(path):
         return path.read_text(encoding='utf-8')
     if shutil.which('timeout') and shutil.which('cat'):
-        result = subprocess.run(
-            ['timeout', f'{timeout_seconds}s', 'cat', str(path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        for attempt in range(1, _CLOUD_READ_ATTEMPTS + 1):
+            result = subprocess.run(
+                ['timeout', f'{timeout_seconds}s', 'cat', str(path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if result.returncode != 124 or attempt == _CLOUD_READ_ATTEMPTS:
+                break
         if result.returncode == 0:
             return result.stdout.decode('utf-8')
         if result.returncode == 124:
-            raise RuntimeError(f"Timed out reading {path} after {timeout_seconds}s")
+            raise RuntimeError(
+                f"Timed out reading {path} after {_CLOUD_READ_ATTEMPTS} attempts "
+                f"of {timeout_seconds}s")
         message = result.stderr.decode('utf-8', errors='replace').strip()
         if result.returncode == 1 and 'No such file' in message:
             raise FileNotFoundError(path)
