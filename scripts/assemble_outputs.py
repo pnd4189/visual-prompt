@@ -20,6 +20,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 _SCRIPT_DIR = str(Path(__file__).parent)
@@ -144,6 +145,29 @@ def _row_detail(line: str) -> int:
     return sum(1 for cell in cells if cell not in _VAGUE_CELL)
 
 
+def _slugify_series(name: str) -> str:
+    """Vietnamese display name -> the slug its bible file is stored under."""
+    folded = unicodedata.normalize('NFD', name.replace('Đ', 'D').replace('đ', 'd'))
+    ascii_only = ''.join(c for c in folded if unicodedata.category(c) != 'Mn')
+    return re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', ascii_only.lower())).strip('-')
+
+
+def _series_bible_path(series: str) -> Path:
+    """Where this series' bible lives.
+
+    The local bible's heading is a display name — "Bình Thiên Sách (Vô Tội)" —
+    while the file it belongs to is the slug. Deriving the path from the heading
+    alone created a second bible beside the real one and split the series' memory
+    in half, silently (observed 2026-08-14). One series happened to escape it by
+    having a heading that was already its slug.
+    """
+    root = Path.home() / '.gemini' / 'bibles'
+    verbatim = root / f'{series}.md'
+    if verbatim.is_file():
+        return verbatim
+    return root / f'{_slugify_series(series)}.md'
+
+
 def sync_series_bible(work_dir: Path) -> dict:
     """Carry this run's character rows back into ~/.gemini/bibles/<series>.md.
 
@@ -162,7 +186,7 @@ def sync_series_bible(work_dir: Path) -> dict:
     if not series_match:
         return {}
     series = series_match.group(1).strip()
-    target = Path.home() / '.gemini' / 'bibles' / f'{series}.md'
+    target = _series_bible_path(series)
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(target, text)

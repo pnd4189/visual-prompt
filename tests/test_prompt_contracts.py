@@ -2087,6 +2087,27 @@ class SeriesBibleSyncTests(unittest.TestCase):
         with unittest.mock.patch.object(Path, 'home', staticmethod(lambda: home)):
             return assemble_outputs.sync_series_bible(work), target
 
+    def test_a_display_name_heading_resolves_to_its_slug_file(self):
+        """The heading is a display name; the file it belongs to is the slug.
+
+        Deriving the path from the heading alone would have created a second
+        bible beside the real one and split the series' memory (2026-08-14).
+        """
+        self.assertEqual('binh-thien-sach-vo-toi',
+                         assemble_outputs._slugify_series('Bình Thiên Sách (Vô Tội)'))
+        self.assertEqual('dao-si-quen',
+                         assemble_outputs._slugify_series('Đạo Sĩ Quèn'))
+
+    def test_a_heading_that_is_already_a_slug_keeps_its_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            existing = home / '.gemini' / 'bibles' / 'dao-si.md'
+            existing.parent.mkdir(parents=True)
+            existing.write_text('# Character Bible — dao-si\n', encoding='utf-8')
+
+            with unittest.mock.patch.object(Path, 'home', staticmethod(lambda: home)):
+                self.assertEqual(existing, assemble_outputs._series_bible_path('dao-si'))
+
     def test_a_new_character_is_carried_back(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / 'home'
