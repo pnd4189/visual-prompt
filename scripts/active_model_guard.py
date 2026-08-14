@@ -420,6 +420,57 @@ def _missing_pipeline_artifacts(work: Path) -> list[str]:
     return [name for name in REQUIRED_PIPELINE_ARTIFACTS if name not in listing]
 
 
+def _digest12(path: Path) -> str | None:
+    """The 12-hex digest convention plan.hash already uses, or None if unreadable."""
+    try:
+        return hashlib.sha1(path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return None
+
+
+def _receipt_mismatches(work: Path) -> list[str]:
+    """Receipts whose content contradicts the artifact they claim to describe.
+
+    Requiring the files only bought their existence, and the model writes them:
+    one run answered the hold with bible.hash "9a8e7d6c5b4a" and style.hash
+    "5e4d3c2b1a0f" — descending hex, no digest behind either — and a
+    scene-counts.json whose wordcount was the pre-QA total (observed 2026-08-14).
+    A receipt nobody checks is a receipt anyone can write.
+    """
+    problems = []
+    for name, source in (('bible.hash', 'character-bible.md'),
+                         ('style.hash', 'active-style.md')):
+        recorded = work / name
+        if not recorded.is_file():
+            continue
+        origin = work / source
+        if not origin.is_file():
+            problems.append(f'{name} has no {source} behind it')
+            continue
+        want = _digest12(origin)
+        try:
+            got = recorded.read_text(encoding='utf-8').strip()
+        except (OSError, UnicodeError):
+            continue
+        if want and got != want:
+            problems.append(f'{name} says {got or "nothing"} but {source} hashes to {want}')
+
+    counts, chapters = work / 'scene-counts.json', work / 'chapters_qa.json'
+    if counts.is_file() and chapters.is_file():
+        try:
+            declared = json.loads(counts.read_text(encoding='utf-8'))
+            rows = json.loads(chapters.read_text(encoding='utf-8'))
+            actual = sum(len(str(row.get('text', '')).split()) for row in rows)
+        except (OSError, UnicodeError, ValueError, AttributeError, TypeError):
+            return problems
+        stated = declared.get('wordcount') if isinstance(declared, dict) else None
+        if isinstance(stated, int) and stated != actual:
+            problems.append(
+                f'scene-counts.json wordcount {stated} is not the proofread text '
+                f'({actual} words) — run calc_scene_count.py on the QA output')
+    return problems
+
+
 def _gate_failure(work: Path, log: Path, lean: bool = False,
                   worker: bool = False) -> str | None:
     """Run the closing canonical gates; return the first failure text, or None."""
@@ -448,6 +499,13 @@ def _gate_failure(work: Path, log: Path, lean: bool = False,
         )
         return ('the run skipped the steps that ground it — .work has no '
                 f'{" and no ".join(missing)}. {detail}')
+    wrong = _receipt_mismatches(work)
+    if wrong:
+        return ('the receipts do not match what they describe — '
+                + '; '.join(wrong) + '. Recompute them from the files themselves; '
+                'a hash typed by hand proves nothing and the scene cache_key is '
+                'built out of these.')
+
     helpers = SKILL_ROOT / 'scripts'
     gates = []
     # cleanup_work.py removes the scene files only after they are merged, and the

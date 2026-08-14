@@ -604,8 +604,12 @@ class StopGateTests(unittest.TestCase):
         (work / 'chapters_qa.json').write_text('[]', encoding='utf-8')
         (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
         (work / 'continuity-check.md').write_text('status: PASS\n', encoding='utf-8')
-        (work / 'bible.hash').write_text('0123456789ab\n', encoding='utf-8')
-        (work / 'style.hash').write_text('0123456789ab\n', encoding='utf-8')
+        (work / 'character-bible.md').write_text('| Lan | 25 |\n', encoding='utf-8')
+        (work / 'active-style.md').write_text('style block\n', encoding='utf-8')
+        for name, source in (('bible.hash', 'character-bible.md'),
+                             ('style.hash', 'active-style.md')):
+            digest = hashlib.sha1((work / source).read_bytes()).hexdigest()[:12]
+            (work / name).write_text(digest + '\n', encoding='utf-8')
         (work / 'scene-counts.json').write_text('{"images": 1}', encoding='utf-8')
         scene = work / 'scene-001.md'
         scene.write_text('scene body', encoding='utf-8')
@@ -655,6 +659,41 @@ class StopGateTests(unittest.TestCase):
                 self.assertEqual('continue', held['decision'])
                 self.assertIn(absent, held['reason'])
                 self.assertIn('STEP 1', held['reason'])
+
+    def test_a_hash_typed_by_hand_is_caught(self):
+        """Observed 2026-08-14: bible.hash "9a8e7d6c5b4a", style.hash "5e4d3c2b1a0f".
+
+        Descending hex, no digest behind either — the hold had asked for the files
+        and the files were what it got.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            (root / '.work' / 'bible.hash').write_text('9a8e7d6c5b4a\n', encoding='utf-8')
+            (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+
+            held = run_guard('stop', payload, env)
+
+        self.assertEqual('continue', held['decision'])
+        self.assertIn('bible.hash says 9a8e7d6c5b4a', held['reason'])
+
+    def test_a_wordcount_from_the_wrong_text_is_caught(self):
+        """The same run declared the pre-QA total, 18 words off the proofread one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            work = root / '.work'
+            work.joinpath('chapters_qa.json').write_text(json.dumps(
+                [{'id': 1, 'text': 'mot hai ba bon nam'}], ensure_ascii=False),
+                encoding='utf-8')
+            work.joinpath('scene-counts.json').write_text(
+                '{"images": 1, "wordcount": 99}', encoding='utf-8')
+            (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+
+            held = run_guard('stop', payload, env)
+
+        self.assertEqual('continue', held['decision'])
+        self.assertIn('wordcount 99 is not the proofread text', held['reason'])
 
     def test_the_quieter_steps_are_receipts_too(self):
         """Across three runs only the one that was told to go back produced these.

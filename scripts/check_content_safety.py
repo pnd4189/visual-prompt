@@ -113,6 +113,25 @@ def _clean_artifacts(text: str) -> str:
     return text
 
 
+# A hyphen is not a word character, so a blocked token matches inside a compound:
+# "self-mutilated" hits on "mutilated". Detection is right to flag it — the phrase
+# is gore either way — but replacing only the matched half left
+# "gruesome self-no graphic blood enemy corpses" in a shipped file (observed
+# 2026-08-14). The whole compound goes, or the sentence comes out broken.
+_COMPOUND_EDGE_RE = re.compile(r'[\w]+(?:-[\w]+)*')
+
+
+def _compound_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Widen a match to the hyphenated word it sits inside, if any."""
+    left = start
+    while left > 0 and (text[left - 1].isalnum() or text[left - 1] == '-'):
+        left -= 1
+    right = end
+    while right < len(text) and (text[right].isalnum() or text[right] == '-'):
+        right += 1
+    return left, right
+
+
 def fix_text(text: str, rules: dict[str, list[re.Pattern]]) -> tuple[str, int]:
     """Apply per-section replacements; return (new_text, count). WARN-only
     sections (religion) are left untouched."""
@@ -129,7 +148,21 @@ def fix_text(text: str, rules: dict[str, list[re.Pattern]]) -> tuple[str, int]:
                     return m.group(0)  # prohibiting context — leave intact
                 fixed += 1
                 return repl
-            text = pat.sub(sub, text)
+
+            def replace_all(source: str) -> str:
+                out, cursor = [], 0
+                for m in pat.finditer(source):
+                    if m.start() < cursor:
+                        continue
+                    left, right = _compound_span(source, m.start(), m.end())
+                    out.append(source[cursor:left])
+                    out.append(sub(m) if (left, right) == (m.start(), m.end())
+                               else (repl if sub(m) != m.group(0) else source[left:right]))
+                    cursor = right
+                out.append(source[cursor:])
+                return ''.join(out)
+
+            text = replace_all(text)
     return _clean_artifacts(text), fixed
 
 
