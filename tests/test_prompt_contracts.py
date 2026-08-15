@@ -1848,7 +1848,9 @@ class QaRetentionTests(unittest.TestCase):
     def _per_chapter(tmp: str, edit) -> tuple[Path, Path]:
         """5 chapters of 10 paragraphs; `edit(chapter_id, paragraphs)` shapes each QA body."""
         root = Path(tmp)
-        paras = [' '.join(f'tu{i}w{j}' for j in range(40)) for i in range(10)]
+        # 30 paragraphs so dropping the last one still clears the 95% chapter
+        # floor — this fixture is about the ending check, not the length one
+        paras = [' '.join(f'tu{i}w{j}' for j in range(40)) for i in range(30)]
         body = '\n\n'.join(paras)
         source = root / 'novel.txt'
         source.write_text('\n\n'.join(
@@ -1873,7 +1875,7 @@ class QaRetentionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 assemble_qa.assemble(source, work)
 
-            self.assertIn('3 kept 200/400 words', str(caught.exception))
+            self.assertIn('3 kept 200/1200 words', str(caught.exception))
             self.assertFalse((work / 'chapters_qa.json').exists())
 
     def test_a_chapter_that_stops_early_is_caught_while_still_long_enough(self):
@@ -2138,6 +2140,49 @@ class SeriesBibleSyncTests(unittest.TestCase):
 
             self.assertEqual({'series': 'testseries', 'added': 0, 'upgraded': 0}, result)
             self.assertIn('| Lan | 25 | slender |', target.read_text(encoding='utf-8'))
+
+
+class QaCompressionTests(unittest.TestCase):
+    """Proofreading smooths a sentence; it does not cut a third out of one."""
+
+    LONG = ('Thì ra Yêu giới đã xảy ra bạo loạn lớn đến thế và ' + 'chữ ' * 60).strip()
+    FILLER = 'câu nền ' * 700  # long enough that one cut paragraph stays above 95%
+
+    def _run(self, tmp: str, qa_paragraph: str):
+        root = Path(tmp)
+        source = f'{self.LONG}\n\n{self.FILLER}'
+        (root / 'novel.txt').write_text(f'Chương 1\n{source}', encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': 1, 'title': 'Chương 1', 'text': source}], ensure_ascii=False),
+            encoding='utf-8')
+        (work / 'qa-chapter-001.md').write_text(
+            f'---\nid: 1\ntitle: "Chương 1"\n---\n{qa_paragraph}\n\n{self.FILLER}\n',
+            encoding='utf-8')
+        return root / 'novel.txt', work
+
+    def test_a_paragraph_rewritten_short_is_refused(self):
+        """Observed 2026-08-15: one paragraph lost 212 of 271 words — the whole
+        comic riff — while the chapter still scored 100% because others grew."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, 'Thì ra Yêu giới đã xảy ra bạo loạn lớn đến thế.')
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('rewritten short', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_ordinary_smoothing_still_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, self.LONG.replace('đã xảy ra', 'vừa xảy ra'))
+
+            self.assertEqual(1, assemble_qa.assemble(source, work)['chapter_count'])
+
+    def test_a_short_paragraph_is_not_measured(self):
+        """Under the floor one clause is most of the paragraph; the ratio is noise."""
+        self.assertEqual([], assemble_qa._compressed_paragraphs('Hắn gật đầu.', 'Hắn gật.'))
 
 
 class QaGroundingTests(unittest.TestCase):

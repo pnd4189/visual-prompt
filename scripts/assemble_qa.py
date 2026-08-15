@@ -15,6 +15,7 @@ merge the title into the first sentence.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import re
 import sys
@@ -92,7 +93,19 @@ MIN_QA_WORD_RETENTION = 0.85
 # of the words overall while chapter 387 kept 54% — the second half of the chapter
 # was gone and a fabricated closing line hid the seam (observed 2026-08-12). Length
 # is therefore checked per chapter against chapters.json as well.
-MIN_QA_CHAPTER_WORD_RETENTION = 0.85
+# Raised from 0.85 once four runs had been measured: healthy chapters land at
+# 98.3-100%, while the one that rewrote its prose came in at 91.5% and 87.5% and
+# sailed through (observed 2026-08-15). 0.95 keeps three points of headroom under
+# the tightest healthy chapter on record.
+MIN_QA_CHAPTER_WORD_RETENTION = 0.95
+
+# Aggregate retention cannot see a paragraph being rewritten short: one chapter
+# scored a perfect 100% while a single paragraph lost 212 of its 271 words — the
+# whole comic riff in it — because other paragraphs had grown. Proofreading
+# smooths a sentence; it does not cut a third of one. Paragraphs under this many
+# words are skipped, where one clause is a large share of the total.
+MIN_QA_PARAGRAPH_RETENTION = 0.70
+PARAGRAPH_MEASURE_FLOOR = 12
 
 # A chapter can also stop a few paragraphs early without losing enough words to
 # trip either ratio: chapter 383 kept 96% of its words yet dropped the closing
@@ -145,6 +158,23 @@ def _source_chapters(work_dir: Path) -> dict[int, str]:
         return {}
     return {int(row['id']): row.get('text', '')
             for row in rows if isinstance(row, dict) and 'id' in row}
+
+
+def _compressed_paragraphs(source_text: str, qa_text: str) -> list[tuple[int, int]]:
+    """(source words, qa words) for paragraphs the proofread cut short."""
+    src, qa = _paragraphs(source_text), _paragraphs(qa_text)
+    matcher = difflib.SequenceMatcher(None, [p[:35] for p in src], [p[:35] for p in qa])
+    shrunk = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != 'equal':
+            continue
+        for before, after in zip(src[i1:i2], qa[j1:j2]):
+            source_words, qa_words = _word_count(before), _word_count(after)
+            if source_words < PARAGRAPH_MEASURE_FLOOR:
+                continue
+            if qa_words < source_words * MIN_QA_PARAGRAPH_RETENTION:
+                shrunk.append((source_words, qa_words))
+    return shrunk
 
 
 def _ending_coverage(source_text: str, qa_text: str) -> float:
@@ -233,7 +263,7 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
             f'The QA step must work through .work/chapters.json, not from memory.'
         )
     if source_texts:
-        gutted, truncated = [], []
+        gutted, truncated, compressed = [], [], []
         for chapter in chapters:
             source_text = source_texts.get(chapter['id'])
             if source_text is None:
@@ -243,15 +273,24 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
                 gutted.append(f"{chapter['id']} kept {kept}/{src_words} words")
             elif _ending_coverage(source_text, chapter['text']) < MIN_QA_ENDING_COVERAGE:
                 truncated.append(str(chapter['id']))
-        if gutted or truncated:
+            else:
+                shrunk = _compressed_paragraphs(source_text, chapter['text'])
+                if shrunk:
+                    worst = min(shrunk, key=lambda pair: pair[1] / pair[0])
+                    compressed.append(
+                        f"{chapter['id']}: {len(shrunk)} paragraph(s), worst "
+                        f"{worst[1]}/{worst[0]} words")
+        if gutted or truncated or compressed:
             detail = '; '.join(
                 part for part in (
                     f"short chapters: {', '.join(gutted)}" if gutted else '',
                     f"chapters missing their ending: {', '.join(truncated)}" if truncated else '',
+                    f"paragraphs rewritten short: {'; '.join(compressed)}" if compressed else '',
                 ) if part
             )
             raise RuntimeError(
-                f'QA dropped text inside {len(gutted) + len(truncated)} chapter(s) '
+                f'QA dropped text inside '
+                f'{len(gutted) + len(truncated) + len(compressed)} chapter(s) '
                 f'({detail}). Proofreading does not shorten the story. Re-run the QA '
                 f'loop for those chapters before assembling.'
             )
