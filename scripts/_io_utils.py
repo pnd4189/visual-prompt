@@ -46,8 +46,9 @@ def read_text_checked(path: Path, *, timeout_seconds: int = 3) -> str:
                 stderr=subprocess.PIPE,
                 check=False,
             )
-            if result.returncode != 124 or attempt == _CLOUD_READ_ATTEMPTS:
+            if result.returncode == 0 or attempt == _CLOUD_READ_ATTEMPTS:
                 break
+            time.sleep(0.5)
         if result.returncode == 0:
             return result.stdout.decode('utf-8')
         if result.returncode == 124:
