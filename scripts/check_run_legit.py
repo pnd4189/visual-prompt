@@ -549,9 +549,9 @@ def main():
                 body = text[m.end():end]
                 present = 0
                 for h in _IMG_HDRS:
-                    # plain `Header:` or bold `**Header:**` at line start
+                    # plain `Header:`, bold `**Header:**`, or bold `**Header**:` at line start
                     if re.search(r'^' + re.escape(h) + r'\s*:', body, re.M) or \
-                       re.search(r'^\*\*' + re.escape(h) + r'\s*:\*\*', body, re.M):
+                       re.search(r'^\*\*' + re.escape(h) + r'(?:\*\*\s*:|:\*\*)', body, re.M):
                         present += 1
                 if present < _MIN_HDRS:
                     shallow += 1
