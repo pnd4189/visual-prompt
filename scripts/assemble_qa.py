@@ -130,6 +130,93 @@ _SOFTENED_SLANG_RE = re.compile(r'(?<!\w)[Đđ](?:éo|ách)(?!\w)')
 # on the retention gate above, so that one cannot catch it either.
 _CJK_RE = re.compile(r'[\u4e00-\u9fff]')
 
+# These chapters become YouTube audio, and check_content_safety.py only ever
+# reads the scene prompts \u2014 nothing looked at the prose itself. Chapter 37 of
+# \u0110\u1ea1o S\u0129 named a child sex offence in a victim's own dialogue and passed every
+# gate (observed 2026-08-24). Naming a sexual act alongside a minor is the one
+# policy breach that deletes a channel outright, with no strike and no appeal,
+# so it is refused rather than warned about.
+#
+# Both halves must land in the SAME sentence: these novels are full of children
+# in ordinary scenes and of adult swearing, and either alone is fine. Requiring
+# the pair keeps the gate quiet on both.
+_MINOR_RE = re.compile(
+    r'(?:tr\u1ebb em|tr\u1ebb nh\u1ecf|tr\u1ebb con|tr\u1ebb g\u00e1i|tr\u1ebb ranh|v\u1ecb th\u00e0nh ni\u00ean|b\u00e9 g\u00e1i|b\u00e9 trai'
+    r'|em b\u00e9|\u0111\u1ee9a tr\u1ebb|\u0111\u1ee9a b\u00e9|nh\u1ecf tu\u1ed5i|h\u1ecdc sinh|thi\u1ebfu n\u1eef|thi\u1ebfu ni\u00ean|t\u1ee5i con'
+    r'|th\u1eb1ng nh\u1ecf|con nh\u1ecf|t\u1ee5i nh\u1ecf|b\u1ecdn nh\u1ecf|tr\u1ebb v\u1ecb th\u00e0nh ni\u00ean|ch\u01b0a th\u00e0nh ni\u00ean)',
+    re.IGNORECASE)
+_SEXUAL_RE = re.compile(
+    r'(?:giao c\u1ea5u|b\u00e1n d\u00e2m|m\u1ea1i d\u00e2m|d\u00e2m \u0111\u00e3ng|d\u00e2m d\u1eadt|d\u00e2m t\u1eb7c|b\u1ea1o d\u00e2m'
+    r'|khi\u00eau d\u00e2m|d\u00e2m \u00f4|l\u00e0m \u0111i\u1ebfm|\u0111i\u1ebfm|g\u00e1i g\u1ecdi|hi\u1ebfp d\u00e2m|c\u01b0\u1ee1ng hi\u1ebfp|x\u00e2m h\u1ea1i t\u00ecnh d\u1ee5c'
+    r'|x\u00e2m h\u1ea1i|s\u00e0m s\u1ee1|quan h\u1ec7 t\u00ecnh d\u1ee5c|l\u00e0m t\u00ecnh|th\u1ee7 d\u00e2m|lo\u1ea1n lu\u00e2n|18\+|sex'
+    # Abuse and trafficking of a child fall under the same policy, and the
+    # register these novels use for ordinary violence ("ch\u00e9m", "\u0111\u00e1nh", "gi\u1ebft")
+    # is nowhere near these words \u2014 none of the fifteen chapters measured on
+    # 2026-08-24 paired one with a child.
+    r'|tra t\u1ea5n|h\u00e0nh h\u1ea1|b\u1ea1o h\u00e0nh|ng\u01b0\u1ee3c \u0111\u00e3i|\u0111\u00e1nh \u0111\u1eadp|b\u00f3c l\u1ed9t|bu\u00f4n ng\u01b0\u1eddi|bu\u00f4n b\u00e1n'
+    r'|d\u1ee5 d\u1ed7|x\u00e2m ph\u1ea1m)',
+    re.IGNORECASE)
+# A few terms are about a minor on their own \u2014 no second word needed.
+_CSAE_STANDALONE_RE = re.compile(
+    r'(?:\u1ea5u d\u00e2m|khi\u00eau d\u00e2m tr\u1ebb em|m\u1ea1i d\u00e2m tr\u1ebb em|t\u00ecnh d\u1ee5c tr\u1ebb em)', re.IGNORECASE)
+# Sentence split is deliberately coarse; a newline ends a sentence too, so a
+# minor named in one paragraph cannot pair with a word in the next.
+_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?\u2026:;])\s+|\n+')
+
+# One run turned "combat" into "chi\u1ebfn \u0111\u1ea5u", "c\u1edbm" into "c\u00f4ng an", "phake" into
+# "nh\u00e1i" and "toang" into "nguy hi\u1ec3m" across three chapters \u2014 every substitution
+# one word for one word, so the retention ratios above all read 100% and waved
+# it through (observed 2026-08-24). These are the markers of the register these
+# novels are read for: internet slang, loanwords and playful coinages, and a
+# comic novel rewritten in a serious register is a worse translation, not a
+# tidier one.
+#
+# Reported, never refused (decided 2026-08-24): the list below is fixed while
+# every novel coins its own slang, so a hard block would fail whole runs over a
+# word this list happens to know \u2014 and worse, it would push the model to leave a
+# clumsy machine-translated sentence alone rather than risk rewriting a marker
+# out of it. The prompt asks for the register; this counts what actually
+# survived so a sweep is visible. Counted per chapter against the source,
+# because a word the author never used cannot go missing.
+_VOICE_MARKERS = (
+    'combat', 'skill', 'check', 'phake', 'auth', 'plot', 'idol', 'cmnr', 'cmn',
+    'cmnl', 'toang', 'c\u1edbm', 'o\u00e1nh', 't\u1ea9n', 'ph\u1ed1t', 'h\u00f3ng', 'ch\u00e9m gi\u00f3', 'r\u00e9n',
+    'x\u1ecbn s\u00f2', 'c\u00f9i b\u1eafp', 'b\u00e1 \u0111\u1ea1o', 'qu\u1ea9y', 'tr\u1ea9u', 'gato', 's\u1eedu nhi', 'k\u00e8o',
+    'tr\u00e0 xanh', 'flex', 'nghi\u1ec7n', 'quay xe', 'b\u00f3c ph\u1ed1t', 'h\u1ea1t g\u1ea1o', 'v\u00e3i',
+)
+# A few markers are also ordinary words in a wuxia register, so they carry the
+# word that must NOT follow: "phốt pho" is the element, "phốt" alone is gossip.
+_VOICE_MARKER_EXCLUSIONS = {'phốt': ('pho',), 'kèo': ('nèo',)}
+_VOICE_MARKER_RES = tuple(
+    (marker, re.compile(
+        rf'(?<!\w){re.escape(marker)}(?!\w)'
+        + (rf'(?!\s+(?:{"|".join(_VOICE_MARKER_EXCLUSIONS[marker])})(?!\w))'
+           if marker in _VOICE_MARKER_EXCLUSIONS else ''),
+        re.IGNORECASE))
+    for marker in _VOICE_MARKERS)
+# One or two may legitimately dissolve when a clumsy machine-translated sentence
+# is rewritten whole. Three or more gone from one chapter reads as a sweep and
+# is worth a look, which is all this number decides — nothing is refused over it.
+MAX_VOICE_MARKERS_LOST = 2
+
+# Quiet self-censorship is invisible to every ratio above: blurring a child sex
+# offence out of chapter 37 cost 35 words of 16,545, so the chapter scored 99.8%
+# and passed (observed 2026-08-24). It reads as a kindness and sometimes is the
+# right call — but the QA step is not the place to decide it silently, because
+# nobody downstream can tell a softened line from a faithful one. Deciding what
+# ships is the operator's call, so the deletion is surfaced instead of allowed.
+# Only flagged when the word vanishes entirely: softening one of four uses is
+# ordinary editing, dropping the last one is a decision.
+_SENSITIVE_TERMS = (
+    'giao cấu', 'bán dâm', 'mại dâm', 'ấu dâm', 'dâm đãng', 'dâm dật', 'dâm tặc',
+    'bạo dâm', 'khiêu dâm', 'làm điếm', 'điếm', 'hiếp dâm', 'cưỡng hiếp',
+    'xâm hại', 'sàm sỡ', 'loạn luân', 'thủ dâm', 'tự tử', 'tự sát', 'ma túy',
+    'heroin', 'cần sa', 'mại độc', 'chích choác',
+)
+_SENSITIVE_RES = tuple(
+    (term, re.compile(rf'(?<!\w){re.escape(term)}(?!\w)', re.IGNORECASE))
+    for term in _SENSITIVE_TERMS)
+
 
 def _soften_slang(text: str) -> tuple[str, int]:
     """House slang rule; returns the rewritten text and how many words changed."""
@@ -175,6 +262,40 @@ def _compressed_paragraphs(source_text: str, qa_text: str) -> list[tuple[int, in
             if qa_words < source_words * MIN_QA_PARAGRAPH_RETENTION:
                 shrunk.append((source_words, qa_words))
     return shrunk
+
+
+def _csae_sentences(text: str) -> list[str]:
+    """Sentences naming abuse of a minor — the CSAE red line."""
+    hits = []
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if not sentence.strip():
+            continue
+        if _CSAE_STANDALONE_RE.search(sentence) or (
+                _MINOR_RE.search(sentence) and _SEXUAL_RE.search(sentence)):
+            hits.append(' '.join(sentence.split())[:160])
+    return hits
+
+
+def _voice_markers_lost(source_text: str, qa_text: str) -> list[str]:
+    """Slang words the source used that the proofread no longer has."""
+    lost = []
+    for marker, pattern in _VOICE_MARKER_RES:
+        before = len(pattern.findall(source_text))
+        if not before:
+            continue
+        after = len(pattern.findall(qa_text))
+        if after < before:
+            lost.append(f'{marker} {before}→{after}')
+    return lost
+
+
+def _sensitive_terms_dropped(source_text: str, qa_text: str) -> list[str]:
+    """Sensitive words the source used that the proofread removed completely."""
+    dropped = []
+    for term, pattern in _SENSITIVE_RES:
+        if pattern.search(source_text) and not pattern.search(qa_text):
+            dropped.append(term)
+    return dropped
 
 
 def _ending_coverage(source_text: str, qa_text: str) -> float:
@@ -240,6 +361,20 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
             f'this text. Fix those chapters and assemble again.'
         )
 
+    flagged = [(chapter['id'], hit)
+               for chapter in chapters
+               for hit in _csae_sentences(chapter['text'])]
+    if flagged:
+        detail = '; '.join(f'{cid}: "{hit}"' for cid, hit in flagged[:4])
+        raise RuntimeError(
+            f'{len(flagged)} sentence(s) name a sexual act alongside a minor '
+            f'({detail}). YouTube deletes a channel for this with no strike and '
+            f'no appeal, and no other gate reads this prose. Keep what happens in '
+            f'the story — the victims, the crime, the consequences — but do not '
+            f'name the act: say "phạm tội" rather than the offence, "chuyện hư '
+            f'hỏng" rather than the trade. Then assemble again.'
+        )
+
     # chapters.json is the proof that STEP 1 read the file the user named. Without
     # it every measurement below compares the proofread against itself: one run
     # skipped load and continuity outright, wrote ten chapters of a different novel
@@ -280,6 +415,21 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
                     compressed.append(
                         f"{chapter['id']}: {len(shrunk)} paragraph(s), worst "
                         f"{worst[1]}/{worst[0]} words")
+            # Both of these warn rather than refuse. Softening a sensitive word
+            # is sometimes the right call for a YouTube upload, and slang moves
+            # around legitimately when a clumsy sentence is rewritten; neither is
+            # worth failing a run over. They just have to be visible.
+            lost = _voice_markers_lost(source_text, chapter['text'])
+            if len(lost) > MAX_VOICE_MARKERS_LOST:
+                warnings.append(
+                    f"chapter {chapter['id']}: slang written out — "
+                    f"{', '.join(lost[:6])}. That register is the voice; check "
+                    f"this was a rewrite, not a sweep to standard prose")
+            dropped = _sensitive_terms_dropped(source_text, chapter['text'])
+            if dropped:
+                warnings.append(
+                    f"chapter {chapter['id']}: QA removed {', '.join(dropped[:6])} "
+                    f"— check this was meant, not a silent softening")
         if gutted or truncated or compressed:
             detail = '; '.join(
                 part for part in (

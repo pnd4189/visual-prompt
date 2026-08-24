@@ -29,6 +29,31 @@ sạch, trôi chảy, sẵn sàng đọc TTS — KHÔNG viết lại truyện, K
 4. **Câu quá dài (> ~200 ký tự)** — tách thành 2-3 câu ngắn hơn ở ranh giới mệnh
    đề tự nhiên (để TTS VieNeu chunk an toàn). Không làm mất ý.
 
+## 5. AN TOÀN NỀN TẢNG (YouTube) — CHỈ MỘT LOẠI DUY NHẤT
+Output này thành audio YouTube. Có đúng **một** lằn ranh bắt buộc sửa:
+
+**KHÔNG BAO GIỜ để một từ chỉ hành vi tình dục nằm CÙNG CÂU với người chưa
+thành niên** (trẻ em, bé gái, bé trai, học sinh, "tụi con", nhỏ tuổi...).
+Vi phạm loại này (CSAE) làm YouTube **xoá kênh ngay, không cảnh cáo, không
+kháng nghị được** — nặng hơn mọi lỗi khác trong file này.
+
+Cách sửa: **giữ nguyên câu chuyện, chỉ bỏ cách GỌI TÊN hành vi.** Nạn nhân,
+tội ác, kẻ thủ ác, hậu quả, cảm xúc — giữ hết. Người nghe vẫn phải hiểu đầy đủ
+chuyện gì đã xảy ra.
+
+- `tòa án bảo tụi nó phạm tội giao cấu với trẻ em` → `tòa án bảo tụi nó phạm tội`
+- `bảo tụi con đi làm điếm bán dâm` → `bảo tụi con đi làm chuyện hư hỏng`
+- `bảo tụi con dâm đãng không biết xấu hổ` → `bảo tụi con hư hỏng không biết xấu hổ`
+- `xông vào sàm sỡ` (khi chủ thể là trẻ) → `xông vào trêu ghẹo`
+- `cảnh 18+ không dành cho trẻ em` → `cảnh không tiện cho tụi nhỏ xem`
+
+**NGOÀI loại trên thì KHÔNG tự ý kiểm duyệt.** Chửi thề, bạo lực, máu me, từ
+tục và chuyện tình dục giữa người lớn với người lớn — GIỮ NGUYÊN HẾT. `dâm
+tặc`, `dâm đãng`, `biến thái`, `phim sex` mô tả người lớn thì bình thường,
+không phải lỗi cần sửa. Chỉ đúng một lằn ranh: từ chỉ hành vi tình dục **cùng
+câu với người chưa thành niên**. Tự ý làm nhẹ ngoài phạm vi đó là vi phạm mục
+FORBIDDEN bên dưới.
+
 ## CROSS-FILE CONTINUITY RULE
 Trước khi QA chương đầu của file, workflow đã chạy `.work/continuity-check.md`.
 Nếu check đó là `WARN` hoặc `FAIL`, KHÔNG được dùng hiệu đính để che lỗi nhảy
@@ -41,6 +66,18 @@ sửa câu chữ trong chương hiện có; continuity phải được xử lý 
 - KHÔNG đổi con số / số lượng / đơn vị.
 - KHÔNG đổi tông giọng hay phong cách của tác giả.
 - KHÔNG tóm tắt, không lược bỏ, không "cải biên".
+- **KHÔNG "chuẩn hoá" tiếng lóng, từ mạng, từ mượn thành văn viết.** `combat`,
+  `combat mõm`, `skill`, `check`, `cớm`, `toang`, `phake`, `auth`, `plot`,
+  `idol`, `oánh`, `tẩn`, `phốt`, `hóng`, `bá đạo hạt gạo`, `cmnr`, `xịn sò`,
+  `cùi bắp`, `quay xe`, `vãi`... — đây KHÔNG phải lỗi dịch máy, đây là giọng
+  truyện. Truyện hài mà dịch bằng văn phong nghiêm túc là làm hỏng nội dung.
+  Đổi `combat`→`chiến đấu`, `cớm`→`công an`, `toang`→`nguy hiểm` là bản dịch
+  TỆ HƠN, không phải sạch hơn.
+  Vẫn được viết lại thoải mái câu dịch máy lủng củng (mục 3) — chỉ là viết lại
+  cho mượt bằng CHÍNH giọng đó, đừng kéo nó về văn viết trung tính.
+- **KHÔNG tự ý làm nhẹ nội dung nhạy cảm** (chửi thề, bạo lực, tình dục giữa
+  người lớn) ngoài đúng một trường hợp CSAE ở mục 5. `assemble_qa.py` so bản QA
+  với bản gốc và báo mọi từ nhạy cảm biến mất, nên việc âm thầm làm mờ sẽ lộ ra.
 - KHÔNG thêm chủ thể, động cơ, cảm xúc, nguyên nhân, kết quả, hoặc quan hệ vốn chỉ
   là suy đoán từ ngữ cảnh.
 
@@ -100,6 +137,11 @@ sẽ tự render heading). Giữ các dòng trống giữa các paragraph.
 6. Đối chiếu từng đoạn với source: mọi tên, chủ thể, hành động, quan hệ nhân quả,
    cảm xúc và kết quả trong bản QA đều phải tồn tại trong đoạn gốc. Nếu không chỉ
    ra được câu nguồn, khôi phục cách diễn đạt sát chữ thay vì suy diễn.
+7. **CSAE (mục 5):** quét từng câu — có câu nào vừa nhắc trẻ vị thành niên vừa có
+   từ chỉ hành vi tình dục không? Còn một câu là kênh bị xoá. Sửa hết.
+8. **Giọng truyện:** so bản QA với source — có từ lóng/từ mạng/từ mượn nào bị
+   đổi thành văn viết không (`combat`, `cớm`, `toang`, `phake`, `skill`...)?
+   Nếu có mà không phải do viết lại cả câu cho mượt → khôi phục nguyên trạng.
 
 ## STDOUT SUMMARY
 ```

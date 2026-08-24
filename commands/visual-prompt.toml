@@ -384,8 +384,24 @@ Sau loop:
 python3 scripts/assemble_qa.py --input "<input_path>"
 ```
 
+Nếu lệnh này BÁO LỖI "sexual act alongside a minor": đây KHÔNG phải lỗi hệ
+thống. Một câu vừa nhắc người chưa thành niên vừa nêu hành vi tình dục / tra
+tấn / buôn bán — YouTube xoá kênh vì loại này, không cảnh cáo, không kháng nghị
+được. Mở `.work/qa-chapter-<NNN>.md` của chương bị nêu, sửa đúng câu đó theo
+mục 5 của `@prompts/qa-proofread.md` (giữ nguyên chuyện gì xảy ra, chỉ bỏ cách
+GỌI TÊN hành vi), rồi chạy lại `assemble_qa.py`. KHÔNG cắt bỏ đoạn văn, KHÔNG
+bỏ qua bằng cách sửa gate.
+
 Parse stdout JSON. Compute `qa_hash = sha1(file_bytes(.work/chapters_qa.json))[:12]`
 → ghi vào `.work/qa.hash`.
+
+In mọi dòng trong `warnings` của stdout JSON cho user thấy. Hai loại đáng chú ý,
+cả hai đều KHÔNG chặn run và KHÔNG tự động sửa:
+- `slang written out` — bản QA đã đổi tiếng lóng thành văn viết. Giọng lóng là
+  thứ người nghe ở lại vì nó; truyện hài mà thành văn phong nghiêm túc là bản
+  dịch tệ hơn. Báo cho user, để user quyết có chạy lại chương đó không.
+- `QA removed <từ>` — bản QA đã bỏ hẳn một từ nhạy cảm có trong nguồn. Đôi khi
+  đúng cho bản upload; chỉ cần user nhìn thấy thay vì diễn ra âm thầm.
 
 Print: `QA hoàn tất: <chapter_count> chương → chapters_qa.json + <stem>_qa.txt`.
 

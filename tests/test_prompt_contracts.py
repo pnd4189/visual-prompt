@@ -2185,6 +2185,190 @@ class QaCompressionTests(unittest.TestCase):
         self.assertEqual([], assemble_qa._compressed_paragraphs('Hắn gật đầu.', 'Hắn gật.'))
 
 
+class QaCsaeTests(unittest.TestCase):
+    """Naming a sexual act beside a minor deletes the channel, so it never ships."""
+
+    FILLER = 'câu nền ' * 700
+
+    def _run(self, tmp: str, line: str):
+        root = Path(tmp)
+        source = f'{line}\n\n{self.FILLER}'
+        (root / 'novel.txt').write_text(f'Chương 1\n{source}', encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': 1, 'title': 'Chương 1', 'text': source}], ensure_ascii=False),
+            encoding='utf-8')
+        (work / 'qa-chapter-001.md').write_text(
+            f'---\nid: 1\ntitle: "Chương 1"\n---\n{source}\n', encoding='utf-8')
+        return root / 'novel.txt', work
+
+    def test_the_offence_named_in_a_victims_dialogue_is_refused(self):
+        """Verbatim from Đạo Sĩ chapter 37, which passed every gate and was one
+        assemble away from becoming a YouTube upload (observed 2026-08-24)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(
+                tmp, 'Tòa án bảo tụi nó phạm tội giao cấu với trẻ em và tuyên án tù.')
+
+            with self.assertRaises(RuntimeError) as caught:
+                assemble_qa.assemble(source, work)
+
+            self.assertIn('sexual act alongside a minor', str(caught.exception))
+            self.assertFalse((work / 'chapters_qa.json').exists())
+
+    def test_the_repaired_line_ships(self):
+        """What happened is intact; only the naming of the act is gone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(tmp, 'Tòa án bảo tụi nó phạm tội và tuyên án tù.')
+
+            self.assertEqual(1, assemble_qa.assemble(source, work)['chapter_count'])
+
+    def test_children_in_an_ordinary_scene_are_left_alone(self):
+        """These novels are full of children; the minor alone is not the breach."""
+        self.assertEqual([], assemble_qa._csae_sentences(
+            'Bé gái ôm chặt lấy chân gã, khóc nức nở gọi thầy ơi.'))
+
+    def test_adult_swearing_is_left_alone(self):
+        self.assertEqual([], assemble_qa._csae_sentences(
+            'Gã trung niên dâm đãng mò lại gần cô gái trẻ, bị tát cho một cái.'))
+
+    def test_abuse_and_trafficking_of_a_child_count_too(self):
+        """Same policy tier as the sexual wording, and the register these novels
+        use for ordinary violence is nowhere near these words."""
+        for line in ('Gã trói bé gái lại rồi tra tấn suốt đêm.',
+                     'Thằng nhỏ bị đánh đập hành hạ tới chết.',
+                     'Bọn buôn người bán trẻ em qua biên giới.',
+                     'Gã dụ dỗ học sinh vào nhà nghỉ.'):
+            self.assertTrue(assemble_qa._csae_sentences(line), line)
+
+    def test_a_term_that_is_about_a_child_by_itself_needs_no_pair(self):
+        self.assertTrue(assemble_qa._csae_sentences('Gã ấu dâm bị bắt.'))
+
+    def test_violence_between_adults_is_left_alone(self):
+        """These are wuxia and horror novels; the fight scenes are the genre."""
+        for line in ('Hắn chém đứt tay tên cướp, máu bắn tung tóe.',
+                     'Vân Mỹ tra tấn gã đàn ông suốt đêm cho hả giận.',
+                     'Đám giang hồ đánh đập nhau ngoài quán.',
+                     'Tôi bị bọn nó bóc lột sức lao động cả tháng.',
+                     'Thằng nhỏ chạy ra sân chơi với đám bạn.'):
+            self.assertEqual([], assemble_qa._csae_sentences(line), line)
+
+    def test_the_pair_must_share_one_sentence(self):
+        """A minor in one sentence and the word in the next is not a hit."""
+        self.assertEqual([], assemble_qa._csae_sentences(
+            'Bé gái đứng khóc bên đường. Gã đàn ông kia bị bắt vì tội mại dâm.'))
+
+
+class QaVoiceTests(unittest.TestCase):
+    """The slang is the voice these novels are read for, not a translation error.
+
+    Reported, never refused: the marker list is fixed while every novel coins its
+    own slang, and a hard block would also push the model to leave a clumsy
+    sentence alone rather than risk rewriting a marker out of it.
+    """
+
+    FILLER = 'câu nền ' * 700
+
+    def _run(self, tmp: str, qa_line: str):
+        root = Path(tmp)
+        source = ('Thằng đó bày thế combat, tao gọi cớm tới check thử, kèo này '
+                  'toang rồi, hàng phake mà đòi xịn sò cái nỗi gì.')
+        body = f'{source}\n\n{self.FILLER}'
+        (root / 'novel.txt').write_text(f'Chương 1\n{body}', encoding='utf-8')
+        work = root / '.work'
+        work.mkdir()
+        (work / 'chapters.json').write_text(json.dumps(
+            [{'id': 1, 'title': 'Chương 1', 'text': body}], ensure_ascii=False),
+            encoding='utf-8')
+        (work / 'qa-chapter-001.md').write_text(
+            f'---\nid: 1\ntitle: "Chương 1"\n---\n{qa_line}\n\n{self.FILLER}\n',
+            encoding='utf-8')
+        return root / 'novel.txt', work
+
+    def test_a_slang_sweep_is_reported_and_still_ships(self):
+        """Observed 2026-08-24: three chapters had their register written out
+        one word for one word, so every retention ratio still read 100%."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(
+                tmp,
+                'Thằng đó bày thế chiến đấu, tao gọi công an tới kiểm tra thử, '
+                'kèo này nguy hiểm rồi, hàng nhái mà đòi cao cấp cái nỗi gì.')
+
+            summary = assemble_qa.assemble(source, work)
+
+            self.assertEqual(1, summary['chapter_count'])
+            self.assertTrue(any('slang written out' in w for w in summary['warnings']))
+
+    def test_smoothing_that_keeps_the_slang_says_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, work = self._run(
+                tmp,
+                'Thằng đó bày thế combat. Tao gọi cớm tới check thử. Kèo này '
+                'toang rồi, hàng phake mà đòi xịn sò cái nỗi gì.')
+
+            summary = assemble_qa.assemble(source, work)
+
+            self.assertEqual(1, summary['chapter_count'])
+            self.assertEqual([], [w for w in summary['warnings'] if 'slang' in w])
+
+    def test_an_element_is_not_mistaken_for_the_slang(self):
+        """"phốt pho" is phosphorus in a wuxia siege; "phốt" alone is gossip.
+        A dropped Hán-Việt gloss beside it read as a slang sweep (observed
+        2026-08-24 on Bình Thiên Sách chapter 40)."""
+        self.assertEqual([], assemble_qa._voice_markers_lost(
+            'Phốt pho! Lưu huỳnh! Mùi bích lân (phốt pho xanh) lan ra.',
+            'Phốt pho! Lưu huỳnh! Mùi bích lân lan ra.'))
+        self.assertIn('phốt 1→0', assemble_qa._voice_markers_lost(
+            'Nó bị bóc phốt giữa chợ.', 'Nó bị bóc trần giữa chợ.'))
+
+    def test_one_word_dissolving_in_a_rewrite_is_tolerated(self):
+        """A clumsy sentence rewritten whole may lose one; that is not a sweep."""
+        self.assertEqual(
+            1, len(assemble_qa._voice_markers_lost(
+                'Nó rén thật, kèo này toang rồi, combat gì nữa.',
+                'Nó rén thật, kèo này toang rồi, đánh gì nữa.')))
+
+
+class QaSensitiveDeletionTests(unittest.TestCase):
+    """Quiet self-censorship costs too few words for any ratio to notice."""
+
+    def test_a_vanished_term_is_reported(self):
+        self.assertEqual(
+            ['giao cấu'],
+            assemble_qa._sensitive_terms_dropped(
+                'Tòa bảo hắn phạm tội giao cấu rồi tuyên án.',
+                'Tòa bảo hắn phạm tội rồi tuyên án.'))
+
+    def test_softening_one_of_several_uses_is_not_reported(self):
+        """Ordinary editing thins a repeated word; only the last one going is a call."""
+        self.assertEqual(
+            [],
+            assemble_qa._sensitive_terms_dropped(
+                'Gã dâm đãng cười. Gã dâm đãng bỏ đi.',
+                'Gã cười khả ố. Gã dâm đãng bỏ đi.'))
+
+    def test_it_warns_without_refusing(self):
+        """Blurring this for a YouTube upload is sometimes right — it just has
+        to be visible, so the run reports it and still ships."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = 'Tòa bảo hắn phạm tội giao cấu rồi tuyên án. ' + 'câu nền ' * 700
+            (root / 'novel.txt').write_text(f'Chương 1\n{source}', encoding='utf-8')
+            work = root / '.work'
+            work.mkdir()
+            (work / 'chapters.json').write_text(json.dumps(
+                [{'id': 1, 'title': 'Chương 1', 'text': source}], ensure_ascii=False),
+                encoding='utf-8')
+            (work / 'qa-chapter-001.md').write_text(
+                '---\nid: 1\ntitle: "Chương 1"\n---\n'
+                + source.replace(' giao cấu', '') + '\n', encoding='utf-8')
+
+            summary = assemble_qa.assemble(root / 'novel.txt', work)
+
+            self.assertEqual(1, summary['chapter_count'])
+            self.assertTrue(any('giao cấu' in w for w in summary['warnings']))
+
+
 class QaGroundingTests(unittest.TestCase):
     """A proofread with no loaded source behind it cannot be checked at all."""
 
