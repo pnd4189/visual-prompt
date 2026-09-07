@@ -19,6 +19,11 @@ prompts. Video and music files are opt-in:
 - `<input>_image_prompts.txt` — deep 350–550 word sectioned image prompts
   (Camera / Story DNA / Setting / Composition / Subject / Action-Energy /
   Style / Lighting-Color / Atmosphere / Negative).
+- `<input>_scene_anchors.md` — the scene plan's `scene_id | chapter | source_anchor`
+  columns, projected next to the prompts. The plan itself lives in hidden `.work/`,
+  which reaches the machine that renders the video only by accident; this visible
+  copy travels with every copy anyone makes, and the video tool uses the anchors to
+  place each image at the moment its beat is narrated.
 - `<input>_video_prompts.txt` — optional deep Veo3 5-part formula video prompts
   (Cinematography → Subject → Action `[00:00–00:02.5]` → Context →
   Style & Ambiance, audio embedded as scene layer).
@@ -202,10 +207,12 @@ Batch mode otherwise keeps opting into music and video as before.
 
 ## Output Spec
 
-- By default, 2 `.txt` files in the same directory as the input:
+- By default, 2 `.txt` files plus `_scene_anchors.md` in the input's directory:
   - `_qa.txt` — proofread, TTS-ready (chapter headings end with a period so TTS
     pauses; feed to TTS_Local VieNeu / VietVoice).
   - `_image_prompts.txt` — separators `--- SCENE NNN ---`.
+  - `_scene_anchors.md` — timing columns from `scene-plan.md`; written whenever the
+    plan exists, and its absence is reported as a run warning.
 - With `--video`/`--videos N`, add `_video_prompts.txt`.
 - With `--music`/`--music N`, add `_music_prompts.txt`; each block is an English
   paragraph followed by `Tags:`.

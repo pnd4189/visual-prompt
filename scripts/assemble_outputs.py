@@ -6,6 +6,7 @@ optional `## Video Prompt` blocks).
 
 Always writes next to the input:
     <input-stem>_image_prompts.txt
+    <input-stem>_scene_anchors.md
 
 When explicitly enabled, also writes:
     <input-stem>_video_prompts.txt
@@ -275,6 +276,47 @@ def parse_scene(path: Path) -> dict:
     }
 
 
+# Columns the downstream video tool needs to time each image against the narration. The plan
+# in .work/ carries these plus several more; only these three travel.
+_ANCHOR_COLUMNS = ('scene_id', 'chapter', 'source_anchor')
+
+
+def write_scene_anchors(work_dir: Path, output_dir: Path, stem: str) -> Path | None:
+    """Project scene-plan.md's timing columns to a VISIBLE file beside the prompts.
+
+    scene-plan.md lives in `.work/`, which is hidden, so it survives being copied to wherever
+    the video is rendered only by accident — episodes have reached the render box with the
+    prompts but without the plan, and their images were then spread evenly over the narration
+    instead of following it. A sibling of the prompts file travels with every copy anyone makes.
+
+    Same markdown table shape as the plan so one parser reads either. Returns the path written,
+    or None when there is no plan to project (nothing here should fail a finished run).
+    """
+    plan = Path(work_dir) / 'scene-plan.md'
+    if not plan.is_file():
+        return None
+    rows: list[list[str]] = []
+    columns: dict[str, int] | None = None
+    for line in plan.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line.startswith('|') or set(line) <= set('|-: '):
+            continue
+        cells = [c.strip() for c in line.strip('|').split('|')]
+        if columns is None:
+            lowered = [c.lower() for c in cells]
+            if all(name in lowered for name in _ANCHOR_COLUMNS):
+                columns = {name: lowered.index(name) for name in _ANCHOR_COLUMNS}
+            continue
+        rows.append([cells[columns[name]] if columns[name] < len(cells) else '' for name in _ANCHOR_COLUMNS])
+    if not rows:
+        return None
+    lines = ['| ' + ' | '.join(_ANCHOR_COLUMNS) + ' |', '|---|---|---|']
+    lines += ['| ' + ' | '.join(row) + ' |' for row in rows]
+    path = Path(output_dir) / f'{stem}_scene_anchors.md'
+    atomic_write_text(path, '\n'.join(lines) + '\n')
+    return path
+
+
 def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
              no_music: bool = True, lean: bool = False) -> dict:
     scenes_paths = discover_scenes(work_dir)
@@ -312,6 +354,10 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
     vid_path = output_dir / f"{stem}_video_prompts.txt"
 
     atomic_write_text(img_path, _join(image_blocks))
+    anchors_path = write_scene_anchors(work_dir, output_dir, stem)
+    if anchors_path is None:
+        warnings.append('scene-plan.md missing — no _scene_anchors.md written, so the video '
+                        'tool cannot time the images to the narration')
     if not no_video:
         atomic_write_text(vid_path, _join(video_blocks))
 
@@ -342,6 +388,7 @@ def assemble(input_path: Path, work_dir: Path, no_video: bool = True,
         'video_count': len(video_blocks),
         'video_indices': [sid for sid, _ in video_blocks],
         'image_path': str(img_path),
+        'anchors_path': str(anchors_path) if anchors_path else None,
         'video_path': str(vid_path) if not no_video else None,
         'music_count': len(music_blocks),
         'music_path': str(music_path) if music_path else None,
