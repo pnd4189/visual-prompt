@@ -1,6 +1,6 @@
 ---
 name: visual-prompt
-version: 0.18.0
+version: 0.19.0
 description: Generate grounded, non-repetitive image prompts by default, with explicitly enabled video/music prompts, strict source anchors, parent-only generation, and fail-closed quality gates for Vietnamese xianxia/wuxia novel files; the batch driver may opt into isolated runner-level Pass-2 workers (VP_WORKERS) and may scope runs via VP_NO_VIDEO/VP_NO_MUSIC/VP_GLOB without changing the default serial run or the default workflow; the auto scene band runs 120-300 images (a ~3h narration); the plan gate checks every declared total against its source — image and chapter counts recomputed from the chapter JSON, genre against genre.txt, per-chapter coverage against each chapter's share of the prose; lean Setting/Action are length-checked as each scene is written (8-word floor) so a stub field fails on the first scenes instead of as a duplicate flood at the end; the stop gate refuses to end a run whose .work has no chapters_qa.json or plan.hash, and scene-plan.md cannot be written before chapters_qa.json exists, so the pipeline cannot be skipped down to the scene plan; assemble_qa refuses to write a proofread that lost more than 15% of the source words, since chapters_qa.json is what every later gate measures against; under --lean, Style is checked as the series lock — one block repeated verbatim, since the repetition gate deliberately never compares it; a slow cloud read is retried rather than failing the step outright; assemble_qa refuses prose that still holds Chinese characters, the Style block must match references/style-catalog.md verbatim, and assemble_outputs merges the run's character rows back into the series bible; the house slang rule (đéo/đách -> éo, everything else left alone) is applied by assemble_qa rather than trusted to the QA step; a run whose scene files cleanup already merged proves itself from the deliverable and the authorship log instead of from files that are gone by design, and a bare Negative list no longer reads as a content-safety hit; assemble_qa measures retention per chapter and checks that each chapter's last source paragraph survived, so one gutted chapter cannot hide behind a healthy total; the stop gate holds a run that has an accepted plan but has not started expanding, since a plan nothing expanded is an unfinished run; the QA step is checked on the prose itself, which no other gate reads — a sentence naming sexual abuse, violence or trafficking against a minor is refused (YouTube deletes a channel for it, no strike and no appeal), while a chapter whose slang was written out into standard prose and a sensitive word the proofread removed entirely are only reported, since a comic novel rewritten in a serious register is a worse translation but not a reason to fail a run; adult swearing, gore and adult sexual wording are the author's and no gate touches them
 license: MIT
 contextFileName: SKILL.md
@@ -10,10 +10,10 @@ contextFileName: SKILL.md
 
 LLM-driven workflow (Antigravity/Agy, Codex, or Claude Code) that reads a Vietnamese xianxia/wuxia novel file
 (.txt / .md / .docx, 2k–18k words, suitable for a 1–2h audio video). The skill
-self-QAs the text first (no pre-proofread required), then emits QA + image
-prompts. Video and music files are opt-in:
+emits image prompts by default; the proofread (`--qa`) and the video and music
+files are opt-in:
 
-- `<input>_qa.txt` — proofread, TTS-ready source of truth (residual Chinese/
+- `<input>_qa.txt` — only with `--qa`: proofread, TTS-ready source of truth (residual Chinese/
   English removed, grammar fixed, long sentences split). Feed straight into
   TTS_Local (VieNeu / VietVoice).
 - `<input>_image_prompts.txt` — deep 350–550 word sectioned image prompts
@@ -76,7 +76,8 @@ prompts. Video and music files are opt-in:
   required in truthful visual realization — camera, composition, setting detail,
   action phase, lighting, palette, texture, and atmosphere — but never by adding
   characters, crowds, combat, locations, props, weather, or outcomes.
-- **Image-only by default.** Every run produces QA + image prompts. Video requires
+- **Image-only by default.** Every run produces image prompts only; the proofread runs only with `--qa`
+  (`--no-qa` is accepted and wins). Video requires
   `--video`, `--videos N`, or an explicit video request. Music requires `--music`,
   `--music N`, or an explicit music request. `--no-video` and `--no-music` win.
 - **Plot-fit staging, including truthful stillness.** When the source describes a
@@ -103,9 +104,11 @@ prompts. Video and music files are opt-in:
   attempt. STEP 8's self-audit runs the same gate (`check_run_legit.py`).
 - **Original outputs only.** Do not copy web images, famous faces, celebrity
   likenesses, known-character faces, or exact IP/artist styles.
-- **QA-first.** A proofread gate runs before everything else and produces the
-  single QA'd source of truth that all downstream steps (bible, genre, scenes,
-  music) consume. The skill no longer assumes pre-proofread input.
+- **QA is opt-in.** With `--qa` a proofread gate runs before everything else and
+  produces the single QA'd source of truth that all downstream steps (bible,
+  genre, scenes, music) consume. Without it, `chapters_qa.json` is built straight
+  from `chapters.json` (`assemble_qa.py --passthrough`) and no `_qa.txt` is
+  written; only the user's own invocation line can switch this, never the model.
 - **Cross-file continuity first.** Before QA, the workflow checks whether the
   first chapter in the current file follows the previous chapter from nearby
   `_qa.txt` / `.txt` files. A likely skipped, repeated, or non-continuing chapter
@@ -125,7 +128,7 @@ prompts. Video and music files are opt-in:
 3. **QA proofread** — LLM fixes residual Chinese/English, grammar, clunky MT
    sentences, splits long sentences (moderate, no plot change). Resume-safe per
    chapter. `scripts/assemble_qa.py` writes `.work/chapters_qa.json` (downstream
-   source) + `<input>_qa.txt` (TTS file). Always runs. Three checks read the
+   source) + `<input>_qa.txt` (TTS file). Runs only with `--qa`. Three checks read the
    prose itself, which nothing else downstream ever does. One refuses: a
    sentence naming sexual abuse, violence or trafficking against a minor, since
    YouTube deletes a channel for it with no strike and no appeal. Both halves
