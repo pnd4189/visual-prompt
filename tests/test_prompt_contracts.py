@@ -2031,9 +2031,12 @@ class CloudReadRetryTests(unittest.TestCase):
     def test_a_file_that_never_answers_still_fails(self):
         error, calls = self._read([124])
 
+        import _io_utils  # type: ignore  # noqa: E402
+        attempts = _io_utils._CLOUD_READ_ATTEMPTS
         self.assertIsInstance(error, RuntimeError)
-        self.assertEqual(3, calls)
-        self.assertIn('3 attempts', str(error))
+        self.assertGreater(attempts, 1)
+        self.assertEqual(attempts, calls)
+        self.assertIn(f'{attempts} attempts', str(error))
 
 
 class QaTranslationGateTests(unittest.TestCase):
