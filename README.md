@@ -18,7 +18,8 @@ bash setup.sh
 /visual-prompt <input.txt>
 ```
 
-Mặc định chỉ tạo 2 file `_qa.txt` và `_image_prompts.txt` cạnh file input. Thêm
+Mặc định chỉ tạo file `_image_prompts.txt` cạnh file input, không chạy bước hiệu
+đính. Thêm `--qa` để hiệu đính trước (tạo thêm `_qa.txt` cho TTS),
 `--video`/`--videos N` để bật video, `--music`/`--music N` để bật music; có thể
 ghi mô tả rõ “tạo video prompt” hoặc “tạo music prompt” sau lệnh. `--no-video` và
 `--no-music` luôn tắt medium tương ứng.
