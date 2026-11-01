@@ -353,6 +353,10 @@ Negative: <danh sách an toàn — giống nhau ở mọi cảnh>
 
 Tổng thân prompt 60-220 từ. Ngắn hơn không có nghĩa là mờ nhạt:
 
+- **Ngôn ngữ: mọi mục viết bằng tiếng Anh**, khớp khối `Style`/`Negative` (vốn là
+  tiếng Anh). Chỉ tên riêng nhân vật/địa danh giữ nguyên chữ Việt. Một prompt trộn
+  hai thứ tiếng làm model sinh ảnh hiểu kém, và cả series phải cùng một thứ tiếng.
+
 - `Subject` và `Style` LẶP LẠI giữa các cảnh là đúng thiết kế — đó là thứ giữ nhân
   vật và phong cách nhất quán. Gate không so trùng hai mục này.
 - `Setting` và `Action` PHẢI khác nhau ở từng cảnh — gate so trùng đúng hai mục

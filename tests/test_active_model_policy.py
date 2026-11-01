@@ -301,6 +301,73 @@ class LeanSpecTests(unittest.TestCase):
                     {'CommandLine': command + ' --lean', 'Cwd': str(root)}, lean))
 
 
+class NoQaTests(unittest.TestCase):
+    """The proofread is off unless the user's own invocation passes --qa."""
+
+    def _state(self, root: Path, no_qa: bool) -> dict:
+        (root / 'guard.json').write_text(json.dumps({
+            'schema': 1, 'primary_conversation_id': 'primary', 'no_qa': no_qa,
+        }), encoding='utf-8')
+        return {'workspacePaths': [str(root)], 'artifactDirectoryPath': str(root)}
+
+    def test_the_model_cannot_skip_the_proofread_on_its_own(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); (root / '.work').mkdir()
+            (root / 'novel.txt').write_text('x', encoding='utf-8')
+            command = (f'python3 {ROOT}/scripts/assemble_qa.py '
+                       f'--input {root}/novel.txt')
+            with patch.dict(os.environ, {'VP_GUARD_STATE': str(root / 'guard.json')}), \
+                    patch.object(policy, '_agy_launcher_cwd', return_value=root):
+                full = self._state(root, no_qa=False)
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command, 'Cwd': str(root)}, full))
+                self.assertIn('--qa was requested', policy.command_denial(
+                    {'CommandLine': command + ' --passthrough', 'Cwd': str(root)}, full))
+
+                skipped = self._state(root, no_qa=True)
+                self.assertIn('must be called with --passthrough', policy.command_denial(
+                    {'CommandLine': command, 'Cwd': str(root)}, skipped))
+                self.assertIsNone(policy.command_denial(
+                    {'CommandLine': command + ' --passthrough', 'Cwd': str(root)}, skipped))
+
+    def test_only_the_invocation_line_turns_the_proofread_on(self):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import active_model_guard as guard
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / 'transcript.jsonl'
+            cases = {
+                '/visual-prompt "novel.txt" --lean': True,
+                '/visual-prompt "novel.txt" --lean --no-qa': True,
+                '/visual-prompt "novel.txt" --qa': False,
+                '/visual-prompt "novel.txt" --qa --no-qa': True,
+                '/visual-prompt "novel.txt" --qa-hash abc': True,
+            }
+            for line, expected in cases.items():
+                transcript.write_text(f'<USER_REQUEST>\n{line}\n</USER_REQUEST>', encoding='utf-8')
+                self.assertEqual(guard._no_qa_invocation(str(transcript)), expected, line)
+            self.assertFalse(guard._no_qa_invocation(str(Path(tmp) / 'missing.jsonl')))
+
+    def test_passthrough_builds_chapters_qa_from_the_loaded_chapters(self):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import assemble_qa
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / '.work'; work.mkdir()
+            (work / 'chapters.json').write_text(json.dumps([
+                {'id': 1, 'title': 'Chương 1: A', 'text': 'Hắn quát: đéo sợ.'},
+                {'id': 2, 'title': 'Chương 2: B', 'text': 'Trời sáng.'},
+            ]), encoding='utf-8')
+            summary = assemble_qa.passthrough(work)
+            rows = json.loads((work / 'chapters_qa.json').read_text(encoding='utf-8'))
+            self.assertEqual([r['id'] for r in rows], [1, 2])
+            self.assertEqual(rows[0]['title'], 'Chương 1: A')
+            self.assertIn('éo sợ', rows[0]['text'])
+            self.assertNotIn('đéo', rows[0]['text'])
+            self.assertIsNone(summary['qa_txt_path'])
+            self.assertFalse(list(Path(tmp).glob('*_qa.txt')))
+            with self.assertRaises(RuntimeError):
+                assemble_qa.passthrough(Path(tmp) / 'missing')
+
+
 class QaNeedsItsSourceTests(unittest.TestCase):
     """A proofread is a rewrite OF something; with no source it is invention."""
 

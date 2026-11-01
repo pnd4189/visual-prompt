@@ -98,6 +98,15 @@ def lean_mode(payload: dict) -> bool:
     return bool(_guard_state(payload).get('lean'))
 
 
+def no_qa_mode(payload: dict) -> bool:
+    """Whether the proofread is off for this run, per the guard state.
+
+    It is off unless the user's own invocation carries --qa. Same rule as lean:
+    only that line decides, so a model cannot pick passthrough or QA for itself.
+    """
+    return bool(_guard_state(payload).get('no_qa'))
+
+
 def worker_mode(payload: dict) -> bool:
     """A Pass-2 worker starts at scene expansion, off a frozen snapshot."""
     return bool(_guard_state(payload).get('worker'))

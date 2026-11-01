@@ -217,7 +217,7 @@ Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví
 Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false`,
 `videos_override = null`, `music_override = null`, `force_redo = false`,
 `similarity_feedback_path = null`, `batch_token = null`, `auto_repair = false`,
-`worker_manifest_path = null`, `plan_only = false`, `epic = false`.
+`worker_manifest_path = null`, `plan_only = false`, `epic = false`, `no_qa = true`.
 
 1. `--series ([a-z0-9-]+)`               → series_name (kebab-case, optional)
 2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
@@ -238,6 +238,8 @@ Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false
 17. `--no-video`                         → video_enabled = false (takes precedence)
 18. `--no-music`                         → music_enabled = false (takes precedence)
 18b. `--lean`                            → lean = true (bộ prompt tinh gọn 5 mục)
+18c. `--qa`                              → no_qa = false (bật bước hiệu đính STEP 1.5; mặc định TẮT)
+18d. `--no-qa`                           → no_qa = true (takes precedence; giữ để lệnh cũ còn chạy)
 19. Sau khi strip flags → còn lại là input_path (positional, required).
 
 Natural-language media requests after the command are also explicit opt-ins:
@@ -265,7 +267,7 @@ Validate:
   `--force-redo`; yêu cầu `auto_repair = true` + `batch_token`. Head session chỉ
   chạy STEP 1 → 5.5 rồi dừng (mục PLAN-ONLY SUBMODE).
 - Nếu có unknown flag (bắt đầu `--` nhưng không match list trên) → HALT với VN error:
-  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --worker-manifest PATH, --plan-only, --epic, --faithful, --no-video, --no-music`
+  `Lỗi: flag không hỗ trợ. Hỗ trợ: --series NAME, --genre NAME, --images N, --video, --videos N, --music [N], --style ID, --force-redo, --similarity-feedback PATH, --batch-token HEX, --auto-repair, --worker-manifest PATH, --plan-only, --epic, --faithful, --no-video, --no-music, --lean, --qa, --no-qa`
 
 Echo lại cho user:
 ```
@@ -287,6 +289,7 @@ Echo lại cho user:
   faithful   = <true | false>
   no_video   = <true | false>
   no_music   = <true | false>
+  no_qa      = <true | false>
 ```
 
 Mặc định = **grounded + image-only**. QA vẫn chạy để làm nguồn sự thật; output mặc
@@ -353,12 +356,24 @@ trong từng chương; nếu nguồn nhảy chương/bỏ chương thì phải d
 
 ---
 
-## STEP 1.5 — QA PROOFREAD (resume-safe loop, always runs)
+## STEP 1.5 — QA PROOFREAD (resume-safe loop, chỉ chạy khi có `--qa`)
 
 Cổng hiệu đính: sửa ký tự Trung/Anh còn sót, chính tả/ngữ pháp, câu dịch máy
 lủng củng, tách câu quá dài. Mức vừa phải — KHÔNG đổi cốt truyện/tên riêng/số.
 Đầu ra `chapters_qa.json` là nguồn duy nhất cho mọi bước sau, và `<stem>_qa.txt`
 là file đọc TTS.
+
+**Nếu `no_qa = true` (mặc định; chỉ `--qa` mới bật QA)**: BỎ QUA toàn bộ loop và prompt QA — KHÔNG viết
+`qa-chapter-*.md`. Chạy đúng một lệnh rồi sang bước tính `qa_hash` bên dưới:
+
+```bash
+python3 scripts/assemble_qa.py --input "<input_path>" --passthrough
+```
+
+Lệnh này dựng `chapters_qa.json` thẳng từ `chapters.json` (chỉ áp luật tiếng lóng
+đéo/đách → éo), KHÔNG ghi `<stem>_qa.txt`. Guard chỉ cho phép `--passthrough` khi
+dòng lệnh của user KHÔNG có `--qa`. In `Bỏ qua QA (mặc định): <chapter_count> chương →
+chapters_qa.json` thay cho dòng "QA hoàn tất".
 
 Nếu `--force-redo`: `rm -f .work/qa-chapter-*.md` TRƯỚC khi vào loop.
 

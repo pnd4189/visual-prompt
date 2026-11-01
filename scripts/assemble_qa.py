@@ -475,19 +475,59 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
     }
 
 
+def passthrough(work_dir: Path) -> dict:
+    """Build chapters_qa.json from the loaded chapters, with no proofread.
+
+    For a run invoked with --no-qa: the source is taken as it is. No _qa.txt is
+    written, since there is no proofread to hand to TTS. Sentences that name a
+    sexual act alongside a minor are reported rather than refused, because there
+    is no QA step left to rewrite them.
+    """
+    source_texts = _source_chapters(work_dir)
+    if not source_texts:
+        raise RuntimeError(
+            'no readable .work/chapters.json — run STEP 1 (load_input.py) first')
+    titles = {}
+    try:
+        for row in json.loads((work_dir / 'chapters.json').read_text(encoding='utf-8')):
+            titles[int(row['id'])] = str(row.get('title') or '')
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+    chapters, warnings, slang_softened = [], [], 0
+    for cid in sorted(source_texts):
+        text, softened = _soften_slang(source_texts[cid])
+        slang_softened += softened
+        chapters.append({'id': cid, 'title': titles.get(cid, ''), 'text': text})
+        for hit in _csae_sentences(text):
+            warnings.append(f'chapter {cid}: minor + sexual act in one sentence: "{hit}"')
+
+    qa_json_path = work_dir / 'chapters_qa.json'
+    atomic_write_json(qa_json_path, chapters, ensure_ascii=False)
+    return {
+        'chapter_count': len(chapters),
+        'slang_softened': slang_softened,
+        'chapters_qa_json': str(qa_json_path),
+        'qa_txt_path': None,
+        'warnings': warnings,
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description='Assemble QA chapters into chapters_qa.json + _qa.txt')
     p.add_argument('--input', required=True,
                    help='Original novel file path (used to derive output stem + dir)')
     p.add_argument('--work-dir', default=None,
                    help='Dir containing qa-chapter-*.md (default: <input-dir>/.work)')
+    p.add_argument('--passthrough', action='store_true',
+                   help='--no-qa runs only: chapters_qa.json straight from chapters.json')
     args = p.parse_args()
 
     input_path = Path(args.input)
     work_dir = Path(args.work_dir) if args.work_dir else input_path.parent / '.work'
 
     try:
-        summary = assemble(input_path, work_dir)
+        summary = passthrough(work_dir) if args.passthrough else assemble(input_path, work_dir)
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

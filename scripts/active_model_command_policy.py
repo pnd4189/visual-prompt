@@ -9,7 +9,7 @@ from glob import glob, has_magic
 from pathlib import Path
 
 from active_model_policy import (
-    FINAL_OUTPUT_RE, SKILL_ROOT, images_override, inside, lean_mode,
+    FINAL_OUTPUT_RE, SKILL_ROOT, images_override, inside, lean_mode, no_qa_mode,
     remember_input_root, roots, state_path, write_denial,
 )
 
@@ -139,6 +139,18 @@ def _lean_flag_denial(name: str, tokens: list[str], payload: dict) -> str | None
     return None
 
 
+def _passthrough_denial(name: str, tokens: list[str], payload: dict) -> str | None:
+    """Running the proofread is the user's choice (--qa), never the model's."""
+    if name != 'assemble_qa.py':
+        return None
+    wants, passed = no_qa_mode(payload), '--passthrough' in tokens
+    if wants and not passed:
+        return 'the proofread is off for this run (pass --qa to enable it) — assemble_qa.py must be called with --passthrough'
+    if passed and not wants:
+        return '--qa was requested for this run; the QA step must run in full'
+    return None
+
+
 def _expect_images_denial(name: str, tokens: list[str], payload: dict) -> str | None:
     """The scene total is the formula's, or the user's — never the model's.
 
@@ -164,6 +176,7 @@ def _expect_images_denial(name: str, tokens: list[str], payload: dict) -> str | 
 
 def _helper_denial(name: str, tokens: list[str], cwd: Path, payload: dict) -> str | None:
     denial = (_lean_flag_denial(name, tokens, payload)
+              or _passthrough_denial(name, tokens, payload)
               or _expect_images_denial(name, tokens, payload))
     if denial:
         return denial

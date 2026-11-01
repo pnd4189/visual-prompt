@@ -40,6 +40,7 @@ GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
 INVOCATION_RE = re.compile(
     rb'<USER_REQUEST>(?:\\[rnt]|\s)*/(?:[A-Za-z0-9._-]+:)?visual-prompt\b'
 )
+QA_FLAG_RE = re.compile(rb'(?<![\w-])--qa(?![\w-])')
 HEAD_BYTES = 131_072
 TAIL_BYTES = 262_144
 # Mirrors SCENE_FILE_RE in check_run_legit.py — the closing gate and the guard
@@ -118,6 +119,17 @@ def _lean_invocation(path: str | None) -> bool:
     """Did the user's own /visual-prompt line carry --lean?"""
     turn = _invocation_turn(path)
     return turn is not None and b'--lean' in turn
+
+
+def _no_qa_invocation(path: str | None) -> bool:
+    """Did the user's own /visual-prompt line leave the proofread off?
+
+    The proofread is off unless the line carries --qa; an explicit --no-qa wins.
+    """
+    turn = _invocation_turn(path)
+    if turn is None:
+        return False
+    return b'--no-qa' in turn or QA_FLAG_RE.search(turn) is None
 
 
 def _worker_invocation(path: str | None) -> bool:
@@ -231,6 +243,7 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         'primary_conversation_id': str(payload.get('conversationId') or ''),
         'model': str(payload.get('modelName') or ''),
         'lean': _lean_invocation(payload.get('transcriptPath')),
+        'no_qa': _no_qa_invocation(payload.get('transcriptPath')),
         'images_override': _images_invocation(payload.get('transcriptPath')),
         'worker': _worker_invocation(payload.get('transcriptPath')),
         'plan_only': _plan_only_invocation(payload.get('transcriptPath')),
