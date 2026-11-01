@@ -108,9 +108,29 @@ def check_image(block: str, lean: bool = False) -> list[str]:
     block_clean = re.sub(r'\*+', '', block)
     m = _NEGATIVE_SECTION_RE.search(block_clean)
     neg_count = len([x for x in m.group(1).split(',') if x.strip()]) if m else 0
-    if neg_count < NEGATIVE_MIN:
-        problems.append(f"negative list too thin: {neg_count} items (<{NEGATIVE_MIN})")
+    neg_min = 10 if lean else NEGATIVE_MIN
+    if neg_count < neg_min:
+        problems.append(f"negative list too thin: {neg_count} items (<{neg_min})")
     return problems
+
+
+_ASSEMBLED_BLOCK_RE = re.compile(r'^--- SCENE (\d+[a-zA-Z]?) ---[ \t]*$', re.M)
+
+
+def image_spec_failures(text: str, lean: bool = False) -> dict[str, list[str]]:
+    """check_image problems for each scene block of an assembled _image_prompts.txt.
+
+    assemble only reports these, and the regen loop after it is an instruction
+    the model can skip, so the closing gates re-read the deliverable with this.
+    """
+    markers = list(_ASSEMBLED_BLOCK_RE.finditer(text))
+    failures: dict[str, list[str]] = {}
+    for k, m in enumerate(markers):
+        end = markers[k + 1].start() if k + 1 < len(markers) else len(text)
+        problems = check_image(text[m.end():end], lean)
+        if problems:
+            failures[m.group(1)] = problems
+    return failures
 
 
 def check_video(block: str) -> list[str]:

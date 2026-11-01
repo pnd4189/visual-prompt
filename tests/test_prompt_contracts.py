@@ -929,12 +929,15 @@ class GroundingAndMediaDefaultTests(unittest.TestCase):
 class CleanedRunTests(unittest.TestCase):
     """cleanup_work.py removes merged scene files; that is not a bypass."""
 
+    NEGATIVE = ('no logo, no watermark, no text overlay, no distorted hands, no extra '
+                'fingers, no copied web image, no real public figure or celebrity face, '
+                'no brand logo or trademark, no 3D render sheen, no flat vector shapes')
     PLAN = ('| scene_id | chapter | source_anchor |\n|---|---|---|\n'
             '| 001 | 1 | Lan bước vào sân đá khi gió lay cành tùng |\n'
             '| 002 | 1 | Minh quỳ xuống bên bậc thềm ướt mưa |\n')
     SCENE = ('--- SCENE {i:03d} ---\nSubject: Lan {i}\nSetting: a stone courtyard '
              'under pine branches {i}\nAction: she crosses the wet threshold '
-             'slowly {i}\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\nNegative: no logo\n')
+             'slowly {i}\nStyle: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\nNegative: ' + NEGATIVE + '\n')
 
     def _cleaned(self, directory: Path, proven: set[int]):
         """A run whose scene files are gone but whose deliverable holds them all."""
@@ -981,6 +984,47 @@ class CleanedRunTests(unittest.TestCase):
 
         self.assertEqual(2, result.returncode)
         self.assertIn('scene-002.md', result.stdout)
+
+
+class LeanSpecGateTests(unittest.TestCase):
+    """Under --lean every scene must meet the spec, not only the ones the model redid."""
+
+    PLAN, NEGATIVE, SCENE = CleanedRunTests.PLAN, CleanedRunTests.NEGATIVE, CleanedRunTests.SCENE
+    _cleaned, _run = CleanedRunTests._cleaned, CleanedRunTests._run
+
+    def _break_scene_one(self, image: Path, old: str, new: str) -> None:
+        image.write_text(image.read_text(encoding='utf-8').replace(old, new, 1), encoding='utf-8')
+
+    def test_the_closing_gate_names_every_scene_that_breaks_the_spec(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            work, image, log = self._cleaned(Path(temp_dir), proven={1, 2})
+            self._break_scene_one(image, 'Subject: Lan 1',
+                                 'Subject: Lan 1 ' + ' '.join(f'detail{n}' for n in range(170)))
+
+            result = self._run(work, image, log)
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn('1/2 scene blocks break the lean spec', result.stdout)
+        self.assertIn('001: image body too long', result.stdout)
+
+    def test_cleanup_keeps_the_scene_files_while_a_negative_list_is_cut_short(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            work, image, _ = self._cleaned(Path(temp_dir), proven={1, 2})
+            for i in (1, 2):
+                (work / f'scene-{i:03d}.md').write_text('scene', encoding='utf-8')
+            self._break_scene_one(image, self.NEGATIVE, 'no logo, no watermark')
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / 'cleanup_work.py'),
+                 '--work', str(work), '--image', str(image), '--lean'],
+                cwd=ROOT, capture_output=True, text=True, check=False)
+            kept = sorted(p.name for p in work.glob('scene-0*.md'))
+
+        self.assertEqual(2, result.returncode, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(['001'], list(report['off_spec']))
+        self.assertIn('negative list too thin: 2 items (<10)', report['off_spec']['001'])
+        self.assertEqual(['scene-001.md', 'scene-002.md'], kept)
 
 
 class ContentSafetyNegationTests(unittest.TestCase):

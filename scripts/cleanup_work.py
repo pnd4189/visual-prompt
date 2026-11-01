@@ -4,7 +4,8 @@
 Those files are intermediates: the deliverable is `<stem>_image_prompts.txt`.
 They cannot be removed earlier, because the legitimacy and authorship gates read
 them — so this helper refuses unless the assembled output already carries at
-least as many scene blocks as the plan declares.
+least as many scene blocks as the plan declares and, under --lean, every block
+meets the lean spec.
 
 `scene-plan.md` and `active-model-authorship.jsonl` are kept: the plan is the
 run's scene contract and the log is its authorship audit trail.
@@ -19,6 +20,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+from assemble_outputs import image_spec_failures
 
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
 SCENE_BLOCK_RE = re.compile(r'^--- SCENE \d+[a-zA-Z]?(?: / \d+)? ---\s*$', re.MULTILINE)
@@ -68,6 +71,13 @@ def cleanup(work: Path, image: Path, lean: bool = False) -> tuple[int, dict]:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': 'assembled output has fewer scenes than the plan — '
                              'finish the run before cleaning up'}
+    off_spec = image_spec_failures(image.read_text(encoding='utf-8', errors='replace'),
+                                   lean=True) if lean else {}
+    if off_spec:
+        return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
+                   'reason': f'{len(off_spec)} scenes break the lean spec — rewrite '
+                             'the flagged scenes and re-assemble before cleaning up',
+                   'off_spec': off_spec}
     failure = _similarity_failure(image, lean)
     if failure is not None:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
@@ -87,7 +97,7 @@ def main() -> int:
     parser.add_argument('--image', required=True, type=Path,
                         help='assembled <stem>_image_prompts.txt')
     parser.add_argument('--lean', action='store_true',
-                        help='grade the lean prompt spec when re-checking similarity')
+                        help='grade the lean prompt spec (per-scene limits and similarity)')
     args = parser.parse_args()
     code, report = cleanup(args.work.expanduser(), args.image.expanduser(), args.lean)
     print(json.dumps(report, ensure_ascii=False))

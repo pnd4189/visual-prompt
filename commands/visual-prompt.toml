@@ -767,8 +767,10 @@ Không truyền `--video`/`--music` khi medium tương ứng bị tắt. Khi t�
 không được discover, validate, assemble, hoặc report file optional nào.
 
 Parse stdout JSON. Ngoài summary, đọc `violations: [{scene_id, kind, detail}]`.
-Mỗi violation = block nông: thiếu header / sai word-count / negative < 20 (image)
-hoặc thiếu header / sai beat count / >3800 chars (video). assemble VẪN ghi `.txt`
+Mỗi violation = block nông: thiếu header / sai word-count / negative < 20 (image;
+lean: 60-220 từ, negative < 10) hoặc thiếu header / sai beat count / >3800 chars
+(video). Với `--lean`, `check_run_legit.py` và `cleanup_work.py` đọc lại output và
+từ chối khi còn violation, nên bỏ qua vòng regen này không làm run xong được. assemble VẪN ghi `.txt`
 (nên run cuối cùng luôn dùng được) — nhưng cố làm sạch violations trước.
 
 Sau mỗi lần assemble, verify output files trên filesystem:
@@ -880,7 +882,9 @@ Xác nhận:
    ghi. Nếu bạn đã tự ghi file → xoá, chạy lại STEP 7.
 5. `check_run_legit.py` exit 0. Exit 2 = dấu vân tay bypass (script tự chế trong
    `.work`, scene count lệch plan, boilerplate loop, optional block trùng lặp) →
-   HALT, không sửa gate/allowlist, không sửa tay output để né.
+   HALT, không sửa gate/allowlist, không sửa tay output để né. Riêng lỗi
+   `break the lean spec` KHÔNG phải bypass: viết lại đúng các scene được liệt kê
+   rồi chạy lại `assemble_outputs.py --lean` (vòng regen STEP 7).
    Trên Agy, hai flag authorship trong lệnh trên là bắt buộc; Codex/Claude omit
    vì không có Agy hook. Log cũ không tự bật chế độ này trên CLI khác.
 6. Similarity gate exit 0 cho image và mọi medium đã bật. Không sửa

@@ -35,6 +35,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from assemble_outputs import image_spec_failures
+
 IMAGE_WORD_MIN = 350
 # --lean trades depth for distinctness: the image model fills in camera,
 # light and mood, so a scene only carries who/where/what plus the locks.
@@ -559,6 +561,22 @@ def main():
                 errors.append(
                     f"{shallow}/{len(markers)} image scene block thiếu header structure (shortcut bypass, không đúng {len(_IMG_HDRS)}-section format)"
                 )
+
+            # 3c. Unlike the deep spec above, the lean spec is a hard limit the user
+            # chose, so every scene must meet it. Left to the regen loop alone, one
+            # 40-file batch shipped 8 files with scenes over 220 words, 6 with the
+            # Negative list cut to 4-9 items and one with 125 scenes missing Setting.
+            if lean:
+                off_spec = image_spec_failures(text, lean=True)
+                if off_spec:
+                    sample = '; '.join(f"{sid}: {', '.join(problems)}"
+                                       for sid, problems in list(off_spec.items())[:3])
+                    errors.append(
+                        f"{len(off_spec)}/{len(markers)} scene blocks break the lean spec "
+                        f"(5 sections, 60-220 words, Negative >= 10 items) — rewrite these "
+                        f"scene files and re-assemble, this is not a bypass: "
+                        f"{', '.join(off_spec)} ({sample})"
+                    )
 
     # 4. Video boilerplate bypass: the video expander must produce per-scene
     # deep prompts. A bypass writes ONE generic template (e.g. "Cultivators flying
