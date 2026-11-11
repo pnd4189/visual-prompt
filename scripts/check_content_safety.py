@@ -24,6 +24,12 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = str(Path(__file__).parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from _io_utils import atomic_write_text, read_text_checked  # type: ignore
+
 # Replacement applied per section when --fix runs. Sections absent here are
 # WARN-only (collected, never rewritten) — currently RELIGION_HIGH_RISK.
 FIX_REPLACEMENT = {
@@ -42,7 +48,12 @@ WARN_ONLY = {'RELIGION_HIGH_RISK'}
 # gate never mangles its own safety line. Brand/IP/likeness/religion are NOT
 # guarded (a named brand/person is a hit regardless of phrasing).
 NEGATION_GUARDED = {'GORE', 'SEXUAL', 'PHOTOREAL_VIDEO'}
-_NEGATIVE_FIELD_RE = re.compile(r'[ \t]*Negative[ \t]*:', re.IGNORECASE)
+_NEGATIVE_FIELD_RE = re.compile(
+    r'(?im)^[ \t]*(?:(?:[-*+]|#{1,6})[ \t]+)?\*{0,2}Negative\*{0,2}[ \t]*:',
+)
+_SECTION_BOUNDARY_RE = re.compile(
+    r'(?m)^(?:---\s*SCENE\b|[ \t]*(?:[-*+][ \t]+)?\*{0,2}[A-Z][A-Za-z /&]{1,24}\*{0,2}[ \t]*:)',
+)
 _NEGATOR_BEFORE = re.compile(
     r'(?i)\b(?:no|not|avoid(?:ing)?|without|never|ban(?:ned)?)\b[\w\s/,-]{0,30}$')
 
@@ -51,14 +62,20 @@ def _is_negated(text: str, start: int) -> bool:
     """True if the match at `start` sits in an instruction telling the model to avoid it.
 
     Two shapes count. A per-item negator ("no gore", "avoiding blood") is caught
-    by looking back a short way. A bare `Negative:` list is not — one run wrote
-    "…ugly, duplicate, morbid, mutilated, disfigured" with no "no" on any item,
-    and every one of its 156 scenes was reported as a GORE hit (observed
-    2026-08-13). The whole line is the avoid-list, so anything on it is negated.
+    by looking back a short way. A bare `Negative:` list (single-line or wrapped
+    across lines) is also an avoid-list, so anything inside it up to the next
+    section/scene boundary is negated.
     """
     line_start = text.rfind('\n', 0, start) + 1
     if _NEGATIVE_FIELD_RE.match(text, line_start):
         return True
+    block_start = text.rfind('--- SCENE ', 0, start)
+    block_start = 0 if block_start == -1 else block_start
+    neg_matches = list(_NEGATIVE_FIELD_RE.finditer(text, block_start, start))
+    if neg_matches:
+        after_neg = neg_matches[-1].end()
+        if not _SECTION_BOUNDARY_RE.search(text, after_neg, start):
+            return True
     return bool(_NEGATOR_BEFORE.search(text[max(0, start - 40):start]))
 
 
@@ -169,28 +186,41 @@ def fix_text(text: str, rules: dict[str, list[re.Pattern]]) -> tuple[str, int]:
 def main() -> int:
     ap = argparse.ArgumentParser(description='Content-safety gate for assembled '
                                              'visual-prompt output files.')
-    ap.add_argument('--output', required=True, help='assembled prompts .txt to scan')
-    ap.add_argument('--blocklist', required=True, help='blocklist-content-safety.md')
+    ap.add_argument('--output', required=False, default=None, help='assembled prompts .txt to scan')
+    ap.add_argument('positional_output', nargs='?', default=None, help='assembled prompts .txt to scan (positional)')
+    ap.add_argument('--blocklist', required=False, default=None, help='blocklist-content-safety.md')
     ap.add_argument('--fix', action='store_true', help='strip/soften in place')
     args = ap.parse_args()
 
+    out_file = args.output or args.positional_output
+    if not out_file:
+        ap.error("the following arguments are required: --output or positional output")
+
+    blocklist_file = args.blocklist
+    if not blocklist_file:
+        default_blocklist = Path(__file__).resolve().parent.parent / 'references' / 'blocklist-content-safety.md'
+        if default_blocklist.is_file():
+            blocklist_file = str(default_blocklist)
+        else:
+            ap.error("the following arguments are required: --blocklist")
+
     try:
-        blocklist = Path(args.blocklist).read_text(encoding='utf-8')
-        out_path = Path(args.output)
-        text = out_path.read_text(encoding='utf-8')
-    except OSError as e:
+        blocklist = read_text_checked(Path(blocklist_file))
+        out_path = Path(out_file)
+        text = read_text_checked(out_path)
+    except (OSError, RuntimeError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
     rules = parse_blocklist(blocklist)
     if not rules:
-        print(f"ERROR: no rules parsed from {args.blocklist}", file=sys.stderr)
+        print(f"ERROR: no rules parsed from {blocklist_file}", file=sys.stderr)
         return 1
 
     if args.fix:
         text, n = fix_text(text, rules)
         if n:
-            out_path.write_text(text, encoding='utf-8')
+            atomic_write_text(out_path, text)
         print(f"content-safety-fix: stripped {n} span(s) in {out_path.name}")
 
     hits = scan(text, rules)
@@ -199,7 +229,8 @@ def main() -> int:
         for section, found in hits.items():
             tag = ' (WARN-only)' if section in WARN_ONLY else ''
             print(f"  {section}{tag}: {len(found)} → {sorted(set(found))}")
-        return 2
+        blocking = {sec: found for sec, found in hits.items() if sec not in WARN_ONLY}
+        return 2 if blocking else 0
     print(f"✓ content-safe: {out_path.name}")
     return 0
 

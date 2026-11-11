@@ -22,6 +22,12 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = str(Path(__file__).parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from _io_utils import atomic_write_text, read_text_checked  # type: ignore
+
 AGE_RE = re.compile(r'[0-9][0-9\-–]*$')  # 16-17, 20, 25-30
 UNKNOWN = {'', 'not stated'}
 
@@ -34,11 +40,12 @@ def _canonical_anchor(fields: list[str]) -> str:
         age_clause = f'{age} years old'
     else:
         age_clause = f'age described as {age}'
-    build_clause = (
-        'build not stated'
-        if build.casefold() in UNKNOWN
-        else f'{build} build'
-    )
+    if build.casefold() in UNKNOWN:
+        build_clause = 'build not stated'
+    elif build.casefold().endswith('build'):
+        build_clause = build
+    else:
+        build_clause = f'{build} build'
     hair_clause = 'hair not stated' if hair.casefold() in UNKNOWN else hair
     face_clause = 'face not stated' if face.casefold() in UNKNOWN else face
     signature_clause = (
@@ -114,10 +121,10 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        bible = Path(args.bible).read_text(encoding='utf-8')
+        bible = read_text_checked(Path(args.bible))
         out_path = Path(args.output)
-        text = out_path.read_text(encoding='utf-8')
-    except OSError as e:
+        text = read_text_checked(out_path)
+    except (OSError, RuntimeError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
@@ -129,7 +136,7 @@ def main() -> int:
     if args.fix:
         text, n = fix_text(text, chars)
         if n:
-            out_path.write_text(text, encoding='utf-8')
+            atomic_write_text(out_path, text)
         print(f"anchor-fix: normalized {n} off-bible anchor(s) in {out_path.name}")
 
     report = scan(text, chars)

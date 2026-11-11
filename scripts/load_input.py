@@ -11,6 +11,12 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = str(Path(__file__).parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from _io_utils import atomic_write_text  # type: ignore
+
 CHAPTER_RE = re.compile(
     r'^[ \t]*(Chương|CHƯƠNG|Chapter|CHAPTER|chương|chapter)[ \t]+(\d+)[ \t:.\-—]*([^\n]*)$',
     re.MULTILINE,
@@ -63,9 +69,14 @@ def load_input(path: str | Path) -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description='v3.5 input loader')
     parser.add_argument('input', help='Path to .txt or .docx novel file')
+    parser.add_argument('-o', '--output', help='Output JSON path (defaults to stdout)')
     args = parser.parse_args()
     chapters = load_input(args.input)
-    print(json.dumps(chapters, ensure_ascii=False))
+    content = json.dumps(chapters, ensure_ascii=False, indent=2)
+    if args.output:
+        atomic_write_text(Path(args.output), content)
+    else:
+        print(content)
     return 0
 
 

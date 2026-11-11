@@ -18,6 +18,7 @@ Separator uses ORIGINAL scene index so video file shows gaps:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import sys
@@ -59,17 +60,22 @@ LEAN_IMAGE_WORD_MIN = 60
 LEAN_IMAGE_WORD_MAX = 220
 _VIDEO_HEADERS = ['Cinematography', 'Subject', 'Action', 'Context', 'Style & Ambiance']
 _TIMESTAMP_RE = re.compile(r'(?:\[\d{2}:\d{2}|Beat\s*\d+)')
-_NEGATIVE_SECTION_RE = re.compile(r'(?ims)^Negative\s*:\s*(.*?)\Z')
+_NEGATIVE_SECTION_RE = re.compile(r'(?ims)^\s*(?:#{1,6}\s+)?Negative(?:\s*:|(?=\s*\n))\s*(.*?)\Z')
 
 
+@functools.lru_cache(maxsize=32)
 def _header_pattern(h: str) -> re.Pattern:
     # 1. Normalize slashes in h to allow optional spacing, e.g. "Action / Energy" or "Action/Energy"
     parts = re.split(r'\s*/\s*', h)
     escaped_parts = [re.escape(p) for p in parts]
     content_pattern = r'\s*/\s*'.join(escaped_parts)
-    
+
     # 2. Allow optional list markers, markdown stars, square brackets, parenthesized notes, and colons in any order
-    pattern = r'(?im)^\s*(?:[-*+]\s+)?(?:\*\*|\*|)?\s*(?:\[|)?\s*' + content_pattern + r'\s*(?:\]|)?\s*(?:\s*\([^)]*\))?\s*(?:\*\*|\*|)?\s*(?::|：)?\s*(?:\*\*|\*|)?'
+    pattern = (
+        r'(?im)^\s*(?:(?:[-*+]|#{1,6})\s+)?(?:\*\*|\*)?\s*\[?\s*'
+        + content_pattern
+        + r'\s*\]?\s*(?:\s*\([^)]*\))?\s*(?:\*\*|\*)?\s*(?::|：)\s*(?:\*\*|\*)?'
+    )
     return re.compile(pattern)
 
 
@@ -199,10 +205,14 @@ def sync_series_bible(work_dir: Path) -> dict:
     Append-only in spirit: a character the series bible does not know is added, and
     one it already knows is replaced only by a row that states strictly more.
     """
-    local = work_dir / 'character-bible.md'
-    if not local.is_file():
+    local = next(
+        (cand for cand in (work_dir / 'character-bible.md', work_dir.parent / 'character-bible.md')
+         if cand.is_file()),
+        None,
+    )
+    if local is None:
         return {}
-    text = local.read_text(encoding='utf-8')
+    text = read_text_checked(local)
     series_match = _BIBLE_SERIES_RE.search(text)
     if not series_match:
         return {}
@@ -213,7 +223,7 @@ def sync_series_bible(work_dir: Path) -> dict:
         atomic_write_text(target, text)
         return {'series': series, 'created': True, 'added': 0, 'upgraded': 0}
 
-    stored = target.read_text(encoding='utf-8').splitlines()
+    stored = read_text_checked(target).splitlines()
     index = {}
     last_row = -1
     for position, line in enumerate(stored):
@@ -315,9 +325,13 @@ def write_scene_anchors(work_dir: Path, output_dir: Path, stem: str) -> Path | N
     plan = Path(work_dir) / 'scene-plan.md'
     if not plan.is_file():
         return None
+    try:
+        plan_lines = read_text_checked(plan).splitlines()
+    except (OSError, RuntimeError):
+        return None
     rows: list[list[str]] = []
     columns: dict[str, int] | None = None
-    for line in plan.read_text(encoding='utf-8').splitlines():
+    for line in plan_lines:
         line = line.strip()
         if not line.startswith('|') or set(line) <= set('|-: '):
             continue

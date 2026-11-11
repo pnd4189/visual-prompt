@@ -13,9 +13,14 @@ If the file does not exist, it is created with the row alone.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
+
+_SCRIPT_DIR = str(Path(__file__).parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from _io_utils import _fsync_if_safe, read_text_checked  # type: ignore
 
 
 def append_row(bible_path: Path, row: str) -> int:
@@ -24,17 +29,16 @@ def append_row(bible_path: Path, row: str) -> int:
     if not row.strip():
         raise ValueError("empty row")
 
-    existing = bible_path.read_text(encoding='utf-8') if bible_path.exists() else ''
+    existing = read_text_checked(bible_path) if bible_path.exists() else ''
     sep = '' if existing.endswith('\n') or not existing else '\n'
 
     with open(bible_path, 'a', encoding='utf-8') as f:
         f.write(f"{sep}{row}\n")
         f.flush()
-        os.fsync(f.fileno())
+        _fsync_if_safe(f, bible_path)
 
     # count rows = non-empty lines after header (rough)
-    new_text = bible_path.read_text(encoding='utf-8')
-    line_count = sum(1 for ln in new_text.splitlines() if ln.strip())
+    line_count = sum(1 for ln in existing.splitlines() if ln.strip()) + 1
     return line_count
 
 

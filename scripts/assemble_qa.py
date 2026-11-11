@@ -232,19 +232,28 @@ def _paragraphs(text: str) -> list[str]:
     return [p for p in text.split('\n') if p.strip()]
 
 
-def _source_chapters(work_dir: Path) -> dict[int, str]:
-    """Per-chapter source text from chapters.json; empty when it is unreadable."""
+def _load_source_rows(work_dir: Path) -> list[dict]:
     path = work_dir / 'chapters.json'
-    if not path.exists():
-        return {}
+    if not path.is_file():
+        return []
     try:
         rows = json.loads(read_text_checked(path))
     except (json.JSONDecodeError, OSError, RuntimeError, ValueError):
-        return {}
+        return []
     if not isinstance(rows, list):
-        return {}
-    return {int(row['id']): row.get('text', '')
-            for row in rows if isinstance(row, dict) and 'id' in row}
+        return []
+    return [row for row in rows if isinstance(row, dict) and 'id' in row]
+
+
+def _source_chapters(work_dir: Path) -> dict[int, str]:
+    """{chapter_id: text} from .work/chapters.json, or {} if unreadable."""
+    result: dict[int, str] = {}
+    for row in _load_source_rows(work_dir):
+        try:
+            result[int(row['id'])] = str(row.get('text', ''))
+        except (TypeError, ValueError):
+            continue
+    return result
 
 
 def _compressed_paragraphs(source_text: str, qa_text: str) -> list[tuple[int, int]]:
@@ -478,21 +487,27 @@ def assemble(input_path: Path, work_dir: Path) -> dict:
 def passthrough(work_dir: Path) -> dict:
     """Build chapters_qa.json from the loaded chapters, with no proofread.
 
-    For a run invoked with --no-qa: the source is taken as it is. No _qa.txt is
-    written, since there is no proofread to hand to TTS. Sentences that name a
-    sexual act alongside a minor are reported rather than refused, because there
-    is no QA step left to rewrite them.
+    For a run without --qa (default or explicit --no-qa): the source is taken as
+    it is. No _qa.txt is written, since there is no proofread to hand to TTS.
+    Sentences that name a sexual act alongside a minor are reported rather than
+    refused, because there is no QA step left to rewrite them.
     """
-    source_texts = _source_chapters(work_dir)
+    rows = _load_source_rows(work_dir)
+    if not rows:
+        raise RuntimeError(
+            'no readable .work/chapters.json — run STEP 1 (load_input.py) first')
+    source_texts: dict[int, str] = {}
+    titles: dict[int, str] = {}
+    for row in rows:
+        try:
+            cid = int(row['id'])
+        except (TypeError, ValueError):
+            continue
+        source_texts[cid] = str(row.get('text', ''))
+        titles[cid] = str(row.get('title') or '')
     if not source_texts:
         raise RuntimeError(
             'no readable .work/chapters.json — run STEP 1 (load_input.py) first')
-    titles = {}
-    try:
-        for row in json.loads((work_dir / 'chapters.json').read_text(encoding='utf-8')):
-            titles[int(row['id'])] = str(row.get('title') or '')
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
 
     chapters, warnings, slang_softened = [], [], 0
     for cid in sorted(source_texts):

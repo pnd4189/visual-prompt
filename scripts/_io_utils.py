@@ -30,10 +30,10 @@ def _fsync_if_safe(file_obj, path: Path) -> None:
 # latency spike past it used to kill the whole step: one re-assemble died on a
 # chapter that read back in 0.52s a minute later (observed 2026-08-13). Retrying
 # tells a spike apart from a hang without giving up the fast failure.
-_CLOUD_READ_ATTEMPTS = 3
+_CLOUD_READ_ATTEMPTS = 5
 
 
-def read_text_checked(path: Path, *, timeout_seconds: int = 3) -> str:
+def read_text_checked(path: Path, *, timeout_seconds: int = 15) -> str:
     """Read UTF-8 text, failing fast on cloud mounts that hang on stale files."""
     path = Path(path)
     if not _is_cloud_mount_path(path):

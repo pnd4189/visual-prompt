@@ -15,6 +15,15 @@ from load_input import load_input  # type: ignore
 
 EXCERPT_CHARS = 2200
 MAX_CANDIDATES = 200
+_GENERATED_TXT_SUFFIXES = (
+    '_image_prompts.txt',
+    '_video_prompts.txt',
+    '_music_prompts.txt',
+)
+
+
+def _is_generated_txt(path: Path) -> bool:
+    return path.name.lower().endswith(_GENERATED_TXT_SUFFIXES)
 
 
 def _tail(text: str) -> str:
@@ -58,12 +67,7 @@ def _candidate_files(input_path: Path) -> list[Path]:
         if len(files) >= MAX_CANDIDATES:
             break
 
-    filtered: list[Path] = []
-    for path in files:
-        name = path.name.lower()
-        if name.endswith('_image_prompts.txt') or name.endswith('_video_prompts.txt'):
-            continue
-        filtered.append(path)
+    filtered = [path for path in files if not _is_generated_txt(path)]
     return sorted(
         filtered,
         key=lambda p: (0 if p.name.lower().endswith('_qa.txt') else 1, str(p)),
@@ -123,8 +127,7 @@ def find_previous(input_path: Path) -> dict:
     # every sibling subdir under the search root on the gdrive FUSE mount and
     # stalls in request_wait_answer (uninterruptible D state) for up to hours
     # on large folders — blocking the whole batch.
-    fast = [p for p in input_path.parent.glob('*.txt')
-            if not p.name.lower().endswith(('_image_prompts.txt', '_video_prompts.txt'))]
+    fast = [p for p in input_path.parent.glob('*.txt') if not _is_generated_txt(p)]
     fast.sort(key=lambda p: (0 if p.name.lower().endswith('_qa.txt') else 1, str(p)))
     best = _search(fast)
     # Fallback: broad scan across sibling dirs (e.g. a "ĐÃ QA" done-folder) only
@@ -167,8 +170,7 @@ def find_previous(input_path: Path) -> dict:
         # the inconsistent one.
         if first_id > 1:
             siblings = [p for p in input_path.parent.glob('*.txt')
-                        if not p.name.lower().endswith(
-                            ('_image_prompts.txt', '_video_prompts.txt', '_music_prompts.txt'))]
+                        if not _is_generated_txt(p)]
             real_marker_count = 0
             for p in siblings:
                 try:

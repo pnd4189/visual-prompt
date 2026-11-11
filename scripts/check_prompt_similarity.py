@@ -184,16 +184,35 @@ def _cosine(vectors: list[dict[str, float]], norms: list[float], a: int, b: int)
 def _similarities(documents: list[str], soft: float):
     tokenized = [_tokens(document) for document in documents]
     normalized = [' '.join(tokens) for tokens in tokenized]
+    lengths = [len(text) for text in normalized]
+    matchers = [
+        difflib.SequenceMatcher(None, '', text) if text else None
+        for text in normalized
+    ]
     vectors, norms = _tfidf_vectors(tokenized)
     for left in range(len(documents)):
-        if not normalized[left]:
+        left_text = normalized[left]
+        if not left_text:
             continue
+        left_len = lengths[left]
         for right in range(left + 1, len(documents)):
-            if not normalized[right]:
+            right_text = normalized[right]
+            if not right_text:
                 continue
-            matcher = difflib.SequenceMatcher(None, normalized[left], normalized[right])
+            if left_text == right_text:
+                yield left, right, 1.0
+                continue
+            cos = _cosine(vectors, norms, left, right)
+            right_len = lengths[right]
+            max_seq = (2.0 * min(left_len, right_len)) / (left_len + right_len)
+            if max_seq < soft or max_seq <= cos:
+                yield left, right, cos
+                continue
+            matcher = matchers[right]
+            assert matcher is not None
+            matcher.set_seq1(left_text)
             sequence_score = matcher.ratio() if matcher.quick_ratio() >= soft else 0.0
-            yield left, right, max(sequence_score, _cosine(vectors, norms, left, right))
+            yield left, right, max(sequence_score, cos)
 
 
 def _warning(kind: str, field: str | None, left: int, right: int, score: float) -> dict:
@@ -217,7 +236,7 @@ def check_style_lock(scenes: list[dict]) -> list[dict]:
     samples is quarantined bypass output — no trustworthy deep run exists to
     calibrate against, and a rule this absolute has no business being guessed.
     """
-    seen: dict[str, int] = {}
+    seen: dict[str, int | str] = {}
     for scene in scenes:
         value = ' '.join((scene['fields'].get('Style') or '').split())
         if value:
@@ -225,7 +244,8 @@ def check_style_lock(scenes: list[dict]) -> list[dict]:
     if len(seen) < 2:
         return []
     return [{
-        'type': 'style_not_locked', 'scene_a': min(seen.values()),
+        'type': 'style_not_locked',
+        'scene_a': min(seen.values(), key=_scene_id_sort_key),
         'sim': 0.0,
         'reason': (f'{len(seen)} different Style blocks across the run — Style is '
                    'the series lock and must be the chosen style id, repeated '
@@ -292,7 +312,11 @@ def check_image(scenes: list[dict], soft: float, near: float,
         pair: fields for pair, fields in pair_fields.items() if len(fields) >= 2
     }
     if len(copied_pairs) > max_pair_copies:
-        for (left_id, right_id), fields in sorted(copied_pairs.items()):
+        pair_sort_key = lambda item: (
+            _scene_id_sort_key(item[0][0]),
+            _scene_id_sort_key(item[0][1]),
+        )
+        for (left_id, right_id), fields in sorted(copied_pairs.items(), key=pair_sort_key):
             violations.append({
                 'type': 'pair_copy', 'scene_a': left_id, 'scene_b': right_id,
                 'fields': [field for field, *_ in fields],
@@ -415,8 +439,9 @@ def _history_values(image_text: str, music_text: str | None) -> dict[str, list[s
         if fields.get('Setting'):
             sentence = re.split(r'(?<=[.!?])\s+', ' '.join(fields['Setting'].split()), maxsplit=1)[0]
             values['settings used'].append(sentence[:200].rstrip())
-        if fields.get('Action / Energy'):
-            motif = re.split(r'[,;—–]', ' '.join(fields['Action / Energy'].split()), maxsplit=1)[0]
+        action_raw = fields.get('Action / Energy') or fields.get('Action')
+        if action_raw:
+            motif = re.split(r'[,;—–]', ' '.join(action_raw.split()), maxsplit=1)[0]
             values['action motifs used'].append(motif.strip())
         if fields.get('Lighting / Color'):
             palette = re.split(r'[,;—–]', ' '.join(fields['Lighting / Color'].split()), maxsplit=1)[0]

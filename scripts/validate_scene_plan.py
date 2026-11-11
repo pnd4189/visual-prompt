@@ -22,6 +22,7 @@ _SCRIPT_DIR = str(Path(__file__).parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
+from _io_utils import atomic_write_text, read_text_checked  # type: ignore  # noqa: E402
 from calc_scene_count import deterministic_images  # type: ignore  # noqa: E402
 
 MIN_SYNOPSIS_WORDS = 4
@@ -510,10 +511,10 @@ def main() -> int:
         print(f"ERROR: chapter source not found: {chapters_path}", file=sys.stderr)
         return 1
     try:
-        chapters = json.loads(chapters_path.read_text(encoding='utf-8'))
+        chapters = json.loads(read_text_checked(chapters_path))
         if not isinstance(chapters, list):
             raise ValueError('chapter source must be a JSON list')
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, RuntimeError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: cannot read chapter source: {exc}", file=sys.stderr)
         return 1
 
@@ -527,17 +528,24 @@ def main() -> int:
 
     genre_path = plan_path.parent / 'genre.txt'
     try:
-        genre = genre_path.read_text(encoding='utf-8').strip()
-    except (OSError, UnicodeError):
+        genre = read_text_checked(genre_path).strip() if genre_path.is_file() else None
+    except (OSError, RuntimeError, UnicodeError):
         genre = None
 
-    plan_bytes = plan_path.read_bytes()
-    result = validate(plan_bytes.decode('utf-8'), chapters, expected, genre)
+    try:
+        plan_text = read_text_checked(plan_path)
+    except (OSError, RuntimeError, UnicodeError) as exc:
+        print(f"ERROR: cannot read scene plan: {exc}", file=sys.stderr)
+        return 1
+    plan_bytes = plan_text.encode('utf-8')
+    result = validate(plan_text, chapters, expected, genre)
     if result['ok']:
         # The cache key the music path reads. Writing it here, from the bytes the
         # gate just accepted, retires a hand-computed step the model kept skipping.
-        (plan_path.parent / 'plan.hash').write_text(
-            hashlib.sha1(plan_bytes).hexdigest()[:12] + '\n', encoding='utf-8')
+        atomic_write_text(
+            plan_path.parent / 'plan.hash',
+            hashlib.sha1(plan_bytes).hexdigest()[:12] + '\n',
+        )
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result['ok'] else 2
 

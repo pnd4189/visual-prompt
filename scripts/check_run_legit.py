@@ -35,6 +35,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from active_model_policy import WRITE_TOOLS
 from assemble_outputs import image_spec_failures
 
 IMAGE_WORD_MIN = 350
@@ -100,7 +101,10 @@ def _sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-STYLE_LINE_RE = re.compile(r'^Style:[ \t]*(.+?)\s*$', re.M)
+STYLE_LINE_RE = re.compile(
+    r'^[ \t]*(?:[-*+][ \t]+)?\**Style\**[ \t]*:[ \t]*\**[ \t]*(.+?)\s*$',
+    re.M,
+)
 _CATALOG_HEADING_RE = re.compile(r'^###\s+([a-z0-9-]+)\s+—')
 _CATALOG_BLOCK_RE = re.compile(r'^-\s*Style block \(EN, paste-ready\):\s*(.*)$')
 
@@ -164,7 +168,13 @@ def _assembled_scene_ids(image_path):
     if image_path is None or not image_path.exists():
         return set()
     try:
-        return {m.casefold() for m in BLOCK_RE.findall(image_path.read_text(errors='ignore'))}
+        ids = set()
+        for m in BLOCK_RE.findall(image_path.read_text(errors='ignore')):
+            ids.add(m.casefold())
+            match = re.fullmatch(r'0*(\d+)([a-zA-Z]?)', m)
+            if match:
+                ids.add(f"{match.group(1)}{match.group(2).casefold()}")
+        return ids
     except OSError:
         return set()
 
@@ -210,7 +220,7 @@ def _proven_writes(log_path):
         and record.get('model')
         and isinstance(record.get('size'), int) and record.get('size') > 0
         and Path(str(record.get('target', ''))).name == record.get('basename')
-        and record.get('tool') in {'write_to_file', 'replace_file_content', 'multi_replace_file_content'}
+        and record.get('tool') in WRITE_TOOLS
     }
     return proven, []
 

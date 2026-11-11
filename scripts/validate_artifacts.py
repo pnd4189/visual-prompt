@@ -297,11 +297,21 @@ def _split_music_output(text: str) -> tuple[list[str], bool]:
     return blocks, not pending
 
 
+def _section_header_re(name: str) -> re.Pattern:
+    return re.compile(
+        rf'^[ \t]*(?:[-*+][ \t]+)?\**{re.escape(name)}\**[ \t]*:',
+        re.MULTILINE,
+    )
+
+
 def _lean_field_length_errors(name: str, text: str) -> list[str]:
     """Reject a lean Setting/Action that is too thin to describe its moment."""
     errors = []
     for field in LEAN_MEASURED_FIELDS:
-        match = re.search(rf'^{field}:[ \t]*(.+)$', text, re.MULTILINE)
+        match = re.search(
+            rf'^[ \t]*(?:[-*+][ \t]+)?\**{re.escape(field)}\**[ \t]*:[ \t]*(.+)$',
+            text, re.MULTILINE,
+        )
         if match is None:
             continue  # the missing-section check already reported it
         words = len(match.group(1).split())
@@ -352,6 +362,67 @@ def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None
     if len(expected_names) != len(expected):
         errors.append(f'{plan_path.name} contains scene id aliases')
 
+    has_scene_files = any(
+        path.name != 'scene-plan.md' and _SCENE_FILE_RE.fullmatch(path.name)
+        for path in work_dir.iterdir()
+    ) if work_dir.is_dir() else False
+
+    if not has_scene_files:
+        # Intermediate scene files were cleaned up post-assembly (e.g. by cleanup_work.py).
+        # Fall back to validating the scenes from the assembled image prompts file.
+        plan_text = read_text_checked(plan_path)
+        stem_match = re.search(r'#\s*Scene\s+Plan\s*[—–-]\s*([^.\r\n]+?)(?:\.txt)?\s*$', plan_text, re.MULTILINE)
+        stem = stem_match.group(1).strip() if stem_match else None
+
+        image_path = None
+        if stem:
+            for d in [work_dir.parent, work_dir]:
+                cand = d / f'{stem}_image_prompts.txt'
+                if cand.is_file():
+                    image_path = cand
+                    break
+        if image_path is None:
+            for d in [work_dir.parent, work_dir]:
+                matches = sorted(d.glob('*_image_prompts.txt'))
+                for cand in matches:
+                    cand_text = _read_nonempty(cand, [], 'assembled candidate')
+                    if cand_text and any(f'--- SCENE {sid}' in cand_text for sid in scene_ids[:3]):
+                        image_path = cand
+                        break
+                if image_path is not None:
+                    break
+        if image_path is None or not image_path.is_file():
+            errors.append(f'no scene files in {work_dir} and no assembled _image_prompts.txt found')
+            return _result('scenes', errors, **extra)
+
+        image_text = _read_nonempty(image_path, errors, 'assembled output')
+        if image_text is None:
+            return _result('scenes', errors, **extra)
+
+        block_splits = re.split(r'^---\s*SCENE\s+(\d+[a-zA-Z]?)\s*---\s*$', image_text, flags=re.MULTILINE)
+        assembled_scenes = {}
+        for idx in range(1, len(block_splits), 2):
+            assembled_scenes[_scene_filename(block_splits[idx])] = block_splits[idx + 1]
+
+        for scene_id in scene_ids:
+            body = assembled_scenes.get(_scene_filename(scene_id))
+            if body is None:
+                errors.append(f'scene {scene_id} missing from {image_path.name}')
+                continue
+
+            required = LEAN_IMAGE_SECTIONS if lean else IMAGE_SECTIONS
+            absent = [name for name in required
+                      if not _section_header_re(name).search(body)]
+            if absent:
+                errors.append(
+                    f'scene-{scene_id} image prompt is missing required section(s) '
+                    f'({"lean" if lean else "deep"} spec): {absent}'
+                )
+            elif lean:
+                errors.extend(_lean_field_length_errors(f'scene-{scene_id}', body))
+
+        return _result('scenes', errors, **extra)
+
     for scene_id in scene_ids:
         path = work_dir / _scene_filename(scene_id)
         text = _read_nonempty(path, errors, 'scene file')
@@ -385,7 +456,7 @@ def check_scenes(work_dir: Path, plan_path: Path, assigned_ids: list[str] | None
             # gate because it has no fields to compare).
             required = LEAN_IMAGE_SECTIONS if lean else IMAGE_SECTIONS
             absent = [name for name in required
-                      if not re.search(rf'^{re.escape(name)}:', text, re.MULTILINE)]
+                      if not _section_header_re(name).search(text)]
             if absent:
                 errors.append(
                     f'{path.name} image prompt is missing required section(s) '

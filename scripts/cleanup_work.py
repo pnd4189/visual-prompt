@@ -19,8 +19,10 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+from _io_utils import read_text_checked
 from assemble_outputs import image_spec_failures
 
 SCENE_FILE_RE = re.compile(r'^scene-\d{3}[a-zA-Z]?\.md$')
@@ -71,8 +73,11 @@ def cleanup(work: Path, image: Path, lean: bool = False) -> tuple[int, dict]:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': 'assembled output has fewer scenes than the plan — '
                              'finish the run before cleaning up'}
-    off_spec = image_spec_failures(image.read_text(encoding='utf-8', errors='replace'),
-                                   lean=True) if lean else {}
+    try:
+        image_text = read_text_checked(image)
+    except (OSError, RuntimeError) as exc:
+        return 2, {'ok': False, 'reason': f'cannot read assembled output: {exc}'}
+    off_spec = image_spec_failures(image_text, lean=True) if lean else {}
     if off_spec:
         return 2, {'ok': False, 'planned': planned, 'assembled': assembled,
                    'reason': f'{len(off_spec)} scenes break the lean spec — rewrite '
@@ -85,7 +90,14 @@ def cleanup(work: Path, image: Path, lean: bool = False) -> tuple[int, dict]:
                              'scenes and re-assemble before cleaning up',
                    'similarity': failure}
     for scene in scenes:
-        scene.unlink()
+        for attempt in range(5):
+            try:
+                scene.unlink(missing_ok=True)
+                break
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.5)
     return 0, {'ok': True, 'removed': len(scenes), 'planned': planned,
                'assembled': assembled, 'kept': ['scene-plan.md',
                                                 'active-model-authorship.jsonl']}
