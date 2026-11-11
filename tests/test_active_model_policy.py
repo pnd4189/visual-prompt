@@ -57,6 +57,26 @@ class WriteRootTests(unittest.TestCase):
 class InputRootLearningTests(unittest.TestCase):
     """A direct /visual-prompt runs from whatever workspace Agy has open."""
 
+    def test_output_option_before_input_does_not_claim_stale_output_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            work = root / '.work'
+            work.mkdir()
+            output = work / 'chapters.json'
+            output.write_text('[]', encoding='utf-8')
+            novel = root / 'novels' / 'input.txt'
+            novel.parent.mkdir()
+            novel.write_text('Chapter one', encoding='utf-8')
+            for option in ('-o', '--output'):
+                with self.subTest(option=option):
+                    payload = {'artifactDirectoryPath': str(root / option)}
+                    self.assertIsNone(policy.command_denial({
+                        'CommandLine': f'python3 "{ROOT}/scripts/load_input.py" '
+                                       f'{option} "{output}" "{novel}"',
+                        'Cwd': str(root),
+                    }, payload))
+                    self.assertEqual(novel.parent, policy.input_root(payload))
+
     def test_first_helper_call_opens_the_input_work_dir_and_nothing_more(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as novel:
             workspace, novel_dir = Path(tmp).resolve(), Path(novel).resolve()

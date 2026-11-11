@@ -17,7 +17,7 @@ except ImportError:  # Windows Agy has no fcntl; append-only records remain vali
 
 from active_model_policy import (
     FORBIDDEN_TOOLS, input_root, NEUTRAL_TOOLS, READ_TOOLS, SKILL_ROOT, WRITE_TOOLS,
-    command_denial, lean_mode, state_path, target_path, write_denial,
+    command_denial, is_full_write, lean_mode, state_path, target_path, write_denial,
 )
 
 # Measured on the wire: Agy sends the enum name with the TERMINATION_REASON_
@@ -40,6 +40,7 @@ GUARD_MARKER = b'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1'
 INVOCATION_RE = re.compile(
     rb'<USER_REQUEST>(?:\\[rnt]|\s)*/(?:[A-Za-z0-9._-]+:)?visual-prompt\b'
 )
+INPUT_ARGS_RE = re.compile(rb'^Input args:[ \t]*([^\r\n]+)', re.MULTILINE)
 QA_FLAG_RE = re.compile(rb'(?<![\w-])--qa(?![\w-])')
 HEAD_BYTES = 131_072
 TAIL_BYTES = 262_144
@@ -80,39 +81,109 @@ GUARD_RULES = (
 )
 
 
-def _transcript_armed(path: str | None) -> bool:
-    """Arm on the user's /visual-prompt turn or on the contract marker."""
+def _armable_jsonl_bytes(raw_line: bytes) -> bytes:
+    """Return user-input content for a JSONL record, or b'' for model/tool steps."""
+    stripped = raw_line.lstrip()
+    try:
+        record = json.loads(stripped)
+    except (UnicodeError, ValueError):
+        header = stripped[:240]
+        if re.search(rb'"type"\s*:\s*"USER_INPUT"|"source"\s*:\s*"USER_EXPLICIT"', header):
+            return stripped
+        return b''
+    if not isinstance(record, dict):
+        return b''
+    if record.get('type') == 'USER_INPUT' or record.get('source') == 'USER_EXPLICIT':
+        content = record.get('content')
+        return (content.encode('utf-8') + b'\n') if isinstance(content, str) else b''
+    return b''
+
+
+def _iter_armable_chunks(raw: bytes):
+    """Yield (start_offset, bytes, is_plain) chunks eligible to arm the guard.
+
+    Agy transcripts store every step as a JSONL object. Filtering out non-user
+    JSONL steps stops read_file/grep/model responses that quote skill files from
+    false-arming unrelated sessions, while keeping plain-text fixtures intact.
+    """
+    cursor = 0
+    plain_start: int | None = None
+    plain_parts: list[bytes] = []
+    for raw_line in raw.splitlines(keepends=True):
+        if raw_line.lstrip().startswith(b'{'):
+            if plain_parts and plain_start is not None:
+                yield plain_start, b''.join(plain_parts), True
+                plain_parts = []
+                plain_start = None
+            candidate = _armable_jsonl_bytes(raw_line)
+            if candidate:
+                yield cursor, candidate, False
+        else:
+            if plain_start is None:
+                plain_start = cursor
+            plain_parts.append(raw_line)
+        cursor += len(raw_line)
+    if plain_parts and plain_start is not None:
+        yield plain_start, b''.join(plain_parts), True
+
+
+def _read_transcript_window(path: str | None) -> bytes:
+    """Read bounded head + line-aligned tail bytes from transcript path."""
     if not path:
-        return False
+        return b''
     try:
         with Path(path).open('rb') as stream:
             head = stream.read(HEAD_BYTES)
+            if len(head) == HEAD_BYTES and not head.endswith(b'\n'):
+                head += stream.readline(HEAD_BYTES)
+            after_head = stream.tell()
             stream.seek(0, os.SEEK_END)
-            stream.seek(max(HEAD_BYTES, stream.tell() - TAIL_BYTES))
-            window = head + stream.read()
+            end = stream.tell()
+            if end <= after_head:
+                return head
+            tail_start = max(after_head, end - TAIL_BYTES)
+            if tail_start > after_head:
+                stream.seek(tail_start - 1)
+                prev = stream.read(1)
+                if prev != b'\n':
+                    stream.readline()
+            else:
+                stream.seek(tail_start)
+            return head + b'\n' + stream.read()
     except OSError:
+        return b''
+
+
+def _transcript_armed(path: str | None) -> bool:
+    """Arm on the user's /visual-prompt turn or on the contract marker."""
+    window = _read_transcript_window(path)
+    if not window:
         return False
-    return GUARD_MARKER in window or INVOCATION_RE.search(window) is not None
+    for _, chunk, _ in _iter_armable_chunks(window):
+        if GUARD_MARKER in chunk or INVOCATION_RE.search(chunk) is not None:
+            return True
+    return False
 
 
 def _invocation_turn(path: str | None) -> bytes | None:
-    """The bytes of the user's own /visual-prompt turn, flags included.
+    """The bytes of the user's latest /visual-prompt turn, flags included.
 
     Everything the user chose on the command line is read from here, so a flag
     the model writes later in the transcript can never be mistaken for one the
     user asked for.
     """
-    if not path:
+    window = _read_transcript_window(path)
+    if not window:
         return None
-    try:
-        with Path(path).open('rb') as stream:
-            window = stream.read(HEAD_BYTES)
-    except OSError:
-        return None
-    match = INVOCATION_RE.search(window)
-    if match is None:
-        return None
-    return window[match.start():match.start() + 2_000].split(b'</USER_REQUEST>')[0]
+    latest = None
+    for _, chunk, _ in _iter_armable_chunks(window):
+        for match in INVOCATION_RE.finditer(chunk):
+            latest = chunk[match.start():match.start() + 2_000].split(b'</USER_REQUEST>')[0]
+        if GUARD_MARKER in chunk:
+            args_match = INPUT_ARGS_RE.search(chunk)
+            if args_match is not None:
+                latest = args_match.group(1)
+    return latest
 
 
 def _lean_invocation(path: str | None) -> bool:
@@ -128,6 +199,9 @@ def _no_qa_invocation(path: str | None) -> bool:
     """
     turn = _invocation_turn(path)
     if turn is None:
+        vp_qa = os.environ.get('VP_QA')
+        if vp_qa in {'0', '1'}:
+            return vp_qa == '0'
         return False
     return b'--no-qa' in turn or QA_FLAG_RE.search(turn) is None
 
@@ -162,14 +236,29 @@ def _images_invocation(path: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _series_invocation(path: str | None) -> str | None:
+    """The --series name from the user's latest /visual-prompt turn, if any."""
+    turn = _invocation_turn(path)
+    if turn is None:
+        return None
+    match = re.search(rb"""--series(?:=|\s+)(?:'([^']+)'|"([^"]+)"|([^\s'"]+))""", turn)
+    if not match:
+        return None
+    raw_series = next((group for group in match.groups() if group is not None), None)
+    if not raw_series:
+        return None
+    try:
+        return raw_series.decode('utf-8').strip() or None
+    except UnicodeError:
+        return None
+
+
 def _last_invocation_offset(path: str | None) -> int | None:
     """Byte offset of the newest thing that would arm the guard, or None.
 
     Two signals arm a run: the user's /visual-prompt turn, and the contract marker
     that a batch session receives as its whole prompt. Both have to be disarmable.
-    The marker also reaches a transcript by accident — an Agy session that merely
-    reads or greps the skill files picks it up, and armed the session for good
-    until this returned an offset for it too (observed 2026-08-11).
+    Non-user JSONL steps are ignored so reading skill files never shifts or arms it.
     """
     if not path:
         return None
@@ -178,11 +267,16 @@ def _last_invocation_offset(path: str | None) -> int | None:
     except OSError:
         return None
     last = None
-    for match in INVOCATION_RE.finditer(raw):
-        last = match.start()
-    marker = raw.rfind(GUARD_MARKER)
-    if marker != -1 and (last is None or marker > last):
-        last = marker
+    for start_offset, chunk, is_plain in _iter_armable_chunks(raw):
+        for match in INVOCATION_RE.finditer(chunk):
+            pos = start_offset + (match.start() if is_plain else 0)
+            if last is None or pos > last:
+                last = pos
+        marker = chunk.rfind(GUARD_MARKER)
+        if marker != -1:
+            pos = start_offset + (marker if is_plain else 0)
+            if last is None or pos > last:
+                last = pos
     return last
 
 
@@ -254,6 +348,18 @@ def _claim_primary(payload: dict) -> tuple[dict, bool]:
         loaded = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(loaded, dict) or loaded.get('schema') != 1:
             raise ValueError('invalid guard state')
+        finished = loaded.get('finished_offset')
+        if (
+            finished is not None
+            and finished is not False
+            and loaded.get('primary_conversation_id') == state['primary_conversation_id']
+        ):
+            latest = _last_invocation_offset(payload.get('transcriptPath'))
+            if latest is not None and latest > finished:
+                _work_marker(payload).unlink(missing_ok=True)
+                _stop_counter(payload).unlink(missing_ok=True)
+                path.write_text(json.dumps(state, ensure_ascii=False) + '\n', encoding='utf-8')
+                return state, True
         return loaded, False
     with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
         json.dump(state, stream, ensure_ascii=False)
@@ -330,7 +436,7 @@ def _pre_tool(payload: dict) -> dict:
     if tool in WRITE_TOOLS:
         denial = write_denial(args, payload, tool=tool)
         target = target_path(args)
-        if (not denial and tool != 'write_to_file' and target is not None
+        if (not denial and not is_full_write(tool, args) and target is not None
                 and target.name.startswith('scene-') and target.is_file()
                 and not _has_provenance(target)):
             denial = 'unproven scene cannot be patched; rewrite its full content directly'
@@ -417,6 +523,17 @@ REQUIRED_PIPELINE_ARTIFACTS = ('chapters_qa.json', 'plan.hash', 'continuity-chec
                                'bible.hash', 'style.hash', 'scene-counts.json')
 
 
+def _is_first_chapter_run(work: Path, listing: set[str]) -> bool:
+    """True when STEP 1.25 recorded continuity status == 'first_chapter'."""
+    if 'continuity-context.json' not in listing:
+        return False
+    try:
+        ctx = json.loads((work / 'continuity-context.json').read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return isinstance(ctx, dict) and ctx.get('status') == 'first_chapter'
+
+
 def _missing_pipeline_artifacts(work: Path) -> list[str]:
     """Absent grounding artifacts — or nothing, when .work cannot be read at all.
 
@@ -430,7 +547,14 @@ def _missing_pipeline_artifacts(work: Path) -> list[str]:
         listing = {entry.name for entry in work.iterdir()}
     except OSError:
         return []
-    return [name for name in REQUIRED_PIPELINE_ARTIFACTS if name not in listing]
+    missing = []
+    for name in REQUIRED_PIPELINE_ARTIFACTS:
+        if name in listing:
+            continue
+        if name == 'continuity-check.md' and _is_first_chapter_run(work, listing):
+            continue
+        missing.append(name)
+    return missing
 
 
 def _digest12(path: Path) -> str | None:
@@ -441,7 +565,27 @@ def _digest12(path: Path) -> str | None:
         return None
 
 
-def _receipt_mismatches(work: Path) -> list[str]:
+def _resolve_bible_origin(work: Path, series: str | None = None) -> Path:
+    """Locate character-bible.md across .work/, <input_dir>/, or ~/.gemini/bibles/."""
+    for candidate in (work / 'character-bible.md', work.parent / 'character-bible.md'):
+        if candidate.is_file():
+            return candidate
+    if series:
+        bibles_dir = Path.home() / '.gemini' / 'bibles'
+        direct = bibles_dir / f'{series}.md'
+        if direct.is_file():
+            return direct
+        try:
+            import assemble_outputs  # local sibling module in scripts/
+            resolved = assemble_outputs._series_bible_path(series)
+            if resolved.is_file():
+                return resolved
+        except Exception:
+            pass
+    return work / 'character-bible.md'
+
+
+def _receipt_mismatches(work: Path, series: str | None = None) -> list[str]:
     """Receipts whose content contradicts the artifact they claim to describe.
 
     Requiring the files only bought their existence, and the model writes them:
@@ -456,7 +600,8 @@ def _receipt_mismatches(work: Path) -> list[str]:
         recorded = work / name
         if not recorded.is_file():
             continue
-        origin = work / source
+        origin = (_resolve_bible_origin(work, series)
+                  if source == 'character-bible.md' else work / source)
         if not origin.is_file():
             problems.append(f'{name} has no {source} behind it')
             continue
@@ -485,7 +630,7 @@ def _receipt_mismatches(work: Path) -> list[str]:
 
 
 def _gate_failure(work: Path, log: Path, lean: bool = False,
-                  worker: bool = False) -> str | None:
+                  worker: bool = False, series: str | None = None) -> str | None:
     """Run the closing canonical gates; return the first failure text, or None."""
     images = sorted(work.parent.glob('*_image_prompts.txt'))
     if not images:
@@ -512,7 +657,7 @@ def _gate_failure(work: Path, log: Path, lean: bool = False,
         )
         return ('the run skipped the steps that ground it — .work has no '
                 f'{" and no ".join(missing)}. {detail}')
-    wrong = _receipt_mismatches(work)
+    wrong = _receipt_mismatches(work, series=series)
     if wrong:
         return ('the receipts do not match what they describe — '
                 + '; '.join(wrong) + '. Recompute them from the files themselves; '
@@ -594,11 +739,6 @@ def _load_counter(payload: dict) -> dict:
         return {'holds': 0, 'scenes': 0, 'stalls': 0}
 
 
-def _input_root_marker_exists(payload: dict) -> bool:
-    """Did any canonical helper ever resolve this run's input?"""
-    return state_path(payload).with_suffix('.root').is_file()
-
-
 def _plan_gate_failure(work: Path) -> str | None:
     """The plan gate's own verdict, so a hold can name the rows to fix.
 
@@ -672,30 +812,30 @@ def _stop(payload: dict) -> dict:
         # re-prompt by hand. Hold it, and hand over the gate's own verdict so the
         # next attempt fixes named rows instead of re-deriving the problem.
         state, _ = _claim_primary(payload)
-        if state.get('primary_conversation_id') == str(payload.get('conversationId') or ''):
-            root = input_root(payload)
-            work = root / '.work' if root else None
-            reason = (_pre_scene_hold_reason(work, bool(state.get('plan_only')))
-                      if work else None)
-            if reason is not None:
-                record = _load_counter(payload)
-                if record['holds'] < MAX_STALLED_HOLDS:
-                    _stop_counter(payload).write_text(json.dumps({
-                        'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
-                    }), encoding='utf-8')
-                    return {'decision': 'continue', 'reason': reason}
-        # Nothing was ever authored and no helper resolved an input, so this
-        # invocation never became a run. Two quiet stops is enough to say so and
-        # hand the conversation back — otherwise the user is stuck with a guarded
-        # session for whatever they do next.
-        if not _input_root_marker_exists(payload):
+        if state.get('primary_conversation_id') != str(payload.get('conversationId') or ''):
+            return {}
+        root = input_root(payload)
+        work = root / '.work' if root else None
+        reason = (_pre_scene_hold_reason(work, bool(state.get('plan_only')))
+                  if work else None)
+        if reason is not None:
             record = _load_counter(payload)
-            if record['holds'] >= 1:
-                _mark_finished(payload)
-            else:
+            if record['holds'] < MAX_STALLED_HOLDS:
                 _stop_counter(payload).write_text(json.dumps({
                     'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
                 }), encoding='utf-8')
+                return {'decision': 'continue', 'reason': reason}
+            _mark_finished(payload)
+            return {}
+        # Resolving an input is not progress when no scene or usable plan follows.
+        # Bound quiet stops even when an input-root marker already exists.
+        record = _load_counter(payload)
+        if record['holds'] >= 1:
+            _mark_finished(payload)
+        else:
+            _stop_counter(payload).write_text(json.dumps({
+                'holds': record['holds'] + 1, 'scenes': 0, 'stalls': 0,
+            }), encoding='utf-8')
         return {}
     state, _ = _claim_primary(payload)
     if state.get('primary_conversation_id') != str(payload.get('conversationId') or ''):
@@ -710,15 +850,18 @@ def _stop(payload: dict) -> dict:
                    'next micro-batch now — do not stop to ask, do not summarise; '
                    'keep going until every scene file exists, then run the gates.')
     else:
-        failure = _gate_failure(work, Path(log_line.strip()), lean_mode(payload),
-                                bool(state.get('worker')))
+        lean = lean_mode(payload)
+        failure = _gate_failure(work, Path(log_line.strip()), lean,
+                                bool(state.get('worker')),
+                                series=_series_invocation(payload.get('transcriptPath')))
         if failure is None:
             if not scenes:
                 _mark_finished(payload)
                 return {}
+            lean_flag = ' --lean' if lean else ''
             message = (f'the gates pass — now merge and tidy up: run '
                        f'{SKILL_ROOT}/scripts/cleanup_work.py --work "{work}" '
-                       f'--image "{_deliverable(work.parent)}" to remove the '
+                       f'--image "{_deliverable(work.parent)}"{lean_flag} to remove the '
                        f'{scenes} merged scene files, then report the summary.')
         else:
             message = ('visual-prompt run is not finished: the closing gate still '

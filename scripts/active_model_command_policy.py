@@ -67,8 +67,17 @@ def _learn_input_root(name: str, tokens: list[str], cwd: Path, payload: dict) ->
         return
     option = INPUT_HELPERS[name]
     if option is None:
-        candidates = [token for token in tokens if not token.startswith('-')]
-        raw = candidates[0] if candidates else None
+        candidates = []
+        remaining = iter(tokens)
+        for token in remaining:
+            if token == '--':
+                candidates.extend(remaining)
+                break
+            if name == 'load_input.py' and token in {'-o', '--output'}:
+                next(remaining, None)
+            elif not token.startswith('-'):
+                candidates.append(token)
+        raw = candidates[0] if len(candidates) == 1 else None
     else:
         raw = _one(tokens, option)
     if not raw:

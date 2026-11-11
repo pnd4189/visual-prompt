@@ -38,6 +38,43 @@ def base_payload(conversation: str, artifact_dir: Path) -> dict:
 
 
 class ActiveModelHookTests(unittest.TestCase):
+    def test_current_agy_tools_preserve_write_checks_and_authorship(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            work = root / '.work'
+            work.mkdir()
+            (work / 'plan.hash').write_text('0123456789ab\n', encoding='utf-8')
+            scene = work / 'scene-001.md'
+            env = {'VP_GUARD_ACTIVE': '1', 'VP_GUARD_STATE': str(root / 'guard.json'),
+                   'VP_ALLOWED_WRITE_ROOTS': str(work)}
+            payload = base_payload('primary', root)
+            for tool, args, decision in (
+                ('read_file', {'Path': str(scene)}, 'allow'),
+                ('write_file', {'Path': str(scene), 'Content': 'stub'}, 'deny'),
+                ('write_file', {'Path': str(work / 'generator.py'), 'Content': 'x'}, 'deny'),
+                ('write_file', {'Path': str(scene), 'Content': '## Image Prompt\nscene'}, 'allow'),
+            ):
+                with self.subTest(tool=tool, args=args):
+                    call = {**payload, 'toolCall': {'name': tool, 'args': args}}
+                    self.assertEqual(decision, run_guard('pre-tool-use', call, env)['decision'])
+            scene.write_text('## Image Prompt\nscene', encoding='utf-8')
+            edit = {**payload, 'toolCall': {'name': 'edit_file', 'args': {
+                'Path': str(scene), 'Target': 'scene', 'Replacement': 'new scene'}}}
+            append = {**payload, 'toolCall': {'name': 'write_file', 'args': {
+                'Path': str(scene), 'Content': 'extra', 'Append': True}}}
+            for call in (edit, append):
+                self.assertEqual('deny', run_guard('pre-tool-use', call, env)['decision'])
+            run_guard('post-tool-use', {**payload, 'toolCall': {'name': 'write_file',
+                'args': {'Path': str(scene), 'Content': scene.read_text()}}}, env)
+            for call in (edit, append):
+                self.assertEqual('allow', run_guard('pre-tool-use', call, env)['decision'])
+            scene.write_text('## Image Prompt\nnew scene', encoding='utf-8')
+            run_guard('post-tool-use', edit, env)
+            records = [json.loads(line) for line in
+                       (work / 'active-model-authorship.jsonl').read_text().splitlines()]
+            self.assertEqual(['write_file', 'edit_file'], [r['tool'] for r in records])
+            self.assertEqual(hashlib.sha256(scene.read_bytes()).hexdigest(), records[-1]['sha256'])
+
     def test_inactive_hook_does_not_affect_other_workflows(self):
         with tempfile.TemporaryDirectory() as tmp:
             payload = base_payload('unrelated', Path(tmp) / 'artifact')
@@ -194,7 +231,8 @@ class AuthorshipGateTests(unittest.TestCase):
 
     def test_gate_accepts_only_matching_primary_scene_provenance(self):
         cases = ((None, 2), ({}, 0), ({'sha256': '0' * 64}, 2),
-                 ({'conversation_id': 'child'}, 2))
+                 ({'conversation_id': 'child'}, 2), ({'tool': 'write_file'}, 0),
+                 ({'tool': 'edit_file'}, 0), ({'tool': 'run_command'}, 2))
         for record, expected in cases:
             with self.subTest(record=record), tempfile.TemporaryDirectory() as tmp:
                 result = self.run_worker_gate(Path(tmp), record)
@@ -344,6 +382,17 @@ class PlanGateHoldTests(unittest.TestCase):
         self.assertEqual('continue', held['decision'])
         self.assertIn('expansion is the only step left', held['reason'])
         self.assertIn('scene-001.md', held['reason'])
+
+    def test_stalled_run_with_input_root_releases_other_tasks(self):
+        for has_plan in (False, True):
+            with self.subTest(has_plan=has_plan), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                payload = self._accepted_plan(root) if has_plan else self._armed_run(root)
+                for _ in range(MAX_HOLDS_PROBE):
+                    run_guard('stop', payload, {})
+                call = {**payload, 'toolCall': {'name': 'run_command', 'args': {
+                    'CommandLine': 'python3 -c "print(1)"'}}}
+                self.assertEqual('allow', run_guard('pre-tool-use', call, {})['decision'])
 
     def test_a_plan_only_head_still_stops_after_its_accepted_plan(self):
         """Pass-2 hands expansion to the workers; the head has no scenes to write."""
@@ -582,6 +631,65 @@ class InvocationArmingTests(unittest.TestCase):
                         'name': tool, 'args': {},
                     }}
                     self.assertEqual(decision, run_guard('pre-tool-use', payload, env)['decision'])
+
+    def test_non_user_jsonl_steps_quoting_skill_files_do_not_arm_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lines = (
+                json.dumps({
+                    'type': 'USER_INPUT',
+                    'source': 'USER_EXPLICIT',
+                    'content': '<USER_REQUEST>\n/ak-code-review review repository\n</USER_REQUEST>',
+                }) + '\n'
+                + json.dumps({
+                    'type': 'PLANNER_RESPONSE',
+                    'source': 'MODEL',
+                    'content': (
+                        'VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1\n'
+                        '<USER_REQUEST>\n/visual-prompt novel.txt\n</USER_REQUEST>'
+                    ),
+                }) + '\n'
+            )
+            artifact = self._armed_artifact(Path(tmp), lines)
+            payload = {**base_payload('review-session', artifact), 'toolCall': {
+                'name': 'invoke_subagent', 'args': {},
+            }}
+            self.assertEqual('allow', run_guard('pre-tool-use', payload, {})['decision'])
+
+    def test_later_user_invocation_after_finished_run_refreshes_guard_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_turn = json.dumps({
+                'type': 'USER_INPUT',
+                'source': 'USER_EXPLICIT',
+                'content': '<USER_REQUEST>\n/visual-prompt a.txt --qa\n</USER_REQUEST>',
+            }) + '\n'
+            artifact = self._armed_artifact(root, first_turn)
+            payload = base_payload('primary', artifact)
+            run_guard('pre-invocation', payload, {})
+            state_file = artifact / '.visual-prompt-primary.json'
+            first_state = json.loads(state_file.read_text(encoding='utf-8'))
+            self.assertFalse(first_state['no_qa'])
+            self.assertFalse(first_state['lean'])
+            first_state['input_root'] = str(root / 'old-dir')
+            first_state['finished_offset'] = 0
+            state_file.write_text(json.dumps(first_state) + '\n', encoding='utf-8')
+
+            transcript = Path(payload['transcriptPath'])
+            second_turn = json.dumps({
+                'type': 'USER_INPUT',
+                'source': 'USER_EXPLICIT',
+                'content': '<USER_REQUEST>\n/visual-prompt b.txt --lean\n</USER_REQUEST>',
+            }) + '\n'
+            with transcript.open('a', encoding='utf-8') as stream:
+                stream.write(second_turn)
+
+            rearmed = run_guard('pre-invocation', payload, {})
+            second_state = json.loads(state_file.read_text(encoding='utf-8'))
+            self.assertIn('GUARDED', rearmed['injectSteps'][0]['ephemeralMessage'])
+            self.assertTrue(second_state['no_qa'])
+            self.assertTrue(second_state['lean'])
+            self.assertNotIn('input_root', second_state)
+            self.assertNotIn('finished_offset', second_state)
 
 
 class StopGateTests(unittest.TestCase):
@@ -865,6 +973,55 @@ class StopGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = Path(tmp) / 'artifact'; artifact.mkdir()
             self.assertEqual({}, run_guard('stop', base_payload('other', artifact), {}))
+
+    def test_first_chapter_run_does_not_require_continuity_check_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            work = root / '.work'
+            (work / 'continuity-check.md').unlink()
+            (work / 'continuity-context.json').write_text(
+                json.dumps({'status': 'first_chapter', 'first_chapter': 1}),
+                encoding='utf-8',
+            )
+            (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+            (work / 'scene-001.md').unlink()
+            self.assertEqual({}, run_guard('stop', payload, env))
+
+    def test_bible_hash_resolves_character_bible_in_input_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            work = root / '.work'
+            parent_bible = root / 'character-bible.md'
+            parent_bible.write_bytes((work / 'character-bible.md').read_bytes())
+            (work / 'character-bible.md').unlink()
+            (root / 'novel_image_prompts.txt').write_text(self.IMAGE_PROMPT, encoding='utf-8')
+            (work / 'scene-001.md').unlink()
+            self.assertEqual({}, run_guard('stop', payload, env))
+
+    def test_lean_mode_stop_cleanup_instruction_passes_lean_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, env = self._authored_run(root)
+            state_file = root / 'guard.json'
+            state = json.loads(state_file.read_text(encoding='utf-8'))
+            state['lean'] = True
+            state_file.write_text(json.dumps(state), encoding='utf-8')
+            lean_image = (
+                '--- SCENE 001 ---\n'
+                'Subject: lone traveler in weathered cloak holding sealed letter\n'
+                'Setting: quiet candlelit inn chamber with rain streaking wooden shutters\n'
+                'Action: traveler breaks wax seal carefully and unfolds damp parchment\n'
+                'Style: semi-realistic digital fantasy painting, visible textured brush strokes, soft rim-lit hair and fabric, atmospheric depth with rain/wind/light particles, painterly skin, original character faces, 16:9 aspect ratio.\n'
+                'Negative: no logo, no watermark, no text, no extra fingers, no blurry face, no modern clothes, no gun, no car, no neon, no 3d sheen\n'
+                + ' '.join(f'detailword{i}' for i in range(15)) + '\n'
+            )
+            (root / 'novel_image_prompts.txt').write_text(lean_image, encoding='utf-8')
+            held = run_guard('stop', payload, env)
+            self.assertEqual('continue', held['decision'])
+            self.assertIn('cleanup_work.py', held['reason'])
+            self.assertIn('--lean', held['reason'])
 
 
 if __name__ == '__main__':

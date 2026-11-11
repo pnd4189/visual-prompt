@@ -32,6 +32,11 @@ class InstallAgyGuardTests(unittest.TestCase):
             installed = json.loads(target.read_text(encoding='utf-8'))
             self.assertEqual(existing['other-hook'], installed['other-hook'])
             guard = installed[HOOK_NAME]
+            self.assertEqual(
+                {'write_to_file', 'replace_file_content', 'multi_replace_file_content',
+                 'write_file', 'edit_file'},
+                set(guard['PostToolUse'][0]['matcher'].split('|')),
+            )
             commands = []
             for phase in guard.values():
                 for entry in phase:
@@ -83,6 +88,17 @@ class InstallAgyGuardTests(unittest.TestCase):
             self.assertFalse(launcher.is_symlink())
             self.assertEqual(expected, launcher.read_text(encoding='utf-8'))
             self.assertEqual(expected, linked.read_text(encoding='utf-8'))
+
+    def test_workspace_and_root_hooks_json_match_post_tool_use_matcher(self):
+        root_hooks = json.loads((ROOT / 'hooks.json').read_text(encoding='utf-8'))[HOOK_NAME]
+        workspace_hooks = json.loads(
+            (ROOT / '.agents' / 'hooks.json').read_text(encoding='utf-8')
+        )[HOOK_NAME]
+        self.assertEqual(
+            root_hooks['PostToolUse'][0]['matcher'],
+            workspace_hooks['PostToolUse'][0]['matcher'],
+        )
+        self.assertEqual(set(root_hooks.keys()), set(workspace_hooks.keys()))
 
 
 if __name__ == '__main__':

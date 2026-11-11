@@ -7,11 +7,12 @@ import re
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
-WRITE_TOOLS = {'write_to_file', 'replace_file_content', 'multi_replace_file_content'}
+WRITE_TOOLS = {'write_to_file', 'replace_file_content', 'multi_replace_file_content',
+               'write_file', 'edit_file'}
 READ_TOOLS = {
     'view_file', 'view_file_outline', 'view_code_item', 'view_content_chunk',
     'list_dir', 'list_directory', 'find', 'find_by_name', 'grep_search',
-    'code_search', 'read_terminal', 'command_status',
+    'code_search', 'read_terminal', 'command_status', 'read_file',
 }
 # Agy step types that neither read artifacts nor author content. Everything
 # outside READ_TOOLS | NEUTRAL_TOOLS | WRITE_TOOLS | {'run_command'} stays
@@ -203,10 +204,14 @@ def _hook_workspace_cwd() -> Path:
 
 
 def target_path(args: dict) -> Path | None:
-    raw = args.get('TargetFile')
+    raw = args.get('Path', args.get('TargetFile'))
     if not isinstance(raw, str) or not raw or not Path(raw).is_absolute():
         return None
     return Path(raw).expanduser().resolve()
+
+
+def is_full_write(tool: str | None, args: dict) -> bool:
+    return tool in {'write_to_file', 'write_file'} and not args.get('Append', False)
 
 
 def _strings(value):
@@ -241,7 +246,7 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
     """
     target = target_path(args)
     if target is None:
-        return 'absolute TargetFile is required for guarded creative writes'
+        return 'absolute TargetFile or Path is required for guarded creative writes'
     if '.agents' in target.parts:
         return 'Agy hook configuration is guard-owned and read-only'
     protected = [state_path(payload)]
@@ -283,7 +288,7 @@ def write_denial(args: dict, payload: dict, from_helper: bool = False,
     # time the gate only objected at the end and every scene had to be rewritten.
     # Judge a whole-file write only: a partial edit carries a fragment, so holding
     # it to the full shape would block the repair itself.
-    if tool == 'write_to_file' and SCENE_FILE_RE.fullmatch(target.name):
+    if is_full_write(tool, args) and SCENE_FILE_RE.fullmatch(target.name):
         body = '\n'.join(_strings(args))
         if '## Image Prompt' not in body:
             return ('a scene file needs its frontmatter (scene_id, cache_key, '
