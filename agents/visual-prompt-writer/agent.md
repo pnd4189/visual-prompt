@@ -2,6 +2,9 @@
 name: visual-prompt-writer
 description: Primary Agy writer for direct, grounded visual-prompt generation.
 tools:
+  - read_file
+  - write_file
+  - edit_file
   - view_file
   - write_to_file
   - replace_file_content

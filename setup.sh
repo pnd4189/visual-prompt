@@ -59,13 +59,19 @@ if [ -d "$PLUGIN_COPY" ] && [ ! -L "$PLUGIN_COPY" ]; then
     # plugin, and a stray copy re-registers a hooks.json whose relative command
     # no longer resolves — the failing hook then degrades into permission prompts.
     backup="$HOME/.gemini/config/vp-plugin-backups/$SKILL_NAME-replaced-$(date +%Y%m%d%H%M%S)"
-    for entry in commands prompts references agents SKILL.md gemini-extension.json plugin.json hooks.json; do
+    for entry in commands prompts references agents scripts skills adapters SKILL.md README.md HUONG-DAN-SU-DUNG.md gemini-extension.json plugin.json hooks.json; do
         target="$PLUGIN_COPY/$entry"
         if [ -e "$target" ] && [ ! -L "$target" ]; then
             mkdir -p "$backup"
             mv "$target" "$backup/$entry"
         fi
         ln -sfn "$REPO/$entry" "$target"
+    done
+    for stale in "$PLUGIN_COPY/.work" "$PLUGIN_COPY"/.visual-prompt-primary* "$PLUGIN_COPY"/.agy-guard-smoke.*; do
+        if [ -e "$stale" ] || [ -L "$stale" ]; then
+            mkdir -p "$backup/stale"
+            mv "$stale" "$backup/stale/"
+        fi
     done
     echo "[OK] Agy plugin copy now follows the repo: $PLUGIN_COPY"
     [ -d "$backup" ] && echo "     replaced copies moved to: $backup"
@@ -103,4 +109,4 @@ echo "Test Agy: /visual-prompt <input.txt>"
 echo "Test Codex native: \$visual-prompt <input.txt>"
 echo "Test Codex slash shim: /prompts:visual-prompt <input.txt>"
 echo "Test Claude Code: /visual-prompt <input.txt>"
-echo "Default output: QA + image prompts. Add --video/--videos N and/or --music [N] explicitly."
+echo "Default output: image prompts only (QA skipped). Add --qa for proofread, --video/--videos N for video, and/or --music [N] for music."

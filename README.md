@@ -18,11 +18,12 @@ bash setup.sh
 /visual-prompt <input.txt>
 ```
 
-Mặc định chỉ tạo file `_image_prompts.txt` cạnh file input, không chạy bước hiệu
-đính. Thêm `--qa` để hiệu đính trước (tạo thêm `_qa.txt` cho TTS),
+Mặc định chỉ tạo `<stem>_image_prompts.txt` (kèm `<stem>_scene_anchors.md`) cạnh
+file input, **bỏ qua bước hiệu đính QA**. Thêm `--qa` để hiệu đính trước (tạo thêm
+`_qa.txt` cho TTS), `--lean` để dùng bộ prompt tinh gọn 5 mục,
 `--video`/`--videos N` để bật video, `--music`/`--music N` để bật music; có thể
-ghi mô tả rõ “tạo video prompt” hoặc “tạo music prompt” sau lệnh. `--no-video` và
-`--no-music` luôn tắt medium tương ứng.
+ghi mô tả rõ “tạo video prompt” hoặc “tạo music prompt” sau lệnh. `--no-qa`,
+`--no-video` và `--no-music` luôn tắt phần tương ứng.
 
 Trước QA, skill kiểm tra file hiện tại có nối tiếp file trước không: nếu file bắt
 đầu Chương N, workflow tìm Chương N-1 trong các `.txt` / `_qa.txt` lân cận và so
@@ -52,14 +53,28 @@ Guard tự bật khi thấy lượt gọi `/visual-prompt` của user trong tran
 phụ thuộc việc model có chịu đọc contract hay không, và `setup.sh` trỏ
 `commands/` + `prompts/` của bản plugin copy về repo để contract không bị cũ.
 
+Guard hỗ trợ cả tên tool cũ và `read_file` / `write_file` / `edit_file` của Agy
+1.4.7, bao gồm ghi provenance và kiểm tra ở gate cuối. Sau khi cập nhật repo,
+đồng bộ matcher của hook global (giữ nguyên các hook khác):
+
+```bash
+python3 scripts/install_agy_guard.py --repo-root "$PWD" --target ~/.gemini/config/hooks.json
+```
+
+Thư mục output được giới hạn theo file input, kể cả khi `load_input.py` nhận
+`-o` / `--output` trước input; không cần mở quyền toàn bộ Google Drive. Run kẹt
+trước scene đầu tiên được giải phóng sau số lần dừng hữu hạn, không được coi là
+đã tạo prompt thành công. Nếu Agy đang mở vẫn dùng matcher cũ, khởi động lại CLI.
+
 ### Batch driver và parallel Pass-2 (opt-in)
 
 `scripts/run-folder.sh` / `run-all.sh` chạy batch nhiều file/series, mặc định
-**serial** — đường đi giữ nguyên byte-for-byte khi không đặt gì thêm. Batch mode
-mặc định opt-in music + video; từng lần chạy có thể scope lại mà không đổi
-workflow gốc: `VP_NO_MUSIC=1` / `VP_NO_VIDEO=1` bỏ medium đó cho riêng phiên chạy
-(gate, harness wait, completion manifest và visual-history extract tự switch theo;
-manifest của các run có music cũ vẫn verify nguyên vẹn), và `VP_GLOB='*_vi.txt'`
+**serial** và đồng bộ hoàn toàn với lệnh trực tiếp: **bỏ qua QA và chỉ tạo image
+prompts** (`VP_QA=0`, `VP_NO_VIDEO=1`, `VP_NO_MUSIC=1`). Từng lần chạy có thể bật
+thêm theo nhu cầu: `VP_QA=1` bật hiệu đính QA + `_qa.txt`, `VP_NO_VIDEO=0` bật
+video, `VP_NO_MUSIC=0` bật music (gate, harness wait, completion manifest và
+visual-history extract tự switch theo; manifest của các run có QA/music cũ vẫn
+verify nguyên vẹn khi chạy với cùng flags), và `VP_GLOB='*_vi.txt'`
 chỉ chọn file input khớp pattern (mặc định `*.txt`). Từ v0.12.0,
 driver có opt-in bounded parallel cho riêng Pass-2: đặt `VP_WORKERS=3` (số nguyên
 1–16, tự cap theo số scene còn lại) để chạy head `--plan-only` → fan-out các

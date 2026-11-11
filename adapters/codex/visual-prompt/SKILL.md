@@ -26,19 +26,24 @@ flags or a stage-specific detail; do not load its unrelated Agy automation.
 The complete user argument string is available after `/prompts:visual-prompt` or
 `$visual-prompt`.
 
-- Default to `<stem>_qa.txt` and `<stem>_image_prompts.txt` only.
-- Enable video or music only when the user explicitly requests that medium.
-- `--no-video` and `--no-music` override every other signal. Do not infer media
-  from a story's YouTube or audio context.
+- Default to `<stem>_image_prompts.txt` (+ `<stem>_scene_anchors.md`) only,
+  skipping QA via `scripts/assemble_qa.py --passthrough` (no `<stem>_qa.txt`).
+- Enable QA (`--qa`), video (`--video` / `--videos N`), or music (`--music` /
+  `--music N`) only when the user explicitly requests them.
+- `--no-qa`, `--no-video`, and `--no-music` override every other signal. Do not
+  infer media from a story's YouTube or audio context.
 
 ## Codex execution loop
 
 1. Read the input with `scripts/load_input.py`; keep all scratch artifacts in
    the adjacent `.work/` directory.
-2. Produce QA chapters, a grounded `scene-plan.md`, and `scene-NNN.md` files in
+2. Build `chapters_qa.json` (`scripts/assemble_qa.py --passthrough` by default,
+   or per-chapter QA proofread + `scripts/assemble_qa.py` when `--qa` is passed),
+   then produce a grounded `scene-plan.md` and `scene-NNN.md` files in
    source order. Each source anchor must be an exact 6–24-word excerpt from its
    chapter. Work in micro-batches of at most three scenes.
-3. Create final QA and image files only through `scripts/assemble_qa.py` and
+3. Create `chapters_qa.json` (plus optional `_qa.txt`) and final image/media
+   files only through `scripts/assemble_qa.py` and
    `scripts/assemble_outputs.py`; never hand-write final output files.
 4. Before publishing, run the grounding, artifact, safety, anchor-consistency,
    legitimacy, and similarity validators. Fix only the flagged artifacts and

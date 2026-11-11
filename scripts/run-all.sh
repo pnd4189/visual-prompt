@@ -7,7 +7,7 @@
 # failing series is reported but does not block the others — re-running resumes.
 #
 # Usage:   run-all.sh <parent-folder>
-# Env:     same as run-folder.sh (VP_MODEL, VP_MUSIC, VP_DRYRUN)
+# Env:     same as run-folder.sh (VP_MODEL, VP_QA, VP_NO_VIDEO, VP_NO_MUSIC, VP_MUSIC, VP_DRYRUN)
 
 set -uo pipefail
 

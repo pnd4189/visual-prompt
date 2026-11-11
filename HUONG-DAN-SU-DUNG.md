@@ -7,16 +7,16 @@
 
 ## 1. Skill này làm gì?
 
-Bạn có 1 file truyện tiên hiệp / huyền huyễn / võ hiệp tiếng Việt (2k–18k từ,
-phù hợp video 1–2 giờ audio). Không cần proofread trước — skill tự hiệu đính.
-Bạn muốn làm video YouTube với khoảng 120-150 ảnh cho 1 giờ audio; video clip và
-nhạc nền là các phần bật thêm khi cần.
+Bạn có 1 file truyện tiên hiệp / huyền huyễn / võ hiệp tiếng Việt (2k–37k từ,
+phù hợp video 1–3 giờ audio). Bạn muốn làm video YouTube với khoảng 120-300 ảnh;
+bước hiệu đính QA, video clip và nhạc nền là các phần bật thêm khi cần.
 
-`/visual-prompt <file.txt>` đọc truyện → mặc định tạo 2 file:
-- `<file>_qa.txt` — bản truyện đã hiệu đính, đưa THẲNG vào TTS_Local đọc giọng
+`/visual-prompt <file.txt>` đọc truyện → **mặc định bỏ qua QA và chỉ tạo image prompt**:
 - `<file>_image_prompts.txt` — paste vào công cụ tạo ảnh để gen ảnh
+- `<file>_scene_anchors.md` — bảng neo từng scene với chapter và câu nguồn để canh nhịp video
 
-Thêm `--video`/`--videos N` hoặc mô tả “tạo video prompt” để có video; thêm
+Thêm `--qa` khi cần hiệu đính truyện và xuất `<file>_qa.txt` đưa vào TTS_Local;
+thêm `--video`/`--videos N` hoặc mô tả “tạo video prompt” để có video; thêm
 `--music`/`--music N` hoặc “tạo music prompt” để có music.
 
 Toàn bộ workflow do active Antigravity/Agy model điều khiển. Python chỉ làm I/O file.
@@ -81,23 +81,23 @@ chỉ chạy khi người dùng gọi slash command rõ ràng. Các adapter đ�
 /visual-prompt /path/to/truyen.txt
 ```
 
-Skill chạy pipeline grounding (mặc định image-only):
-1. Load chapters
-2. **QA hiệu đính** (luôn chạy) — sửa chữ Trung/Anh sót, chính tả, câu dịch máy
-   lủng củng, tách câu dài → `chapters_qa.json` + `<file>_qa.txt`
+Skill chạy pipeline grounding (mặc định bỏ qua QA + chỉ tạo image prompt):
+1. Load chapters + kiểm tra nối tiếp chương với file trước (continuity audit)
+2. **Bỏ qua QA mặc định** (`assemble_qa.py --passthrough` → `chapters_qa.json`, không ghi `_qa.txt`). Nếu truyền `--qa`: chạy hiệu đính LLM sửa chữ Trung/Anh sót, chính tả, câu dịch máy lủng củng, tách câu dài → `chapters_qa.json` + `<file>_qa.txt`
 3. Trích xuất character bible (lưu cạnh file truyện); field ngoại hình thiếu
    bằng chứng được ghi `not stated`, không tự ước lượng tuổi/tóc/mặt/đạo cụ
 4. Detect thể loại
 5. **Chọn style** — gợi ý style theo thể loại + HỎI bạn chọn (Enter = #1, hoặc gõ
    id khác). Có `--style <id>` → bỏ qua hỏi. Xem mục §5 "Chọn style".
-6. Tính số scene (mặc định: 120-150 ảnh; video chỉ khi có opt-in)
+6. Tính số scene (mặc định: 120-300 ảnh; video chỉ khi có opt-in)
 7. Plan + expand scenes (theo style đã chọn)
 8. Video/music (chỉ khi đã bật bằng flag hoặc mô tả rõ)
 9. Assemble các file output đã bật
 
 **Kết quả** nằm cạnh file input:
-- `truyen_qa.txt` (đưa vào TTS_Local — xem §6)
-- `truyen_image_prompts.txt`
+- `truyen_image_prompts.txt` (mặc định)
+- `truyen_scene_anchors.md` (mặc định — bảng neo scene → chapter/source_anchor)
+- `truyen_qa.txt` (chỉ khi bật `--qa` — đưa vào TTS_Local, xem §6)
 - `truyen_video_prompts.txt` (chỉ khi bật video)
 - `truyen_music_prompts.txt` (chỉ khi bật music)
 - `character-bible.md` (giữ lại cho lần sau)
@@ -175,7 +175,7 @@ Giá trị hỗ trợ: `tien-hiep`, `huyen-huyen`, `do-thi`, `co-dien`, `vo-hiep
 
 ### `--images N --video/--videos M` — Override số lượng
 
-Mặc định chỉ có image: `N = clamp(round(wc/120), 120, 150)`, `M = 0`.
+Mặc định chỉ có image: `N = clamp(round(wc/120), 120, 300)`, `M = 0`.
 Muốn bật video tự động hoặc ép số khác:
 
 ```
@@ -185,6 +185,11 @@ Muốn bật video tự động hoặc ép số khác:
 
 `--videos M` tự bật video và tôn trọng đúng M. Không truyền flag video thì video
 không được tạo.
+
+### `--qa` / `--lean` — Bật hiệu đính QA hoặc chế độ prompt tinh gọn
+
+- Mặc định QA tắt (`--no-qa`). Thêm `--qa` để chạy bước hiệu đính chương và xuất `<file>_qa.txt` cho TTS_Local.
+- Thêm `--lean` để tạo image prompt tinh gọn 5 mục (`Subject / Setting / Action / Style / Negative`, 60–220 từ).
 
 ### `--music [N]` — Bật số loop nhạc nền
 
@@ -321,10 +326,11 @@ regen loop thiếu hoặc stale; `--force-redo` tạo lại cả music plan.
 
 ## 7. Workflow đề xuất
 
-| Audio length | Wordcount | Images | Videos | Cadence |
+| Audio length | Wordcount | Images | Videos (opt-in) | Cadence |
 |---|---|---|---|---|
 | 1 giờ | ~9k từ | ~120 | ~20 | 1 prompt / ~30s audio slot |
-| 2 giờ | ~18k từ | ~150 | ~25 | 1 prompt / ~45–50s audio slot |
+| 2 giờ | ~18k từ | ~150 | ~25 | 1 prompt / ~48s audio slot |
+| 3 giờ | ~37k từ | ~300 | ~50 | 1 prompt / ~36s audio slot |
 
 **Lý do:** output nhiều hơn giúp tránh video audio quá tĩnh; editor vẫn có thể
 chọn lọc hoặc dùng `--images` / `--videos` để chạy nhanh. Chi tiết:

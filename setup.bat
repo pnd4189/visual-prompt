@@ -122,5 +122,5 @@ echo Test Agy: /visual-prompt ^<input.txt^>
 echo Test Codex native: $visual-prompt ^<input.txt^>
 echo Test Codex slash shim: /prompts:visual-prompt ^<input.txt^>
 echo Test Claude Code: /visual-prompt ^<input.txt^>
-echo Default output: QA + image prompts. Add --video/--videos N and/or --music [N] explicitly.
+echo Default output: image prompts only (QA skipped). Add --qa for proofread, --video/--videos N for video, and/or --music [N] for music.
 pause

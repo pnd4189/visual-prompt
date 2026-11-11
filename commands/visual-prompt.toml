@@ -1,7 +1,7 @@
 description = "Generate grounded, non-repetitive image prompts by default; optionally add video/music prompts from Vietnamese xianxia/wuxia novel files"
 prompt = """
 VISUAL_PROMPT_ACTIVE_MODEL_GUARD_V1
-Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.17.4.
+Bạn là active model của CLI đang chạy (Antigravity/Agy, Codex, hoặc Claude Code) thực thi pipeline visual-prompt v0.19.1.
 LLM-driven loop — KHÔNG brief/response JSON, KHÔNG schema cứng.
 Python scripts chỉ làm I/O. Bạn quyết định bước tiếp theo dựa trên kết quả.
 
@@ -217,7 +217,8 @@ Args là 1 string. Parse theo token đầy đủ (không dùng prefix match; ví
 Khởi tạo trước khi parse: `video_enabled = false`, `music_enabled = false`,
 `videos_override = null`, `music_override = null`, `force_redo = false`,
 `similarity_feedback_path = null`, `batch_token = null`, `auto_repair = false`,
-`worker_manifest_path = null`, `plan_only = false`, `epic = false`, `no_qa = true`.
+`worker_manifest_path = null`, `plan_only = false`, `epic = false`, `lean = false`,
+`no_qa = true`.
 
 1. `--series ([a-z0-9-]+)`               → series_name (kebab-case, optional)
 2. `--genre (tien-hiep|huyen-huyen|do-thi|co-dien|vo-hiep)` → genre_override (optional)
@@ -289,12 +290,15 @@ Echo lại cho user:
   faithful   = <true | false>
   no_video   = <true | false>
   no_music   = <true | false>
+  lean       = <true | false>
   no_qa      = <true | false>
 ```
 
-Mặc định = **grounded + image-only**. QA vẫn chạy để làm nguồn sự thật; output mặc
-định là `_qa.txt` và `_image_prompts.txt`. Video/music chỉ chạy khi được bật bằng
-flag hoặc mô tả rõ sau lệnh. `--epic` chỉ cho phép tăng chất lượng ánh sáng,
+Mặc định = **grounded + image-only**, bỏ qua bước QA (`no_qa = true`: chạy
+`assemble_qa.py --passthrough`, không ghi `_qa.txt`; output mặc định chỉ gồm
+`<stem>_image_prompts.txt` và `<stem>_scene_anchors.md`). QA chỉ chạy khi truyền
+`--qa`; video/music chỉ chạy khi được bật bằng flag hoặc mô tả rõ sau lệnh.
+`--epic` chỉ cho phép tăng chất lượng ánh sáng,
 composition và scale của chi tiết đã có; tuyệt đối không thêm nhân vật, combat,
 địa điểm, vật phẩm, hoặc kết quả mới.
 
@@ -486,16 +490,17 @@ Chọn art style cho cả run. Genre và style tách rời — mọi style trong
 ## STEP 4 — SCENE COUNT
 
 ```bash
-python3 scripts/calc_scene_count.py \\
-    --input "<input_path>" \\
-    --chapters-json .work/chapters_qa.json \\
-    [--images <N>] [--video] [--videos <M>] [--epic] [--faithful]
+python3 scripts/calc_scene_count.py \
+  --input "<input_path>" \
+  --chapters-json .work/chapters_qa.json \
+  [--images <N>] [--video] [--videos <M>] [--epic] [--faithful] \
+  > .work/scene-counts.json
 ```
 
 (Thêm `--epic` / `--faithful` vào lệnh nếu các flag tương ứng set ở STEP 0.)
 Chỉ thêm `--video` hoặc `--videos <M>` khi `video_enabled = true`.
 
-Parse stdout JSON → lưu `images_n`, `videos_m`, `mode`, `action_density`,
+Đọc JSON từ `.work/scene-counts.json` → lưu `images_n`, `videos_m`, `mode`, `action_density`,
 `recommended_mix`. `mode` phải là `grounded`.
 
 Default auto path tạo khoảng 120–300 image prompts và `videos_m = 0`. Trần 300 ứng
@@ -970,8 +975,10 @@ Bible:      <bible_path> (<N chars>)
 Scene plan: .work/scene-plan.md (<N> scenes, <M> video)
 
 Output files:
-  📝 <input_stem>_qa.txt              — bản hiệu đính, đưa thẳng vào TTS_Local
   📷 <input_stem>_image_prompts.txt   — <image_count> ảnh
+  🗂 <input_stem>_scene_anchors.md    — neo scene → chapter/source_anchor
+  📝 <input_stem>_qa.txt              — bản hiệu đính, đưa thẳng vào TTS_Local
+      [include this line only when `no_qa = false` (`--qa`)]
   🎬 <input_stem>_video_prompts.txt   — <video_count> video (indices: <list>)
       [include this line only when `video_enabled = true`]
   🎵 <input_stem>_music_prompts.txt   — <music_count> loop nhạc nền (Lyria)
@@ -981,10 +988,10 @@ Warnings:
   <list, hoặc "(không có)">
 
 Bước tiếp:
-  1. Đưa `<stem>_qa.txt` vào TTS_Local để tạo giọng đọc
-     (VieNeu hoặc VietVoice). Xem HUONG-DAN-SU-DUNG.md §TTS.
+  1. Chỉ khi `no_qa = false` (`--qa`): đưa `<stem>_qa.txt` vào TTS_Local để tạo
+     giọng đọc (VieNeu hoặc VietVoice). Xem HUONG-DAN-SU-DUNG.md §TTS.
   2. Mở công cụ tạo ảnh → paste từng block `--- SCENE NNN ---` từ
-     file ảnh để generate hình.
+     file ảnh để generate hình (dùng `<stem>_scene_anchors.md` để canh nhịp).
   3. Chỉ khi `video_enabled = true`: mở Veo3/Seedance → paste từng block từ
      file video để generate clip.
   4. Chỉ khi `music_enabled = true`: mở Lyria 3 → paste lần lượt từng paragraph

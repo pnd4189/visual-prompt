@@ -1446,26 +1446,47 @@ class WorkerProtocolContractTests(unittest.TestCase):
         self.assertEqual(0, serial.returncode, serial.stderr)
 
     def test_vp_no_music_opt_in_announces_and_wires_flag(self):
-        run = self._dryrun_output({'VP_NO_MUSIC': '1'})
-        self.assertEqual(0, run.returncode, run.stderr)
-        self.assertIn('music: off', run.stdout)
-        self.assertIn('(no-music)', run.stdout)
-
-        # Default stays music-enabled: batch mode keeps opting into music.
+        # Batch mode defaults to skipping QA + image prompts only (VP_QA=0,
+        # VP_NO_VIDEO=1, VP_NO_MUSIC=1), matching direct /visual-prompt.
         default_run = self._dryrun_output({})
         self.assertEqual(0, default_run.returncode, default_run.stderr)
-        self.assertNotIn('music: off', default_run.stdout)
-        self.assertNotIn('(no-music)', default_run.stdout)
+        self.assertIn('qa: off', default_run.stdout)
+        self.assertIn('music: off', default_run.stdout)
+        self.assertIn('video: off', default_run.stdout)
+        self.assertIn('(no-qa)', default_run.stdout)
+        self.assertIn('(no-video)', default_run.stdout)
+        self.assertIn('(no-music)', default_run.stdout)
+
+        # Explicit opt-in enables QA, music, and video cleanly.
+        opt_in_run = self._dryrun_output({
+            'VP_QA': '1',
+            'VP_NO_MUSIC': '0',
+            'VP_NO_VIDEO': '0',
+        })
+        self.assertEqual(0, opt_in_run.returncode, opt_in_run.stderr)
+        self.assertIn('qa: on', opt_in_run.stdout)
+        self.assertIn('music: 4', opt_in_run.stdout)
+        self.assertIn('video: on', opt_in_run.stdout)
+        self.assertIn('(qa)', opt_in_run.stdout)
+        self.assertNotIn('(no-music)', opt_in_run.stdout)
+        self.assertNotIn('(no-video)', opt_in_run.stdout)
 
         runner = (ROOT / 'scripts' / 'run-folder.sh').read_text(encoding='utf-8')
         self.assertIn('--no-music', runner)
-        # The full-mode harness must not wait on music outputs when music is off.
+        self.assertIn('--no-qa', runner)
+        self.assertIn('--qa', runner)
+        # The full-mode harness must not wait on music/QA outputs when disabled.
         self.assertIn("os.environ.get('VP_NO_MUSIC') != '1'", runner)
+        self.assertIn("os.environ.get('VP_QA') == '1'", runner)
 
     def test_vp_no_music_env_validation(self):
         rejected = self._dryrun_output({'VP_NO_MUSIC': 'abc'})
         self.assertNotEqual(0, rejected.returncode)
         self.assertIn('VP_NO_MUSIC', rejected.stderr)
+
+        rejected_qa = self._dryrun_output({'VP_QA': 'abc'})
+        self.assertNotEqual(0, rejected_qa.returncode)
+        self.assertIn('VP_QA', rejected_qa.stderr)
 
     def test_vp_glob_selects_input_files(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -1719,7 +1740,9 @@ class BatchResumeTests(unittest.TestCase):
             environment.update({
                 'HOME': str(base / 'home'),
                 'VP_DRYRUN': '1',
+                'VP_QA': '1',
                 'VP_MUSIC': '1',
+                'VP_NO_MUSIC': '0',
                 'VP_NO_VIDEO': '1',
                 'VP_SERIES': 'safe-series',
                 'VP_LOCAL': str(base / 'local'),
@@ -1774,6 +1797,7 @@ class BatchResumeTests(unittest.TestCase):
             environment.update({
                 'HOME': str(base / 'home'),
                 'VP_DRYRUN': '1',
+                'VP_QA': '1',
                 'VP_NO_VIDEO': '1',
                 'VP_NO_MUSIC': '1',
                 'VP_SERIES': 'safe-series',
@@ -1786,7 +1810,7 @@ class BatchResumeTests(unittest.TestCase):
             )
             # Switching back to music mode must NOT reuse a no-music manifest.
             music_env = dict(environment)
-            music_env.pop('VP_NO_MUSIC')
+            music_env['VP_NO_MUSIC'] = '0'
             rerun = subprocess.run(
                 ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
                 cwd=ROOT, env=music_env, capture_output=True, text=True, check=False,
@@ -1796,6 +1820,58 @@ class BatchResumeTests(unittest.TestCase):
         self.assertIn('đã có output, skip', skipped.stdout)
         self.assertEqual(0, rerun.returncode, rerun.stderr)
         self.assertNotIn('đã có output, skip', rerun.stdout)
+
+    def test_default_image_only_no_qa_manifest_skips_until_qa_or_media_requested(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            base = Path(temp_dir)
+            folder = base / 'novel'
+            folder.mkdir()
+            chapter = folder / 'chapter-001.txt'
+            chapter.write_text('Chương 1. Test\n', encoding='utf-8')
+            stem = chapter.with_suffix('')
+            image = Path(f'{stem}_image_prompts.txt')
+            image.write_text('image\n', encoding='utf-8')
+            version = json.loads((ROOT / 'gemini-extension.json').read_text())['version']
+            manifest = Path(f'{stem}_visual-prompt-complete.json')
+            manifest.write_text(json.dumps({
+                'schema': 1,
+                'skill_version': version,
+                'series': 'safe-series',
+                'style': '',
+                'model': 'Gemini 3.1 Pro (High)',
+                'music_n': 0,
+                'no_video': True,
+                'no_music': True,
+                'no_qa': True,
+                'artifacts': {
+                    'input': self._digest(chapter),
+                    'image': self._digest(image),
+                },
+            }), encoding='utf-8')
+            environment = os.environ.copy()
+            for key in ('VP_QA', 'VP_NO_VIDEO', 'VP_NO_MUSIC'):
+                environment.pop(key, None)
+            environment.update({
+                'HOME': str(base / 'home'),
+                'VP_DRYRUN': '1',
+                'VP_SERIES': 'safe-series',
+                'VP_LOCAL': str(base / 'local'),
+            })
+
+            skipped = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=environment, capture_output=True, text=True, check=False,
+            )
+            qa_env = dict(environment, VP_QA='1')
+            rerun_qa = subprocess.run(
+                ['bash', str(SCRIPTS / 'run-folder.sh'), str(folder)],
+                cwd=ROOT, env=qa_env, capture_output=True, text=True, check=False,
+            )
+
+        self.assertEqual(0, skipped.returncode, skipped.stderr)
+        self.assertIn('đã có output, skip', skipped.stdout)
+        self.assertEqual(0, rerun_qa.returncode, rerun_qa.stderr)
+        self.assertNotIn('đã có output, skip', rerun_qa.stdout)
 
 
 class LeanSimilarityTests(unittest.TestCase):
@@ -2878,6 +2954,168 @@ class SceneCountCliTests(unittest.TestCase):
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn('deterministic scene count 175', completed.stdout)
+
+
+class MaintenanceRegressionTests(unittest.TestCase):
+    """Covers maintenance fixes across content safety, similarity, artifacts, and TOML."""
+
+    def test_command_toml_parses_and_skill_symlink_is_relative(self):
+        import tomllib
+
+        data = tomllib.loads((ROOT / 'commands' / 'visual-prompt.toml').read_text(encoding='utf-8'))
+        prompt = data['prompt']
+        calc_lines = [line for line in prompt.splitlines() if 'calc_scene_count.py' in line]
+        self.assertTrue(any('> .work/scene-counts.json' in line for line in calc_lines))
+        self.assertFalse(any(line.endswith('\\') for line in calc_lines))
+
+        skill_link = ROOT / 'skills' / 'visual-prompt' / 'SKILL.md'
+        self.assertTrue(skill_link.is_symlink())
+        self.assertFalse(os.readlink(skill_link).startswith('/'))
+        self.assertEqual(
+            (ROOT / 'SKILL.md').read_bytes(),
+            skill_link.read_bytes(),
+        )
+
+    def test_multiline_negative_list_and_religion_warn_only_exit_zero(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            image = Path(temp_dir) / 'image.txt'
+            image.write_text(
+                '--- SCENE 001 ---\n'
+                'Subject: lone Taoist beside a desecrated stone shrine\n'
+                'Setting: misty cliff ruin\n'
+                'Action: sweeps fallen pine needles\n'
+                'Style: semi-realistic digital fantasy painting\n'
+                'Negative:\n'
+                '  gore, mutilated, disfigured\n'
+                '  nude, live-action, photorealistic\n',
+                encoding='utf-8',
+            )
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / 'check_content_safety.py'),
+                 '--output', str(image)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn('RELIGION_HIGH_RISK (WARN-only)', result.stdout)
+        self.assertNotIn('GORE', result.stdout)
+        self.assertNotIn('SEXUAL', result.stdout)
+        self.assertNotIn('PHOTOREAL_VIDEO', result.stdout)
+
+    def test_mixed_int_and_suffixed_scene_ids_and_lean_history_do_not_crash(self):
+        scenes = similarity.parse_image(
+            '--- SCENE 001 ---\n'
+            'Subject: Lan in grey robe\n'
+            'Setting: misty pine courtyard at dawn\n'
+            'Action: steps across wet stone threshold\n'
+            'Style: drifted style alpha\n'
+            'Negative: no logos\n\n'
+            '--- SCENE 001a ---\n'
+            'Subject: Lan in grey robe\n'
+            'Setting: bamboo corridor beside quiet pond\n'
+            'Action: lifts bronze lantern toward eaves\n'
+            'Style: drifted style beta\n'
+            'Negative: no logos\n'
+        )
+        checked = similarity.check_image(
+            scenes, 0.60, 0.95, 0, 4, similarity.LEAN_COMPARED_FIELDS, lean=True,
+        )
+        self.assertTrue(any(v['type'] == 'style_not_locked' for v in checked['violations']))
+
+        history = similarity._history_values(
+            '--- SCENE 001 ---\nSetting: ancient stone courtyard.\n'
+            'Action: raises a bronze lantern slowly\n',
+            None,
+        )
+        self.assertEqual(['raises a bronze lantern slowly'], history['action motifs used'])
+
+    def test_post_cleanup_fallback_does_not_alias_suffixed_scene_onto_numeric_twin(self):
+        plan_text = (
+            'Genre: tien-hiep · Images: 2 · Videos: 0 · Chapters: 1\n\n'
+            '| scene_id | chapter | source_anchor | scene_tag | characters | synopsis | setting_plan | camera_plan | action_plan | palette_plan | video? |\n'
+            '|---|---|---|---|---|---|---|---|---|---|---|\n'
+            '| 026 | 1 | Lan bước vào sân đá khi gió lay | detail | Lan | s1 | set1 | cam1 | act1 | pal1 | |\n'
+            '| 026b | 1 | Nàng nâng ngọc ấn lên trước cửa | detail | Lan | s2 | set2 | cam2 | act2 | pal2 | |\n'
+        )
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            root = Path(temp_dir)
+            work = root / '.work'
+            work.mkdir()
+            plan = work / 'scene-plan.md'
+            plan.write_text(plan_text, encoding='utf-8')
+            output = root / 'novel_image_prompts.txt'
+            output.write_text(
+                '--- SCENE 026 ---\n' + deep_image_prompt().replace('## Image Prompt\n', ''),
+                encoding='utf-8',
+            )
+            missing_suffix = artifacts.check_scenes(work, plan)
+
+            output.write_text(
+                '--- SCENE 026 ---\n' + deep_image_prompt().replace('## Image Prompt\n', '')
+                + '\n--- SCENE 026B ---\n' + deep_image_prompt().replace('## Image Prompt\n', ''),
+                encoding='utf-8',
+            )
+            both_present = artifacts.check_scenes(work, plan)
+
+        self.assertFalse(missing_suffix['ok'])
+        self.assertIn('scene 026b missing', '\n'.join(missing_suffix['errors']))
+        self.assertTrue(both_present['ok'], both_present['errors'])
+
+    def test_bold_section_headers_are_accepted_consistently(self):
+        import check_run_legit as legit
+
+        catalog = ROOT / 'references' / 'style-catalog.md'
+        style_block = legit.catalog_style_blocks(catalog)['donghua-xianxia']
+        bold_lean = (
+            '## Image Prompt\n\n'
+            '**Subject:** Lan — age not stated, grey robe, calm narrow eyes\n'
+            '**Setting:** Trước khe cửa gỗ của một căn phòng ngủ mờ tối có ánh trăng\n'
+            '**Action:** Hé mở cánh cửa gỗ và thò đầu ra ngoài nhìn quanh thật khẽ\n'
+            f'**Style:** {style_block}\n'
+            '**Negative:** no logo, no watermark\n'
+        )
+        self.assertEqual([], artifacts._lean_field_length_errors('scene-001.md', bold_lean))
+        for section in artifacts.LEAN_IMAGE_SECTIONS:
+            self.assertIsNotNone(artifacts._section_header_re(section).search(bold_lean), section)
+        self.assertEqual(
+            [], legit._style_errors('--- SCENE 001 ---\n' + bold_lean, catalog),
+        )
+
+    def test_continuity_excludes_music_prompts_txt_outputs(self):
+        import check_previous_continuity as continuity
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            folder = Path(temp_dir)
+            current = folder / 'ep2.txt'
+            current.write_text('Chương 2: Tiếp theo\nNội dung chương hai.\n', encoding='utf-8')
+            fake_music = folder / 'ep1_music_prompts.txt'
+            fake_music.write_text('Chương 1: Nhạc nền\nTags: ambient\n', encoding='utf-8')
+            candidates = continuity._candidate_files(current)
+
+        self.assertNotIn(fake_music.resolve(), candidates)
+
+    def test_sync_series_bible_finds_bible_in_input_parent(self):
+        header = '# Character Bible — parentseries\n\n| name | age | build |\n|---|---|---|\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'novel'
+            work = root / '.work'
+            work.mkdir(parents=True)
+            parent_bible = root / 'character-bible.md'
+            parent_bible.write_text(
+                header + '| Lan | 22 | slender |\n', encoding='utf-8',
+            )
+            home = Path(tmp) / 'home'
+            with unittest.mock.patch.object(Path, 'home', staticmethod(lambda: home)):
+                created = assemble_outputs.sync_series_bible(work)
+                parent_bible.write_text(
+                    header + '| Lan | 22 | slender |\n| Minh | 30 | tall |\n',
+                    encoding='utf-8',
+                )
+                merged = assemble_outputs.sync_series_bible(work)
+            synced = home / '.gemini' / 'bibles' / 'parentseries.md'
+            self.assertTrue(created.get('created'))
+            self.assertEqual(1, merged['added'])
+            self.assertIn('| Minh | 30 | tall |', synced.read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

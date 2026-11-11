@@ -171,20 +171,25 @@ files are opt-in:
 
 ```
 /visual-prompt <input.txt> [--series <name>] [--genre <name>] [--style <id>] \
-                            [--images N] [--video] [--videos M] [--music [N]] \
+                            [--images N] [--lean] [--qa] [--no-qa] \
+                            [--video] [--videos M] [--music [N]] \
                             [--epic] [--faithful] [--no-video] [--no-music] [--force-redo]
 ```
 
 `--style <id>` picks an art style up-front (skips the interactive recommend step);
 ids are in `references/style-catalog.md`. Omit it to get a recommendation and
-choose interactively. `--video` enables adaptive video count; `--videos M` enables
+choose interactively. `--lean` switches to the 5-section lean image prompt spec.
+`--qa` enables the STEP 1.5 proofread and writes `<input>_qa.txt` (skipped by
+default; `--no-qa` always wins). `--video` enables adaptive video count; `--videos M` enables
 exactly M. `--music` enables adaptive music segmentation (3–5 regions);
 `--music N` enables exactly N. Natural-language requests after the command are
 equivalent explicit opt-ins. `--epic` may intensify only source-supported visual
 realization. `--faithful` is retained as a compatibility alias; all runs are
 grounded. `--no-video`/`--no-music` disable their medium.
 
-**Batch driver (runner-level).** `scripts/run-folder.sh` stays serial by default.
+**Batch driver (runner-level).** `scripts/run-folder.sh` stays serial by default
+and matches direct `/visual-prompt` defaults: QA skipped (`VP_QA=0`), video off
+(`VP_NO_VIDEO=1`), and music off (`VP_NO_MUSIC=1`) — emitting image prompts only.
 Opt-in `VP_WORKERS=N` (N ≥ 2, capped by remaining scene rows) enables bounded
 parallel Pass-2 only: a `--plan-only` head session, isolated worker sessions on
 disjoint scene-ID ranges over a frozen snapshot, a fail-closed join, then the
@@ -192,17 +197,17 @@ serial tail (music/assemble/gates). Workers never publish history, markers, or
 assembled outputs; all final gates stay coordinator-only; any failure falls back
 to the unchanged serial path. Direct `/visual-prompt` invocations never use
 worker mode. Rollback = unset `VP_WORKERS` and restart the driver.
-The driver also accepts per-run scopes without changing the default workflow:
-`VP_NO_VIDEO=1` / `VP_NO_MUSIC=1` skip that medium for the run (gates, harness
-waits, completion manifest, and visual-history extract all switch with the flag;
-music-enabled resumes are never invalidated), and `VP_GLOB` selects the input
-filename pattern (default `*.txt`, e.g. `*_vi.txt` for translation-only folders).
-Batch mode otherwise keeps opting into music and video as before.
+Set `VP_QA=1`, `VP_NO_VIDEO=0`, and/or `VP_NO_MUSIC=0` to opt into proofreading,
+video, or music for a batch run (gates, harness waits, completion manifest, and
+visual-history extract all switch with the flags, and existing QA/music manifests
+keep verifying byte-for-byte when those flags are enabled), and `VP_GLOB` selects
+the input filename pattern (default `*.txt`, e.g. `*_vi.txt` for translation-only
+folders).
 
 ## Input Spec
 
-- Vietnamese (machine-translated is fine — the QA gate cleans it up; no
-  pre-proofread required).
+- Vietnamese (when `--qa` is enabled, the QA gate cleans up MT residue; without
+  `--qa`, `assemble_qa.py --passthrough` uses the loaded chapters directly).
 - Chapter markers `Chương 1: …`, `CHƯƠNG 1`, `Chapter 1`, etc. (regex in
   `scripts/load_input.py`)
 - Encoding: UTF-8 preferred; fallback chain handles utf-8-sig, gbk, gb18030,
@@ -210,26 +215,28 @@ Batch mode otherwise keeps opting into music and video as before.
 
 ## Output Spec
 
-- By default, 2 `.txt` files plus `_scene_anchors.md` in the input's directory:
-  - `_qa.txt` — proofread, TTS-ready (chapter headings end with a period so TTS
-    pauses; feed to TTS_Local VieNeu / VietVoice).
+- By default, 1 `.txt` file plus `_scene_anchors.md` in the input's directory:
   - `_image_prompts.txt` — separators `--- SCENE NNN ---`.
   - `_scene_anchors.md` — timing columns from `scene-plan.md`; written whenever the
     plan exists, and its absence is reported as a run warning.
+- With `--qa`, add `_qa.txt` — proofread, TTS-ready (chapter headings end with a
+  period so TTS pauses; feed to TTS_Local VieNeu / VietVoice).
 - With `--video`/`--videos N`, add `_video_prompts.txt`.
 - With `--music`/`--music N`, add `_music_prompts.txt`; each block is an English
   paragraph followed by `Tags:`.
 
 ## Limitations
 
-- Vietnamese input only (QA gate handles MT residue; no pre-proofread needed).
+- Vietnamese input only (`--qa` handles MT residue when needed).
 - Supported genres: tiên hiệp, huyền huyễn, đô thị, cổ điển, võ hiệp.
 - **Refuses:** đam mỹ (BL romance), ngôn tình (modern romance) — out of scope.
 - Text-only output. Reference-image pattern deferred to v2.
-- **Optional media flags:** `--video`/`--videos N` enable video; `--music`/`--music N`
+- **Optional QA & media flags:** `--qa` enables proofreading (`--no-qa` disables);
+  `--video`/`--videos N` enable video; `--music`/`--music N`
   enable music. `--no-video` and `--no-music` explicitly disable them and are
   honored by the planner, expanders, assemblers, and validators. The batch driver
-  opts in explicitly when its `VP_MUSIC`/`VP_NO_VIDEO` settings request it.
+  defaults to image-only + skip-QA and opts in only when `VP_QA=1`,
+  `VP_NO_VIDEO=0`, or `VP_NO_MUSIC=0` is set.
 - **One style per run.** Styles in the `accent-title-card` / `video-oriented`
   categories keep character identity poorly across many scenes — best for opening
   title cards or montages, not every shot. The recommend step warns when a chosen

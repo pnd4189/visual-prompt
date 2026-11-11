@@ -32,12 +32,14 @@ create a shortened private workflow or alter its gates.
 
 `$ARGUMENTS` is the full text after `/visual-prompt`.
 
-- Default: QA output + image prompts only.
+- Default: image prompts only (QA proofread skipped via `assemble_qa.py --passthrough`;
+  emits `<stem>_image_prompts.txt` + `<stem>_scene_anchors.md`, no `_qa.txt`).
+- `--qa` enables STEP 1.5 proofreading and writes `<stem>_qa.txt` (`--no-qa` always wins).
 - `--video`, `--videos N`, or a clear request such as “tạo video prompt” enables
   video.
 - `--music`, `--music N`, or a clear request such as “tạo music/nhạc prompt”
   enables music.
-- `--no-video` and `--no-music` always win.
+- `--no-qa`, `--no-video`, and `--no-music` always win.
 
 Do not infer optional media from the story's mention of YouTube, audio, or music.
 
